@@ -45,13 +45,26 @@ jobs:
             .\build.ps1 release
           }
 
+      - name: Bundle Qt DLLs with windeployqt
+        shell: pwsh
+        run: |
+          $ExePath = if (Test-Path "build\Release\ensemble.exe") { "build\Release\ensemble.exe" } elseif (Test-Path "build\Debug\ensemble.exe") { "build\Debug\ensemble.exe" } else { "build\ensemble.exe" }
+          Write-Host "Found executable at: $ExePath"
+          $OutDir = "build\dist_win"
+          New-Item -ItemType Directory -Force -Path $OutDir
+          Copy-Item $ExePath -Destination "$OutDir\ensemble.exe"
+          
+          # Deploy Qt dependencies and Chromium WebEngine assets into dist folder
+          windeployqt --compiler-runtime "$OutDir\ensemble.exe"
+          
+          # Package into standalone zip release archive
+          Compress-Archive -Path "$OutDir\*" -DestinationPath "build\ensemble-windows-x64.zip" -Force
+
       - name: Upload to Github Releases
         uses: softprops/action-gh-release@v3
         with: 
           files: |
-            build/Release/ensemble.exe
-            build/Debug/ensemble.exe
-            build/ensemble.exe
+            build/ensemble-windows-x64.zip
           name: Ensemble Release ${{ github.event.inputs.GITHUB_VERSIONING }}
           tag_name: ${{ github.event.inputs.GITHUB_VERSIONING }}  
           body: |
@@ -59,7 +72,7 @@ jobs:
             Version ${{github.event.inputs.GITHUB_VERSIONING}}
 
             Notes:
-            This release is for Windows only, find the Linux variant somewhere in this repo or build it yourself.
+            This release is for Windows (x64). Extract the zip archive and run `ensemble.exe`.
             
             For more information, visit: https://github.com/Mizumo-prjkt/ensemble
         env:
