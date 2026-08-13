@@ -6,7 +6,7 @@ These are the following versions that are maintained for security and stability.
 
 | Versions | Status | EOL  |
 |----------|--------|------|
-| 1.0.x    | Active | 2027 |
+| 1.1.x    | Active | 2027 |
 
 
 ## Reporting a vulnerability
