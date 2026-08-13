@@ -1,5 +1,4 @@
-name: Build
-
+name: Build (Windows)
 
 on:
   workflow_dispatch:
@@ -15,9 +14,6 @@ on:
         type: boolean
         default: false
 
-
-
-
 jobs:
   build:
     name: "Building the App (Windows)"
@@ -30,23 +26,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        
-          
+
+      - name: Setup Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.0'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2019'
+
       - name: Build
-        shell: bash
+        shell: pwsh
         run: |
-          if [[ "${{ inputs.BUILD_WITH_DEBUG }}" == "true" ]]; then
-            cmd /c build.bat debug
-          else
-            cmd /c build.bat release
-          fi
+          if ("${{ inputs.BUILD_WITH_DEBUG }}" -eq "true") {
+            .\build.ps1 debug
+          } else {
+            .\build.ps1 release
+          }
 
       - name: Upload to Github Releases
         uses: softprops/action-gh-release@v3
         with: 
           files: |
-             build/ensemble.exe
-             build/Release/ensemble.exe
+            build/Release/ensemble.exe
+            build/Debug/ensemble.exe
+            build/ensemble.exe
           name: Ensemble Release ${{ github.event.inputs.GITHUB_VERSIONING }}
           tag_name: ${{ github.event.inputs.GITHUB_VERSIONING }}  
           body: |
@@ -58,6 +62,4 @@ jobs:
             
             For more information, visit: https://github.com/Mizumo-prjkt/ensemble
         env:
-          GITHUB_TOKEN:  ${{secrets.KEYS}}
-        
-    
+          GITHUB_TOKEN: ${{secrets.KEYS}}
