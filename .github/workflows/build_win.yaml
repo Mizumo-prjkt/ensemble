@@ -8,7 +8,7 @@ on:
         description: "Version for Github Releases"
         required: true
         type: string
-        default: "1.0.0"
+        default: "1.1.0"
       BUILD_WITH_DEBUG:
         description: "Build with Debug symbols"
         required: true
@@ -33,6 +33,7 @@ jobs:
         
           
       - name: Build
+        shell: bash
         run: |
           if [[ "${{ inputs.BUILD_WITH_DEBUG }}" == "true" ]]; then
             cmd /c build.bat debug
@@ -44,7 +45,8 @@ jobs:
         uses: softprops/action-gh-release@v3
         with: 
           files: |
-             build/ensemble
+             build/ensemble.exe
+             build/Release/ensemble.exe
           name: Ensemble Release ${{ github.event.inputs.GITHUB_VERSIONING }}
           tag_name: ${{ github.event.inputs.GITHUB_VERSIONING }}  
           body: |
