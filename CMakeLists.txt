@@ -105,7 +105,17 @@ set(HEADERS
     src/ui/Ao3SkinDiffDialog.h
 )
 
-qt_add_executable(ensemble ${SOURCES} ${HEADERS})
+# Windows-specific GUI subsystem setting
+if(WIN32)
+  set(GUI_TYPE WIN32)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/appicon.rc")
+    list(APPEND SOURCES resources/appicon.rc)
+  endif()
+else()
+  set(GUI_TYPE "")
+endif()
+
+qt_add_executable(ensemble ${GUI_TYPE} ${SOURCES} ${HEADERS})
 
 target_include_directories(ensemble PRIVATE src)
 
@@ -117,6 +127,10 @@ target_link_libraries(ensemble PRIVATE
     Qt6::WebEngineWidgets
 )
 
+if(WIN32)
+    target_link_libraries(ensemble PRIVATE ws2_32 shlwapi)
+endif()
+
 qt_add_resources(ensemble resources/resources.qrc)
 
 install(TARGETS ensemble RUNTIME DESTINATION bin)
@@ -125,3 +139,6 @@ install(TARGETS ensemble RUNTIME DESTINATION bin)
 add_executable(test_ao3_parser test/cpp/test_ao3_parser.cpp src/net/Ao3Parser.cpp)
 target_include_directories(test_ao3_parser PRIVATE src)
 target_link_libraries(test_ao3_parser PRIVATE Qt6::Core Qt6::Gui)
+if(WIN32)
+    target_link_libraries(test_ao3_parser PRIVATE ws2_32)
+endif()
