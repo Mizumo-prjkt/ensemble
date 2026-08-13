@@ -1,4 +1,5 @@
 #include "PreviewPane.h"
+#include "debug/debug.hpp"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -6,37 +7,39 @@
 #include <QWebEnginePage>
 #include <QWebEngineView>
 
-PreviewPane::PreviewPane(QWidget *parent)
-    : QWidget(parent)
-{
-    auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0);
+PreviewPane::PreviewPane(QWidget *parent) : QWidget(parent) {
+  auto *layout = new QVBoxLayout(this);
+  layout->setContentsMargins(0, 0, 0, 0);
 
-    m_view = new QWebEngineView(this);
-    layout->addWidget(m_view, 1);
+  m_view = new QWebEngineView(this);
+  layout->addWidget(m_view, 1);
 
-    connect(m_view, &QWebEngineView::loadFinished, this, [this](bool ok) {
-        m_pageLoaded = ok;
-    });
+  connect(m_view, &QWebEngineView::loadFinished, this, [this](bool ok) {
+    m_pageLoaded = ok;
+    qCDebug(logPreview) << "QWebEngineView loadFinished:" << ok;
+  });
 }
 
-static QString jsonEncodeString(const QString &str)
-{
-    const QJsonArray arr{str};
-    const QByteArray json = QJsonDocument(arr).toJson(QJsonDocument::Compact);
-    return QString::fromUtf8(json.mid(1, json.length() - 2));
+static QString jsonEncodeString(const QString &str) {
+  const QJsonArray arr{str};
+  const QByteArray json = QJsonDocument(arr).toJson(QJsonDocument::Compact);
+  return QString::fromUtf8(json.mid(1, json.length() - 2));
 }
 
-void PreviewPane::updatePreview(const QString &chapterTitle, const QString &html, const QString &css)
-{
-    // If chapter changed or page not loaded yet, do initial full load
-    if (!m_pageLoaded || m_lastChapterTitle != chapterTitle) {
-        m_lastChapterTitle = chapterTitle;
-        m_pageLoaded = false;
+void PreviewPane::updatePreview(const QString &chapterTitle,
+                                const QString &html, const QString &css) {
+  // If chapter changed or page not loaded yet, do initial full load
+  if (!m_pageLoaded || m_lastChapterTitle != chapterTitle) {
+    ENSEMBLE_PROFILE_CAT_SCOPE("PreviewPane Full HTML Load", logPreview);
+    qCDebug(logPreview)
+        << "Performing full QWebEngineView HTML load for chapter:"
+        << chapterTitle;
+    m_lastChapterTitle = chapterTitle;
+    m_pageLoaded = false;
 
-        const QString escapedTitle = chapterTitle.toHtmlEscaped();
+    const QString escapedTitle = chapterTitle.toHtmlEscaped();
 
-        const QString page = QStringLiteral(R"html(<!DOCTYPE html>
+    const QString page = QStringLiteral(R"html(<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -82,7 +85,7 @@ void PreviewPane::updatePreview(const QString &chapterTitle, const QString &html
 </head>
 <body>
 <div id="preview-banner">
-  ℹ️ <strong>Preview Note:</strong> Rendered with Chromium WebEngine & active AO3 Work Skin.
+  ℹ️ <strong>Preview Note:</strong> Rendered with Chromium WebEngine (Qt WebEngine) & active AO3 Work Skin.
 </div>
 <div id="workskin-wrapper">
 <div id="workskin">
@@ -91,14 +94,16 @@ void PreviewPane::updatePreview(const QString &chapterTitle, const QString &html
 </div>
 </div>
 </body>
-</html>)html").arg(css, escapedTitle, html);
+</html>)html")
+                             .arg(css, escapedTitle, html);
 
-        m_view->setHtml(page, QUrl(QStringLiteral("https://archiveofourown.org/")));
-        return;
-    }
+    m_view->setHtml(page, QUrl(QStringLiteral("https://archiveofourown.org/")));
+    return;
+  }
 
-    // Fast live update via DOM mutation (preserves scroll position 100% without jumping to top)
-    const QString js = QStringLiteral(R"js(
+  // Fast live update via DOM mutation (preserves scroll position 100% without
+  // jumping to top)
+  const QString js = QStringLiteral(R"js(
         (function() {
             let titleEl = document.getElementById("chapter-title");
             let contentEl = document.getElementById("chapter-content");
@@ -118,7 +123,10 @@ void PreviewPane::updatePreview(const QString &chapterTitle, const QString &html
             }
         })();
     )js")
-    .arg(jsonEncodeString(chapterTitle), jsonEncodeString(html), jsonEncodeString(css));
+                         .arg(jsonEncodeString(chapterTitle),
+                              jsonEncodeString(html), jsonEncodeString(css));
 
-    m_view->page()->runJavaScript(js);
+  qCDebug(logPreview) << "Executing live DOM mutation update for chapter:"
+                      << chapterTitle << "HTML bytes:" << html.length();
+  m_view->page()->runJavaScript(js);
 }

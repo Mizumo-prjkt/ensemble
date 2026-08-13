@@ -1,19 +1,22 @@
-#include "ui/MainWindow.h"
+#include "debug/debug.hpp"
 #include "ui/AppIcon.h"
+#include "ui/MainWindow.h"
 
 #include <QApplication>
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
+  EnsembleDebug::initDebugSystem();
 
-    QApplication app(argc, argv);
-    app.setApplicationName(QStringLiteral("Ensemble"));
-    app.setOrganizationName(QStringLiteral("Ensemble"));
-    app.setApplicationVersion(QStringLiteral("1.0.0"));
-    app.setWindowIcon(AppIcon::icon());
+  QApplication app(argc, argv);
+  app.setApplicationName(QStringLiteral("Ensemble"));
+  app.setOrganizationName(QStringLiteral("Ensemble"));
+  app.setApplicationVersion(QStringLiteral("1.1.0"));
+  app.setWindowIcon(AppIcon::icon());
 
-    MainWindow window;
-    window.show();
+  ENSEMBLE_PROFILE_SCOPE("Application Window Initialization");
 
-    return app.exec();
+  MainWindow window;
+  window.show();
+
+  return app.exec();
 }

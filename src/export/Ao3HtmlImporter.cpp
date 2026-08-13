@@ -89,17 +89,22 @@ QString cleanHtmlEntities(const QString &html) {
 
 } // namespace
 
-void Ao3HtmlImporter::importHtml(QTextEdit *editor, const QString &html) {
+void Ao3HtmlImporter::importHtml(QTextEdit *editor, const QString &rawHtml) {
   if (!editor)
     return;
 
-  const QString cleaned = cleanHtmlEntities(html);
-  const QString sanitized = Ao3HtmlSanitizer::sanitize(cleaned);
-  const QString markedUp = encodeClassesAsMarkers(sanitized);
+  QString cleanHtml = rawHtml;
+  cleanHtml.remove(QRegularExpression(QStringLiteral(R"(<!--[\s\S]*?-->)")));
+
+  // 1. Sanitize the HTML first to ensure valid markup
+  const QString sanitized = Ao3HtmlSanitizer::sanitize(cleanHtml);
+
+  // 2. Pre-process HTML to encode class= attributes as font-family markers
+  const QString markedHtml = encodeClassesAsMarkers(sanitized);
 
   editor->blockSignals(true);
   editor->document()->clear();
-  editor->document()->setHtml(markedUp);
+  editor->document()->setHtml(markedHtml);
 
   // Post-process: find font-family markers and convert to CssClassProperty
   for (QTextBlock block = editor->document()->begin(); block.isValid();

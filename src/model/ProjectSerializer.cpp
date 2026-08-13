@@ -1,5 +1,6 @@
 #include "ProjectSerializer.h"
 #include "ZstdArchive.h"
+#include "debug/debug.hpp"
 
 #include <QBuffer>
 #include <QDateTime>
@@ -115,8 +116,12 @@ bool ProjectSerializer::loadLegacyJson(const QString &path, Ao3Project &project,
 
 bool ProjectSerializer::loadZstdArchive(const QString &path, Ao3Project &project, QString *error)
 {
+    ENSEMBLE_PROFILE_CAT_SCOPE("ProjectSerializer::loadZstdArchive", logModel);
+    qCDebug(logModel) << "Loading ZSTD project archive from:" << path;
+
     QMap<QString, QByteArray> entries;
     if (!ZstdArchive::decompressArchive(path, entries, error)) {
+        qCWarning(logModel) << "Decompress archive failed for:" << path;
         return false;
     }
 

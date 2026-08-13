@@ -109,7 +109,8 @@ QString repairStack(QStack<QString> stack)
 
 QString Ao3HtmlSanitizer::sanitize(const QString &html)
 {
-    const QString cleaned = unescapeQuoteEntities(html);
+    QString cleaned = unescapeQuoteEntities(html);
+    cleaned.remove(QRegularExpression(QStringLiteral(R"(<!--[\s\S]*?-->)")));
     if (cleaned.trimmed().isEmpty())
         return QStringLiteral("<p></p>");
 

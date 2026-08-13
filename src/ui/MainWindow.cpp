@@ -6,15 +6,21 @@
 #include "ui/Ao3ImportDialog.h"
 #include "ui/ChapterSidebar.h"
 #include "ui/CssEditorPane.h"
+#include "ui/DebugConsoleDialog.h"
 #include "ui/EditorPane.h"
 #include "ui/FindReplaceDialog.h"
 #include "ui/HtmlSourcePane.h"
 #include "ui/MainMenuWindow.h"
 #include "ui/PreviewPane.h"
+#include "ui/ProblemsDialog.h"
 #include "ui/CodeEditor.h"
+#include "debug/debug.hpp"
 
+#include <QPushButton>
 #include <QStackedWidget>
+#include <QStatusBar>
 #include <QTextEdit>
+#include <QXmlStreamReader>
 
 #include <QAction>
 #include <QApplication>
@@ -117,6 +123,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   popOutAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+P")));
   connect(popOutAction, &QAction::triggered, this, &MainWindow::onPopOutPreview);
 
+  if (EnsembleDebug::isDebugBuild()) {
+    viewMenu->addSeparator();
+    auto *debugConsoleAction = viewMenu->addAction(QStringLiteral("Debug &Console"));
+    debugConsoleAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+D")));
+    connect(debugConsoleAction, &QAction::triggered, this, &MainWindow::onShowDebugConsole);
+  }
+
   // Help menu
   auto *aboutAction = helpMenu->addAction(QStringLiteral("&About"));
   connect(aboutAction, &QAction::triggered, this, &MainWindow::onShowAbout);
@@ -210,6 +223,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   connect(m_chapterSidebar, &ChapterSidebar::chaptersReordered, this,
           &MainWindow::onChaptersReordered);
 
+  if (m_editorPane && m_editorPane->editor())
+    connect(m_editorPane->editor(), &QTextEdit::cursorPositionChanged, this, &MainWindow::updateCursorPosition);
+  if (m_htmlPane && m_htmlPane->editor())
+    connect(m_htmlPane->editor(), &QPlainTextEdit::cursorPositionChanged, this, &MainWindow::updateCursorPosition);
+  if (m_cssPane && m_cssPane->editor())
+    connect(m_cssPane->editor(), &QPlainTextEdit::cursorPositionChanged, this, &MainWindow::updateCursorPosition);
+
+  qApp->installEventFilter(this);
+
   loadCurrentChapterIntoEditors();
   m_cssPane->setCss(m_project.workSkinCss());
 
@@ -230,6 +252,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   addAction(replaceAction);
 
   updateWindowTitle();
+  setupStatusBar();
   schedulePreviewUpdate();
 
   // Open Welcome UI / Main Menu automatically on startup
@@ -488,6 +511,7 @@ void MainWindow::onCssChanged(const QString &css) {
 void MainWindow::onCssClassesChanged(const QStringList &classNames) {
   // Update the rich text editor's available classes for the context menu
   m_editorPane->setAvailableCssClasses(classNames);
+  updateProblemsDiagnostics();
 }
 
 void MainWindow::onChapterSelected(int index) {
@@ -611,6 +635,15 @@ void MainWindow::onPopOutPreview() {
   m_previewPopup->activateWindow();
 }
 
+void MainWindow::onShowDebugConsole() {
+  if (!m_debugConsoleDialog) {
+    m_debugConsoleDialog = new DebugConsoleDialog(this);
+  }
+  m_debugConsoleDialog->show();
+  m_debugConsoleDialog->raise();
+  m_debugConsoleDialog->activateWindow();
+}
+
 void MainWindow::onFindRequested() {
   QWidget *editor = activeTextEditor();
   if (!editor)
@@ -646,4 +679,308 @@ QWidget *MainWindow::activeTextEditor() const {
   if (current == m_cssPane)
     return m_cssPane->editor();
   return nullptr;
+}
+
+void MainWindow::setupStatusBar() {
+  QStatusBar *sb = statusBar();
+  sb->setStyleSheet(QStringLiteral(
+      "QStatusBar { background-color: #111116; color: #aeb3c6; border-top: 1px solid #282a36; font-size: 11px; padding: 2px 8px; }"
+  ));
+
+  m_statusInfoLabel = new QLabel(QStringLiteral("Ready"), this);
+  m_statusInfoLabel->setStyleSheet(QStringLiteral("color: #aeb3c6; font-size: 11px;"));
+  sb->addWidget(m_statusInfoLabel, 1);
+
+  // Line and Column Indicator (e.g. Ln 692, Col 31)
+  m_lineColLabel = new QLabel(QStringLiteral("Ln 1, Col 1"), this);
+  m_lineColLabel->setStyleSheet(QStringLiteral("color: #aeb3c6; font-size: 11px; padding: 2px 8px;"));
+  sb->addPermanentWidget(m_lineColLabel);
+
+  // Insert/Overwrite Mode Toggle Button (INS / OVR)
+  m_insertModeButton = new QPushButton(QStringLiteral("INS"), this);
+  m_insertModeButton->setFlat(true);
+  m_insertModeButton->setCursor(Qt::PointingHandCursor);
+  m_insertModeButton->setStyleSheet(QStringLiteral(
+      "QPushButton { color: #aeb3c6; padding: 2px 6px; font-size: 11px; font-weight: bold; border: none; }"
+      "QPushButton:hover { color: #ffffff; background-color: #282a36; border-radius: 3px; }"
+  ));
+  connect(m_insertModeButton, &QPushButton::clicked, this, &MainWindow::toggleInsertMode);
+  sb->addPermanentWidget(m_insertModeButton);
+
+  // Caps Lock Warning Indicator (⇪ CAPS LOCK)
+  m_capsLockLabel = new QLabel(QStringLiteral("⇪ CAPS LOCK"), this);
+  m_capsLockLabel->setStyleSheet(QStringLiteral(
+      "color: #ffb86c; background-color: #2b2718; border: 1px solid #624c16; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;"
+  ));
+  m_capsLockLabel->hide();
+  sb->addPermanentWidget(m_capsLockLabel);
+
+  // Problems Badge (⊗ 0 ⚠ N)
+  m_problemsBadgeButton = new QPushButton(this);
+  m_problemsBadgeButton->setFlat(true);
+  m_problemsBadgeButton->setCursor(Qt::PointingHandCursor);
+  m_problemsBadgeButton->setStyleSheet(QStringLiteral(
+      "QPushButton { color: #50fa7b; background-color: #192b20; border: 1px solid #1c452b; padding: 2px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; }"
+      "QPushButton:hover { background-color: #243f2f; }"
+  ));
+  connect(m_problemsBadgeButton, &QPushButton::clicked, this, &MainWindow::onShowProblemsDialog);
+  sb->addPermanentWidget(m_problemsBadgeButton);
+
+  updateProblemsDiagnostics();
+  updateCursorPosition();
+}
+
+void MainWindow::updateCursorPosition() {
+  if (!m_lineColLabel || !m_insertModeButton)
+    return;
+
+  QWidget *editor = activeTextEditor();
+  int line = 1;
+  int col = 1;
+  bool isOverwrite = false;
+
+  if (auto *te = qobject_cast<QTextEdit *>(editor)) {
+    QTextCursor cursor = te->textCursor();
+    line = cursor.blockNumber() + 1;
+    col = cursor.positionInBlock() + 1;
+    isOverwrite = te->overwriteMode();
+  } else if (auto *pte = qobject_cast<QPlainTextEdit *>(editor)) {
+    QTextCursor cursor = pte->textCursor();
+    line = cursor.blockNumber() + 1;
+    col = cursor.positionInBlock() + 1;
+    isOverwrite = pte->overwriteMode();
+  }
+
+  m_lineColLabel->setText(QStringLiteral("Ln %1, Col %2").arg(line).arg(col));
+
+  if (isOverwrite) {
+    m_insertModeButton->setText(QStringLiteral("OVR"));
+    m_insertModeButton->setStyleSheet(QStringLiteral(
+        "QPushButton { color: #ff5555; background-color: #3b1818; border: 1px solid #621616; padding: 2px 6px; border-radius: 3px; font-weight: bold; font-size: 11px; }"
+        "QPushButton:hover { background-color: #542222; }"
+    ));
+  } else {
+    m_insertModeButton->setText(QStringLiteral("INS"));
+    m_insertModeButton->setStyleSheet(QStringLiteral(
+        "QPushButton { color: #aeb3c6; padding: 2px 6px; font-size: 11px; font-weight: bold; border: none; }"
+        "QPushButton:hover { color: #ffffff; background-color: #282a36; border-radius: 3px; }"
+    ));
+  }
+}
+
+void MainWindow::toggleInsertMode() {
+  QWidget *editor = activeTextEditor();
+  if (auto *te = qobject_cast<QTextEdit *>(editor)) {
+    te->setOverwriteMode(!te->overwriteMode());
+  } else if (auto *pte = qobject_cast<QPlainTextEdit *>(editor)) {
+    pte->setOverwriteMode(!pte->overwriteMode());
+  }
+  updateCursorPosition();
+}
+
+void MainWindow::updateCapsLockState(bool active) {
+  m_capsLockOn = active;
+  if (m_capsLockLabel) {
+    if (m_capsLockOn)
+      m_capsLockLabel->show();
+    else
+      m_capsLockLabel->hide();
+  }
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+  if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease) {
+    auto *keyEvent = static_cast<QKeyEvent *>(event);
+    if (keyEvent->key() == Qt::Key_CapsLock) {
+      if (event->type() == QEvent::KeyPress) {
+        updateCapsLockState(!m_capsLockOn);
+      }
+    } else if (event->type() == QEvent::KeyPress) {
+      if (keyEvent->key() == Qt::Key_Insert) {
+        toggleInsertMode();
+      }
+      const QString text = keyEvent->text();
+      if (text.length() == 1) {
+        const QChar c = text.at(0);
+        if (c.isLetter()) {
+          const bool shiftPressed = keyEvent->modifiers().testFlag(Qt::ShiftModifier);
+          if (c.isUpper() && !shiftPressed) {
+            updateCapsLockState(true);
+          } else if (c.isLower() && !shiftPressed) {
+            updateCapsLockState(false);
+          }
+        }
+      }
+    }
+  }
+  return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::updateProblemsDiagnostics() {
+  m_currentProblems.clear();
+  int errorCount = 0;
+  int warningCount = 0;
+
+  // 1. Check Work Skin CSS issues
+  const QStringList cssClasses = m_cssPane ? m_cssPane->cssClassNames() : QStringList();
+  const QSet<QString> cssClassSet(cssClasses.begin(), cssClasses.end());
+
+  // Check duplicate CSS classes
+  QMap<QString, int> classCounts;
+  for (const QString &cls : cssClasses) {
+    classCounts[cls]++;
+  }
+
+  for (auto iter = classCounts.constBegin(); iter != classCounts.constEnd(); ++iter) {
+    if (iter.value() > 1) {
+      ProblemItem item;
+      item.severity = ProblemItem::Warning;
+      item.category = QStringLiteral("Work Skin CSS");
+      item.description = QStringLiteral("Duplicate CSS class '.%1' defined %2 times in Work Skin.").arg(iter.key()).arg(iter.value());
+      item.chapterIndex = -1;
+      m_currentProblems.append(item);
+      warningCount++;
+    }
+  }
+
+  // 2. Check chapter structural issues & missing CSS classes
+  static const QRegularExpression classAttrRe(R"re(class\s*=\s*"([^"]+)")re", QRegularExpression::CaseInsensitiveOption);
+  QMap<QString, QList<int>> missingClassChapters;
+
+  int chIdx = 0;
+  for (const Chapter &ch : m_project.chapters()) {
+    const QString html = ch.html();
+    if (ch.title().trimmed().isEmpty()) {
+      ProblemItem item;
+      item.severity = ProblemItem::Warning;
+      item.category = QStringLiteral("Chapter Structure");
+      item.description = QStringLiteral("Chapter %1 has an empty title.").arg(chIdx + 1);
+      item.chapterIndex = chIdx;
+      m_currentProblems.append(item);
+      warningCount++;
+    }
+    if (html.trimmed().isEmpty()) {
+      ProblemItem item;
+      item.severity = ProblemItem::Warning;
+      item.category = QStringLiteral("Chapter Content");
+      item.description = QStringLiteral("Chapter %1 (\"%2\") has no body content.").arg(chIdx + 1).arg(ch.title());
+      item.chapterIndex = chIdx;
+      m_currentProblems.append(item);
+      warningCount++;
+    }
+
+    // Check HTML parse errors via QXmlStreamReader
+    if (!html.trimmed().isEmpty()) {
+      const QString wrapped = QStringLiteral("<root>%1</root>").arg(html);
+      QXmlStreamReader reader(wrapped);
+      while (!reader.atEnd()) {
+        reader.readNext();
+        if (reader.hasError()) {
+          const QString err = reader.errorString();
+          const qint64 line = qMax<qint64>(1, reader.lineNumber() - 1);
+
+          ProblemItem item;
+          item.severity = ProblemItem::Error; // HTML tag mismatch is an Error
+          item.category = QStringLiteral("HTML Syntax");
+          item.description = QStringLiteral("HTML parse error in Chapter %1 (\"%2\") near line %3: %4")
+                                 .arg(chIdx + 1)
+                                 .arg(ch.title())
+                                 .arg(line)
+                                 .arg(err);
+          item.chapterIndex = chIdx;
+          m_currentProblems.append(item);
+          errorCount++;
+          break;
+        }
+      }
+    }
+
+    // Check for inline style= attributes
+    static const QRegularExpression styleAttrRe(R"(\bstyle\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))", QRegularExpression::CaseInsensitiveOption);
+    if (html.contains(styleAttrRe)) {
+      ProblemItem item;
+      item.severity = ProblemItem::Warning;
+      item.category = QStringLiteral("AO3 Compliance");
+      item.description = QStringLiteral("Inline style= attributes detected in Chapter %1 (\"%2\"). AO3 strips inline styles upon posting.").arg(chIdx + 1).arg(ch.title());
+      item.chapterIndex = chIdx;
+      m_currentProblems.append(item);
+      warningCount++;
+    }
+
+    // Scan chapter HTML for used CSS classes missing from Work Skin CSS
+    QRegularExpressionMatchIterator it = classAttrRe.globalMatch(html);
+    while (it.hasNext()) {
+      QRegularExpressionMatch m = it.next();
+      const QStringList classes = m.captured(1).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+      for (const QString &cls : classes) {
+        if (!cssClassSet.contains(cls)) {
+          if (!missingClassChapters[cls].contains(chIdx)) {
+            missingClassChapters[cls].append(chIdx);
+          }
+        }
+      }
+    }
+
+    chIdx++;
+  }
+
+  // Add missing/removed CSS class warnings
+  for (auto iter = missingClassChapters.constBegin(); iter != missingClassChapters.constEnd(); ++iter) {
+    const QString &cls = iter.key();
+    const QList<int> &chList = iter.value();
+
+    ProblemItem item;
+    item.severity = ProblemItem::Warning;
+    item.category = QStringLiteral("Work Skin CSS");
+    if (chList.size() <= 2) {
+      QStringList chNames;
+      for (int idx : chList) {
+        chNames << QStringLiteral("Chapter %1").arg(idx + 1);
+      }
+      item.description = QStringLiteral("CSS class '.%1' is used in %2, but is missing from Work Skin.").arg(cls, chNames.join(QStringLiteral(", ")));
+    } else {
+      item.description = QStringLiteral("CSS class '.%1' is used across %2 chapters, but is missing from Work Skin.").arg(cls).arg(chList.size());
+    }
+    item.chapterIndex = chList.first();
+    m_currentProblems.append(item);
+    warningCount++;
+  }
+
+  if (!m_problemsBadgeButton)
+    return;
+
+  if (errorCount > 0) {
+    m_problemsBadgeButton->setText(QStringLiteral("⊗ %1  ⚠ %2").arg(errorCount).arg(warningCount));
+    m_problemsBadgeButton->setStyleSheet(QStringLiteral(
+        "QPushButton { color: #ff5555; background-color: #3b1818; border: 1px solid #621616; padding: 2px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; }"
+        "QPushButton:hover { background-color: #542222; }"
+    ));
+  } else if (warningCount > 0) {
+    m_problemsBadgeButton->setText(QStringLiteral("⊗ 0  ⚠ %1").arg(warningCount));
+    m_problemsBadgeButton->setStyleSheet(QStringLiteral(
+        "QPushButton { color: #ffb86c; background-color: #2b2718; border: 1px solid #624c16; padding: 2px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; }"
+        "QPushButton:hover { background-color: #3f3823; }"
+    ));
+  } else {
+    m_problemsBadgeButton->setText(QStringLiteral("✔ 0 Problems"));
+    m_problemsBadgeButton->setStyleSheet(QStringLiteral(
+        "QPushButton { color: #50fa7b; background-color: #192b20; border: 1px solid #1c452b; padding: 2px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; }"
+        "QPushButton:hover { background-color: #243f2f; }"
+    ));
+  }
+}
+
+void MainWindow::onShowProblemsDialog() {
+  updateProblemsDiagnostics();
+  if (!m_problemsDialog) {
+    m_problemsDialog = new ProblemsDialog(this);
+    connect(m_problemsDialog, &ProblemsDialog::chapterSelected, this, &MainWindow::onChapterSelected);
+    connect(m_problemsDialog, &ProblemsDialog::cssTabRequested, this, [this]() {
+      if (m_editorTabs) m_editorTabs->setCurrentIndex(2);
+    });
+  }
+  m_problemsDialog->setProblems(m_currentProblems);
+  m_problemsDialog->show();
+  m_problemsDialog->raise();
+  m_problemsDialog->activateWindow();
 }

@@ -4,8 +4,12 @@
 
 #include <QMainWindow>
 
+#include "ui/ProblemsDialog.h"
+
 class FindReplaceDialog;
 class AboutDialog;
+class DebugConsoleDialog;
+class ProblemsDialog;
 class ChapterSidebar;
 class CssEditorPane;
 class EditorPane;
@@ -16,6 +20,8 @@ class QTimer;
 class QTabWidget;
 class QSplitter;
 class QStackedWidget;
+class QPushButton;
+class QLabel;
 
 class MainWindow : public QMainWindow
 {
@@ -41,6 +47,12 @@ private slots:
     void onImportFromAo3();
     void onToggleLivePreview(bool checked);
     void onPopOutPreview();
+    void onShowDebugConsole();
+    void onShowProblemsDialog();
+    void updateProblemsDiagnostics();
+    void updateCursorPosition();
+    void toggleInsertMode();
+    void updateCapsLockState(bool active);
     void onEditorContentChanged();
     void onEditorHtmlExported(const QString &html);
     void onHtmlApplyRequested(const QString &html);
@@ -61,11 +73,15 @@ private slots:
     void updateWindowTitle();
     void schedulePreviewUpdate();
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     bool maybeSave();
     bool saveProjectToPath(const QString &path);
     void loadCurrentChapterIntoEditors();
     void saveCurrentChapterFromEditors();
+    void setupStatusBar();
     QWidget *activeTextEditor() const;
 
     Ao3Project m_project;
@@ -84,6 +100,16 @@ private:
 
     AboutDialog *m_aboutDialog = nullptr;
     FindReplaceDialog *m_findReplaceDialog = nullptr;
+    DebugConsoleDialog *m_debugConsoleDialog = nullptr;
+    ProblemsDialog *m_problemsDialog = nullptr;
+
+    QPushButton *m_problemsBadgeButton = nullptr;
+    QLabel *m_statusInfoLabel = nullptr;
+    QLabel *m_lineColLabel = nullptr;
+    QPushButton *m_insertModeButton = nullptr;
+    QLabel *m_capsLockLabel = nullptr;
+    bool m_capsLockOn = false;
+    QList<ProblemItem> m_currentProblems;
 
     QTimer *m_htmlSyncTimer = nullptr;
     QTimer *m_previewTimer = nullptr;

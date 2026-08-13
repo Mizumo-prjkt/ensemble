@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(ensemble VERSION 1.0.0 LANGUAGES CXX)
+project(ensemble VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -36,6 +36,11 @@ add_compile_definitions(
   ENSEMBLE_FULL_VERSION="${ENSEMBLE_FULL_VERSION}"
 )
 
+set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG "RELEASE" "DEBUG" "")
+set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL "RELEASE" "DEBUG" "")
+set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO "RELEASE" "DEBUG" "")
+set(QT_NO_ADD_WINDOWS_MANIFEST TRUE)
+
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network WebEngineWidgets)
 
 qt_standard_project_setup()
@@ -70,6 +75,10 @@ set(SOURCES
     src/net/Ao3AuthServer.cpp
     src/ui/Ao3ImportDialog.cpp
     src/ui/Ao3SkinDiffDialog.cpp
+    src/ui/DebugConsoleDialog.cpp
+    src/ui/ProblemsDialog.cpp
+    src/debug/debug.cpp
+    src/utils/AppPaths.cpp
 )
 
 set(HEADERS
@@ -103,19 +112,46 @@ set(HEADERS
     src/net/Ao3AuthServer.h
     src/ui/Ao3ImportDialog.h
     src/ui/Ao3SkinDiffDialog.h
+    src/ui/DebugConsoleDialog.h
+    src/ui/ProblemsDialog.h
+    src/debug/debug.hpp
 )
+
+set(CMAKE_QT_NO_ADD_WINDOWS_MANIFEST TRUE)
+set(QT_NO_ADD_WINDOWS_MANIFEST TRUE)
 
 # Windows-specific GUI subsystem setting
 if(WIN32)
   set(GUI_TYPE WIN32)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest")
+    list(APPEND SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest")
+  endif()
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/appicon.rc")
-    list(APPEND SOURCES resources/appicon.rc)
+    list(APPEND SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/resources/appicon.rc")
   endif()
 else()
   set(GUI_TYPE "")
 endif()
 
 qt_add_executable(ensemble ${GUI_TYPE} ${SOURCES} ${HEADERS})
+set_target_properties(ensemble PROPERTIES QT_NO_ADD_WINDOWS_MANIFEST TRUE)
+
+if(WIN32)
+# Are we complying to the IMPORTED_IMPLIB or are we being dumb ahh
+  if(CMAKE_BUILD_TYPE MATCHES "Release")
+    set_target_properties(Qt6::Core PROPERTIES MAP_IMPORTED_CONFIG_COVERAGE "RELEASE")
+    set_target_properties(Qt6::Gui PROPERTIES MAP_IMPORTED_CONFIG_COVERAGE "RELEASE")
+    set_target_properties(Qt6::Widgets PROPERTIES MAP_IMPORTED_CONFIG_COVERAGE "RELEASE")
+    set_target_properties(Qt6::Network PROPERTIES MAP_IMPORTED_CONFIG_COVERAGE "RELEASE")
+    set_target_properties(Qt6::WebEngineWidgets PROPERTIES MAP_IMPORTED_CONFIG_COVERAGE "RELEASE")
+  else()
+    set_target_properties(Qt6::Core PROPERTIES MAP_IMPORTED_CONFIG_COVERAGE "DEBUG")
+    set_target_properties(Qt6::Gui PROPERTIES MAP_IMPORTED_CONFIG_COVERAGE "DEBUG")
+    set_target_properties(Qt6::Widgets PROPERTIES MAP_IMPORTED_CONFIG_COVERAGE "DEBUG")
+    set_target_properties(Qt6::Network PROPERTIES MAP_IMPORTED_CONFIG_COVERAGE "DEBUG")
+    set_target_properties(Qt6::WebEngineWidgets PROPERTIES MAP_IMPORTED_CONFIG_COVERAGE "DEBUG")
+  endif()
+endif()
 
 target_include_directories(ensemble PRIVATE src)
 

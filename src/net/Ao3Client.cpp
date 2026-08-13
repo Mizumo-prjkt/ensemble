@@ -1,6 +1,7 @@
 #include "Ao3Client.h"
 #include "Ao3Parser.h"
 #include "Ao3Session.h"
+#include "debug/debug.hpp"
 
 #include <QFile>
 #include <QNetworkReply>
@@ -13,7 +14,9 @@ Ao3Client::Ao3Client(Ao3Session *session, QObject *parent)
 
 void Ao3Client::fetchPseuds()
 {
+    ENSEMBLE_PROFILE_CAT_SCOPE("Ao3Client::fetchPseuds", logNetwork);
     if (!m_session || !m_session->isAuthenticated()) {
+        qCWarning(logNetwork) << "fetchPseuds aborted: Not authenticated";
         emit errorOccurred(QStringLiteral("User is not authenticated with AO3."));
         return;
     }

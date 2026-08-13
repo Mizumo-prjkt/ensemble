@@ -2,6 +2,7 @@
 
 #include "export/Ao3HtmlExporter.h"
 #include "export/Ao3HtmlImporter.h"
+#include "debug/debug.hpp"
 
 #include <QAbstractTextDocumentLayout>
 #include <QAction>
@@ -323,6 +324,7 @@ void EditorPane::showEditorContextMenu(const QPoint &pos)
     if (!m_availableCssClasses.isEmpty()) {
         menu->addSeparator();
         QMenu *stylesMenu = menu->addMenu(QStringLiteral("Apply Style"));
+        stylesMenu->setStyleSheet(QStringLiteral("QMenu { max-height: 420px; }"));
 
         // Currently applied classes on cursor selection
         QTextCursor cursor = m_editor->textCursor();
@@ -348,8 +350,9 @@ void EditorPane::showEditorContextMenu(const QPoint &pos)
 
         stylesMenu->addSeparator();
 
-        for (const QString &className : m_availableCssClasses) {
-            QAction *action = stylesMenu->addAction(className);
+        // Helper lambda to add a class action to any target QMenu
+        auto addClassAction = [this, &activeClasses](QMenu *targetMenu, const QString &className) {
+            QAction *action = targetMenu->addAction(className);
             action->setCheckable(true);
             bool isApplied = activeClasses.contains(className);
             action->setChecked(isApplied);
@@ -364,10 +367,8 @@ void EditorPane::showEditorContextMenu(const QPoint &pos)
                 QStringList classes = existingStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
 
                 if (isApplied) {
-                    // Toggle OFF
                     classes.removeAll(className);
                 } else {
-                    // Toggle ON
                     if (!classes.contains(className))
                         classes.append(className);
                 }
@@ -380,7 +381,7 @@ void EditorPane::showEditorContextMenu(const QPoint &pos)
                     newFmt.setUnderlineStyle(QTextCharFormat::NoUnderline);
                 } else {
                     newFmt.setProperty(CssClassProperty, classes.join(QLatin1Char(' ')));
-                    newFmt.setBackground(QColor(40, 42, 54)); // #282a36 dark badge bg
+                    newFmt.setBackground(QColor(40, 42, 54));   // #282a36 dark badge bg
                     newFmt.setForeground(QColor(80, 250, 123)); // #50fa7b emerald text
                     newFmt.setUnderlineStyle(QTextCharFormat::DashUnderline);
                     newFmt.setUnderlineColor(QColor(139, 233, 253)); // #8be9fd cyan dash
@@ -389,6 +390,59 @@ void EditorPane::showEditorContextMenu(const QPoint &pos)
                 cursor.mergeCharFormat(newFmt);
                 m_editor->setTextCursor(cursor);
             });
+        };
+
+        // If there are many classes (> 12), organize into prefix submenus (e.g. hsr-, doc-, news-)
+        if (m_availableCssClasses.size() > 12) {
+            QMap<QString, QStringList> prefixMap;
+            QStringList standaloneClasses;
+
+            for (const QString &className : m_availableCssClasses) {
+                int dashIdx = className.indexOf(QLatin1Char('-'));
+                int underscoreIdx = className.indexOf(QLatin1Char('_'));
+                int splitIdx = -1;
+                if (dashIdx != -1 && underscoreIdx != -1)
+                    splitIdx = qMin(dashIdx, underscoreIdx);
+                else if (dashIdx != -1)
+                    splitIdx = dashIdx;
+                else if (underscoreIdx != -1)
+                    splitIdx = underscoreIdx;
+
+                if (splitIdx > 0) {
+                    const QString prefix = className.left(splitIdx);
+                    prefixMap[prefix].append(className);
+                } else {
+                    standaloneClasses.append(className);
+                }
+            }
+
+            QMap<QString, QMenu *> categoryMenus;
+            for (auto it = prefixMap.constBegin(); it != prefixMap.constEnd(); ++it) {
+                if (it.value().size() >= 2) {
+                    QMenu *catMenu = stylesMenu->addMenu(QStringLiteral("%1...").arg(it.key()));
+                    catMenu->setStyleSheet(QStringLiteral("QMenu { max-height: 420px; }"));
+                    categoryMenus[it.key()] = catMenu;
+                    for (const QString &cls : it.value()) {
+                        addClassAction(catMenu, cls);
+                    }
+                } else {
+                    for (const QString &cls : it.value()) {
+                        standaloneClasses.append(cls);
+                    }
+                }
+            }
+
+            if (!categoryMenus.isEmpty() && !standaloneClasses.isEmpty()) {
+                stylesMenu->addSeparator();
+            }
+
+            for (const QString &className : standaloneClasses) {
+                addClassAction(stylesMenu, className);
+            }
+        } else {
+            for (const QString &className : m_availableCssClasses) {
+                addClassAction(stylesMenu, className);
+            }
         }
     }
 

@@ -1,0 +1,65 @@
+name: Build
+
+
+on:
+  workflow_dispatch:
+    inputs:
+      GITHUB_VERSIONING:
+        description: "Version for Github Releases"
+        required: true
+        type: string
+        default: "1.0.0"
+      BUILD_WITH_DEBUG:
+        description: "Build with Debug symbols"
+        required: true
+        type: boolean
+        default: false
+
+
+
+
+jobs:
+  build:
+    name: "Building the App (Linux)"
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+      actions: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v8
+
+      - name: Install Deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache build-essential qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-webengine-dev vulkan-tools libvulkan1
+
+      - name: Build
+        run: |
+          if [[ "${{ inputs.BUILD_WITH_DEBUG }}" == "true" ]]; then
+            bash build.sh debug
+          else
+            bash build.sh release
+          fi
+
+      - name: Upload to Github Releases
+        uses: softprops/action-gh-release@v2
+        with: 
+          files: |
+             build/ensemble
+          name: Ensemble Release ${{ github.event.inputs.GITHUB_VERSIONING }}
+          tag: ${{ github.event.inputs.GITHUB_VERSIONING }}  
+          body: |
+            Ensemble Release<br>
+            Version ${{github.event.inputs.GITHUB_VERSIONING}}
+
+            Notes:
+            This release is for Linux only, find the Windows variant somewhere in this repo or build it yourself.
+            
+            For more information, visit: https://github.com/Mizumo-prjkt/ensemble
+        env:
+          GITHUB_TOKEN:  ${{secrets.KEYS}}
+        
+    

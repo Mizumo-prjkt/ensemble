@@ -23,7 +23,7 @@ CssEditorPane::CssEditorPane(QWidget *parent)
     m_warningLabel->setWordWrap(true);
     m_warningLabel->setStyleSheet(QStringLiteral(
         "QLabel { background-color: #3a2a00; color: #ffcc00; padding: 6px 10px; "
-        "border-bottom: 1px solid #664d00; font-size: 11px; font-weight: bold; }"));
+        "border-bottom: 1px solid #664d00; font-size: 11px; font-weight: bold; max-height: 90px; }"));
     m_warningLabel->hide();
 
     auto *topRow = new QHBoxLayout();
@@ -120,23 +120,45 @@ void CssEditorPane::parseCssClasses(const QString &css)
     if (m_project) {
         for (const QString &oldClass : m_classNames) {
             if (!uniqueClasses.contains(oldClass)) {
-                // Class was removed. Check if any chapter HTML still uses it.
+                // Class was removed. Find affected chapters.
+                QStringList affectedChapters;
                 int chNum = 1;
                 for (const Chapter &ch : m_project->chapters()) {
                     if (ch.html().contains(oldClass)) {
-                        warnings << QStringLiteral("⚠️ Warning: CSS class '.%1' was removed from Work Skin, but is still used in Chapter %2 (\"%3\").")
-                                        .arg(oldClass)
-                                        .arg(chNum)
-                                        .arg(ch.title());
+                        affectedChapters << QStringLiteral("Chapter %1").arg(chNum);
                     }
                     chNum++;
+                }
+
+                if (!affectedChapters.isEmpty()) {
+                    if (affectedChapters.size() <= 2) {
+                        warnings << QStringLiteral("⚠️ Warning: CSS class '.%1' was removed from Work Skin, but is still used in %2.")
+                                        .arg(oldClass, affectedChapters.join(QStringLiteral(", ")));
+                    } else {
+                        warnings << QStringLiteral("⚠️ Warning: CSS class '.%1' was removed from Work Skin, but is still used across %2 chapters (%3, %4, ...).")
+                                        .arg(oldClass)
+                                        .arg(affectedChapters.size())
+                                        .arg(affectedChapters.at(0))
+                                        .arg(affectedChapters.at(1));
+                    }
                 }
             }
         }
     }
 
+    constexpr int kMaxDisplayedWarnings = 4;
     if (!warnings.isEmpty()) {
-        m_warningLabel->setText(warnings.join(QStringLiteral("\n")));
+        QStringList displayWarnings;
+        if (warnings.size() > kMaxDisplayedWarnings) {
+            for (int i = 0; i < kMaxDisplayedWarnings; ++i) {
+                displayWarnings << warnings.at(i);
+            }
+            displayWarnings << QStringLiteral("⚠️ ...and %1 more warning(s).").arg(warnings.size() - kMaxDisplayedWarnings);
+        } else {
+            displayWarnings = warnings;
+        }
+
+        m_warningLabel->setText(displayWarnings.join(QStringLiteral("\n")));
         m_warningLabel->show();
     } else {
         m_warningLabel->hide();

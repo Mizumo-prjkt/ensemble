@@ -11,3 +11,4 @@ CMakeUserPresets.json
 ao3-typewriter
 compile_commands.json
 .cache/
+build-win/

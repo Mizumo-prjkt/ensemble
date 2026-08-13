@@ -275,6 +275,7 @@ Ao3FullWork Ao3Parser::parseFullWork(const QByteArray &htmlData)
                     QString body = block.mid(bodyStart, bodyEnd - bodyStart).trimmed();
                     body.remove(QRegularExpression(QStringLiteral("^\\s*<h3[^>]*class=[\"']landmark[^\"'\\w]*heading[\"'][^>]*>.*?</h3>"),
                                                   QRegularExpression::DotMatchesEverythingOption));
+                    body.remove(QRegularExpression(QStringLiteral(R"(<!--[\s\S]*?-->)")));
                     chap.bodyHtml = body.trimmed();
                 }
             }
@@ -290,7 +291,9 @@ Ao3FullWork Ao3Parser::parseFullWork(const QByteArray &htmlData)
         QRegularExpression reBody(QStringLiteral("<div[^>]+class=[\"']userstuff[^\"']*[\"'][^>]*>(.*?)</div>"),
                                   QRegularExpression::DotMatchesEverythingOption);
         const auto bMatch = reBody.match(html);
-        chap.bodyHtml = bMatch.hasMatch() ? bMatch.captured(1).trimmed() : QString();
+        QString body = bMatch.hasMatch() ? bMatch.captured(1).trimmed() : QString();
+        body.remove(QRegularExpression(QStringLiteral(R"(<!--[\s\S]*?-->)")));
+        chap.bodyHtml = body.trimmed();
         fullWork.chapters.append(chap);
     }
 

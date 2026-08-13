@@ -227,7 +227,7 @@ def main():
     )
 
     headers = {
-        "User-Agent": "Ensemble/1.0.0 (Desktop; +https://github.com/mizumo-prjkt/ensemble)",
+        "User-Agent": "Ensemble/1.1.0 (Desktop; +https://github.com/mizumo-prjkt/ensemble)",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
     }
 

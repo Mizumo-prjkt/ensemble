@@ -1,0 +1,11 @@
+v1.1.0
+Aug 13 2016
+
+- Introduced Debug Logging for User Report
+- Fixed some UI Issues
+
+
+v1.0.0
+Aug 13 2026
+
+Initial Version of the software
