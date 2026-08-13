@@ -14,12 +14,6 @@ if %ERRORLEVEL% NEQ 0 goto error
 cmake --build build --config %BUILD_TYPE% --parallel
 if %ERRORLEVEL% NEQ 0 goto error
 
-echo Launching Ensemble...
-if exist "build\%BUILD_TYPE%\ensemble.exe" (
-    start build\%BUILD_TYPE%\ensemble.exe
-) else (
-    start build\ensemble.exe
-)
 goto end
 
 :error

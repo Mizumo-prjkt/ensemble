@@ -16,10 +16,3 @@ Write-Host "========================================" -ForegroundColor Cyan
 
 cmake -B build -DCMAKE_BUILD_TYPE=$BuildType
 cmake --build build --config $BuildType --parallel
-
-Write-Host "Launching Ensemble..." -ForegroundColor Green
-if (Test-Path "build\$BuildType\ensemble.exe") {
-    Start-Process "build\$BuildType\ensemble.exe"
-} else {
-    Start-Process "build\ensemble.exe"
-}
