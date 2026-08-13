@@ -1,0 +1,13 @@
+build/
+cmake-build-*/
+CMakeUserPresets.json
+*.user
+*.autosave
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+ao3-typewriter
+compile_commands.json
+.cache/

@@ -1,0 +1,35 @@
+/* Default work skin — readable typography baseline */
+#chapter-content {
+  max-width: 45em;
+}
+
+#chapter-content p {
+  margin: 0 0 1em 0;
+  text-indent: 1.5em;
+}
+
+#chapter-content p:first-child,
+#chapter-content h1 + p,
+#chapter-content h2 + p,
+#chapter-content h3 + p,
+#chapter-content h4 + p,
+#chapter-content h5 + p,
+#chapter-content h6 + p,
+#chapter-content blockquote + p,
+#chapter-content hr + p {
+  text-indent: 0;
+}
+
+#chapter-content h1, #chapter-content h2, #chapter-content h3,
+#chapter-content h4, #chapter-content h5, #chapter-content h6 {
+  font-family: "Lucida Grande", "Lucida Sans Unicode", Helvetica, Arial, sans-serif;
+  margin: 1.5em 0 0.5em 0;
+}
+
+#chapter-content em {
+  font-style: italic;
+}
+
+#chapter-content strong {
+  font-weight: bold;
+}

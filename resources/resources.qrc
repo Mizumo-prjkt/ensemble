@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/">
+        <file>ao3-preview-shell.html</file>
+        <file>default-work-skin.css</file>
+        <file alias="icon.png">../src/icons/icon.png</file>
+    </qresource>
+</RCC>
