@@ -92,3 +92,9 @@ Ensemble saves projects as `.ao3proj` binary archives compressed with **Zstandar
 - **Developer**: [Mizumo-prjkt](https.github.com/Mizumo-prjkt)
 - **Built with**: Qt 6, Chromium WebEngine & Zstandard
 - **License**: MIT License
+
+## ⚖️ Legal
+
+This project is not affiliated with Archive of Our Own (AO3), the Organization for Transformative Works (OTW), or any of their affiliates. AO3 and OTW are registered trademarks of the Organization for Transformative Works.
+
+Qt is a trademark of Qt Group Plc. Chromium is a trademark of Google LLC. Zstandard is a trademark of Facebook, Inc.
