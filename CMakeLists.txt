@@ -167,6 +167,7 @@ if(WIN32)
     target_link_libraries(ensemble PRIVATE ws2_32 shlwapi)
 endif()
 
+set_target_properties(ensemble PROPERTIES QT_RESOURCE_PREFIX "/")
 qt_add_resources(ensemble resources/resources.qrc)
 
 install(TARGETS ensemble RUNTIME DESTINATION bin)
