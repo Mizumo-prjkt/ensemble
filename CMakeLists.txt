@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(ensemble VERSION 1.1.0 LANGUAGES CXX)
+project(ensemble VERSION 1.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,6 +42,7 @@ set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO "RELEASE" "DEBUG" "")
 set(QT_NO_ADD_WINDOWS_MANIFEST TRUE)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network WebEngineWidgets)
+find_package(ZLIB REQUIRED)
 
 qt_standard_project_setup()
 
@@ -65,6 +66,7 @@ set(SOURCES
     src/export/Ao3HtmlImporter.cpp
     src/ui/MainMenuWindow.cpp
     src/ui/AboutDialog.cpp
+    src/ui/CreditsDialog.cpp
     src/ui/AppIcon.cpp
     src/ui/FindReplaceDialog.cpp
     src/ui/EditorMinimap.cpp
@@ -79,6 +81,7 @@ set(SOURCES
     src/ui/ProblemsDialog.cpp
     src/debug/debug.cpp
     src/utils/AppPaths.cpp
+    src/utils/miniz.cpp
 )
 
 set(HEADERS
@@ -104,6 +107,7 @@ set(HEADERS
     src/export/Ao3HtmlImporter.h
     src/ui/MainMenuWindow.h
     src/ui/AboutDialog.h
+    src/ui/CreditsDialog.h
     src/ui/AppIcon.h
     src/net/Ao3Types.h
     src/net/Ao3Parser.h
@@ -115,6 +119,8 @@ set(HEADERS
     src/ui/DebugConsoleDialog.h
     src/ui/ProblemsDialog.h
     src/debug/debug.hpp
+    src/utils/AppPaths.h
+    src/utils/miniz.h
 )
 
 set(CMAKE_QT_NO_ADD_WINDOWS_MANIFEST TRUE)
@@ -161,6 +167,7 @@ target_link_libraries(ensemble PRIVATE
     Qt6::Widgets
     Qt6::Network
     Qt6::WebEngineWidgets
+    ZLIB::ZLIB
 )
 
 if(WIN32)
@@ -178,4 +185,20 @@ target_include_directories(test_ao3_parser PRIVATE src)
 target_link_libraries(test_ao3_parser PRIVATE Qt6::Core Qt6::Gui)
 if(WIN32)
     target_link_libraries(test_ao3_parser PRIVATE ws2_32)
+endif()
+
+add_executable(test_project_archive
+    test/cpp/test_project_archive.cpp
+    src/model/Chapter.cpp
+    src/model/Ao3Project.cpp
+    src/model/ProjectSerializer.cpp
+    src/model/ZstdArchive.cpp
+    src/debug/debug.cpp
+    src/utils/AppPaths.cpp
+    src/utils/miniz.cpp
+)
+target_include_directories(test_project_archive PRIVATE src)
+target_link_libraries(test_project_archive PRIVATE Qt6::Core Qt6::Gui ZLIB::ZLIB)
+if(WIN32)
+    target_link_libraries(test_project_archive PRIVATE ws2_32)
 endif()

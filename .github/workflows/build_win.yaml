@@ -7,7 +7,7 @@ on:
         description: "Version for Github Releases"
         required: true
         type: string
-        default: "1.1.0"
+        default: "1.1.1"
       BUILD_WITH_DEBUG:
         description: "Build with Debug symbols"
         required: true

@@ -46,7 +46,7 @@ void AboutDialog::setupUi() {
   titleLayout->setSpacing(3);
 
 #ifndef ENSEMBLE_FULL_VERSION
-#define ENSEMBLE_FULL_VERSION "1.1.0 (Debug)"
+#define ENSEMBLE_FULL_VERSION "1.1.1 (Debug)"
 #endif
 
   const QString fullVersion = QStringLiteral(ENSEMBLE_FULL_VERSION);

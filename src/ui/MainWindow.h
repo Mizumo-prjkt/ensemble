@@ -8,6 +8,7 @@
 
 class FindReplaceDialog;
 class AboutDialog;
+class CreditsDialog;
 class DebugConsoleDialog;
 class ProblemsDialog;
 class ChapterSidebar;
@@ -44,6 +45,7 @@ private slots:
     void onShowMainMenu();
     void onStartWriting();
     void onShowAbout();
+    void onShowCredits();
     void onImportFromAo3();
     void onToggleLivePreview(bool checked);
     void onPopOutPreview();
@@ -99,6 +101,7 @@ private:
     QAction *m_previewToggleAction = nullptr;
 
     AboutDialog *m_aboutDialog = nullptr;
+    CreditsDialog *m_creditsDialog = nullptr;
     FindReplaceDialog *m_findReplaceDialog = nullptr;
     DebugConsoleDialog *m_debugConsoleDialog = nullptr;
     ProblemsDialog *m_problemsDialog = nullptr;

@@ -1,4 +1,5 @@
 #include "ZstdArchive.h"
+#include "utils/miniz.h"
 
 #include <QDir>
 #include <QDirIterator>
@@ -42,6 +43,43 @@ bool ZstdArchive::isZstdArchive(const QString &filePath)
 
 bool ZstdArchive::compressArchive(const QString &destPath, const QMap<QString, QByteArray> &fileEntries, QString *error)
 {
+    // 1. Primary: In-process C/C++ miniz ZIP archive builder (zero external dependencies, 100% portable)
+    mz_zip_archive zip;
+    mz_zip_zero_struct(&zip);
+
+    if (mz_zip_writer_init_heap(&zip, 0, 65536)) {
+        bool addSuccess = true;
+        for (auto it = fileEntries.constBegin(); it != fileEntries.constEnd(); ++it) {
+            const QByteArray relName = it.key().toUtf8();
+            const QByteArray fileData = it.value();
+
+            if (!mz_zip_writer_add_mem(&zip, relName.constData(), fileData.constData(), static_cast<size_t>(fileData.size()), MZ_DEFAULT_COMPRESSION)) {
+                addSuccess = false;
+                break;
+            }
+        }
+
+        if (addSuccess) {
+            void *pZipBuf = nullptr;
+            size_t zipSize = 0;
+            if (mz_zip_writer_finalize_heap_archive(&zip, &pZipBuf, &zipSize) && pZipBuf && zipSize > 0) {
+                // Atomic save via temp file or direct QFile write
+                QFile outFile(destPath);
+                if (outFile.open(QIODevice::WriteOnly)) {
+                    qint64 written = outFile.write(reinterpret_cast<const char *>(pZipBuf), static_cast<qint64>(zipSize));
+                    outFile.flush();
+                    outFile.close();
+                    if (written == static_cast<qint64>(zipSize)) {
+                        mz_zip_writer_end(&zip);
+                        return true;
+                    }
+                }
+            }
+        }
+        mz_zip_writer_end(&zip);
+    }
+
+    // 2. Fallback: Temporary directory with external tooling
     QTemporaryDir tempDir;
     if (!tempDir.isValid()) {
         if (error) *error = QStringLiteral("Failed to create temporary directory.");
@@ -64,7 +102,6 @@ bool ZstdArchive::compressArchive(const QString &destPath, const QMap<QString, Q
         }
     }
 
-    // Remove existing destination file if present
     if (QFile::exists(destPath)) {
         QFile::remove(destPath);
     }
@@ -72,7 +109,7 @@ bool ZstdArchive::compressArchive(const QString &destPath, const QMap<QString, Q
     const QString nativeDestPath = QDir::toNativeSeparators(destPath);
     const QString nativeTempDir = QDir::toNativeSeparators(tempDir.path());
 
-    // 1. Primary: Use python3 / python zipfile module to write standard Zip archive container
+    // 2a. Python zipfile
     const QString pyScript = QStringLiteral(
         "import zipfile, os, sys\n"
         "src_dir = sys.argv[1]\n"
@@ -94,7 +131,7 @@ bool ZstdArchive::compressArchive(const QString &destPath, const QMap<QString, Q
         }
     }
 
-    // 2. Windows Native: PowerShell Compress-Archive
+    // 2b. Windows PowerShell
 #if defined(Q_OS_WIN) || defined(_WIN32)
     QProcess psProc;
     const QString psCmd = QStringLiteral("Compress-Archive -Path '%1\\*' -DestinationPath '%2' -Force")
@@ -105,22 +142,10 @@ bool ZstdArchive::compressArchive(const QString &destPath, const QMap<QString, Q
     }
 #endif
 
-    // 3. Native tar command (Windows 10+ / Linux / macOS)
+    // 2c. Native tar
     QProcess tarProc;
     tarProc.start(QStringLiteral("tar"), {QStringLiteral("-a"), QStringLiteral("-c"), QStringLiteral("-f"), destPath, QStringLiteral("-C"), tempDir.path(), QStringLiteral(".")});
     if (tarProc.waitForStarted(1000) && tarProc.waitForFinished(5000) && tarProc.exitCode() == 0 && QFile::exists(destPath)) {
-        return true;
-    }
-
-    // 4. 7z fallback
-    QProcess process7z;
-    process7z.start(QStringLiteral("7z"), {
-        QStringLiteral("a"),
-        QStringLiteral("-tzip"),
-        destPath,
-        QDir(tempDir.path()).filePath(QStringLiteral("*"))
-    });
-    if (process7z.waitForStarted(1000) && process7z.waitForFinished(5000) && process7z.exitCode() == 0 && QFile::exists(destPath)) {
         return true;
     }
 
@@ -130,6 +155,45 @@ bool ZstdArchive::compressArchive(const QString &destPath, const QMap<QString, Q
 
 bool ZstdArchive::decompressArchive(const QString &srcPath, QMap<QString, QByteArray> &outEntries, QString *error)
 {
+    // 1. Primary: In-process C/C++ miniz ZIP archive extractor
+    QFile inFile(srcPath);
+    if (inFile.open(QIODevice::ReadOnly)) {
+        const QByteArray archiveBytes = inFile.readAll();
+        inFile.close();
+
+        if (!archiveBytes.isEmpty()) {
+            mz_zip_archive zip;
+            mz_zip_zero_struct(&zip);
+
+            if (mz_zip_reader_init_mem(&zip, archiveBytes.constData(), static_cast<size_t>(archiveBytes.size()), 0)) {
+                mz_uint totalFiles = mz_zip_reader_get_num_files(&zip);
+                for (mz_uint i = 0; i < totalFiles; ++i) {
+                    mz_zip_archive_file_stat stat;
+                    if (!mz_zip_reader_file_stat(&zip, i, &stat))
+                        continue;
+                    if (stat.m_is_directory)
+                        continue;
+
+                    size_t uncompSize = 0;
+                    void *pData = mz_zip_reader_extract_to_heap(&zip, i, &uncompSize, 0);
+                    if (pData) {
+                        QString relPath = QString::fromUtf8(stat.m_filename);
+                        if (relPath.startsWith(QLatin1String("./")))
+                            relPath = relPath.mid(2);
+                        outEntries.insert(relPath, QByteArray(reinterpret_cast<const char *>(pData), static_cast<int>(uncompSize)));
+                        mz_free(pData);
+                    }
+                }
+                mz_zip_reader_end(&zip);
+
+                if (!outEntries.isEmpty()) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // 2. Fallback: External process extraction
     QTemporaryDir tempDir;
     if (!tempDir.isValid()) {
         if (error) *error = QStringLiteral("Failed to create temporary directory.");
@@ -155,7 +219,7 @@ bool ZstdArchive::decompressArchive(const QString &srcPath, QMap<QString, QByteA
     const QString nativeSrcPath = QDir::toNativeSeparators(srcPath);
     const QString nativeTempDir = QDir::toNativeSeparators(tempDir.path());
 
-    // 1. Primary: Use python3 / python zipfile module to extract archive
+    // 2a. Python
     const QString pyScript = QStringLiteral(
         "import zipfile, sys\n"
         "in_file = sys.argv[1]\n"
@@ -174,7 +238,7 @@ bool ZstdArchive::decompressArchive(const QString &srcPath, QMap<QString, QByteA
         }
     }
 
-    // 2. Windows Native: PowerShell Expand-Archive
+    // 2b. PowerShell
 #if defined(Q_OS_WIN) || defined(_WIN32)
     QProcess psProc;
     const QString psCmd = QStringLiteral("Expand-Archive -Path '%1' -DestinationPath '%2' -Force")
@@ -186,26 +250,10 @@ bool ZstdArchive::decompressArchive(const QString &srcPath, QMap<QString, QByteA
     }
 #endif
 
-    // 3. Try tar (Windows 10+ / Linux / macOS)
+    // 2c. tar
     QProcess tarProc;
     tarProc.start(QStringLiteral("tar"), {QStringLiteral("-xf"), srcPath, QStringLiteral("-C"), tempDir.path()});
     if (tarProc.waitForStarted(1000) && tarProc.waitForFinished(5000) && tarProc.exitCode() == 0) {
-        if (readEntriesFromTempDir())
-            return true;
-    }
-
-    // 4. Try unzip
-    QProcess unzipProc;
-    unzipProc.start(QStringLiteral("unzip"), {QStringLiteral("-q"), QStringLiteral("-o"), srcPath, QStringLiteral("-d"), tempDir.path()});
-    if (unzipProc.waitForStarted(1000) && unzipProc.waitForFinished(5000) && unzipProc.exitCode() == 0) {
-        if (readEntriesFromTempDir())
-            return true;
-    }
-
-    // 5. Try 7z
-    QProcess process7z;
-    process7z.start(QStringLiteral("7z"), {QStringLiteral("x"), QStringLiteral("-y"), QStringLiteral("-o") + tempDir.path(), srcPath});
-    if (process7z.waitForStarted(1000) && process7z.waitForFinished(5000) && process7z.exitCode() == 0) {
         if (readEntriesFromTempDir())
             return true;
     }

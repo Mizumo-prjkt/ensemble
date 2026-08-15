@@ -3,6 +3,7 @@
 #include "export/Ao3HtmlSanitizer.h"
 #include "model/ProjectSerializer.h"
 #include "ui/AboutDialog.h"
+#include "ui/CreditsDialog.h"
 #include "ui/Ao3ImportDialog.h"
 #include "ui/ChapterSidebar.h"
 #include "ui/CssEditorPane.h"
@@ -131,8 +132,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   }
 
   // Help menu
-  auto *aboutAction = helpMenu->addAction(QStringLiteral("&About"));
+  auto *aboutAction = helpMenu->addAction(QStringLiteral("&About Ensemble"));
   connect(aboutAction, &QAction::triggered, this, &MainWindow::onShowAbout);
+
+  auto *creditsAction = helpMenu->addAction(QStringLiteral("&Open Source Credits…"));
+  connect(creditsAction, &QAction::triggered, this, &MainWindow::onShowCredits);
 
   // Stacked central widget
   m_centralStack = new QStackedWidget(this);
@@ -195,6 +199,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
   // Create dialogs (lazy initialization)
   m_aboutDialog = new AboutDialog(this);
+  m_creditsDialog = new CreditsDialog(this);
 
   // Connections
   m_chapterSidebar->bindProject(&m_project);
@@ -605,6 +610,13 @@ void MainWindow::onShowMainMenu() { m_centralStack->setCurrentIndex(0); }
 void MainWindow::onStartWriting() { m_centralStack->setCurrentIndex(1); }
 
 void MainWindow::onShowAbout() { m_aboutDialog->exec(); }
+
+void MainWindow::onShowCredits() {
+  if (!m_creditsDialog) {
+    m_creditsDialog = new CreditsDialog(this);
+  }
+  m_creditsDialog->exec();
+}
 
 void MainWindow::onToggleLivePreview(bool checked) {
   if (checked) {
