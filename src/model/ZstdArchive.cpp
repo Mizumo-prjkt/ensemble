@@ -69,9 +69,11 @@ bool ZstdArchive::compressArchive(const QString &destPath, const QMap<QString, Q
         QFile::remove(destPath);
     }
 
-    // 1. Primary: Use python3 zipfile module to write standard Zip archive container
-    QProcess pyProc;
-    const QString script = QStringLiteral(
+    const QString nativeDestPath = QDir::toNativeSeparators(destPath);
+    const QString nativeTempDir = QDir::toNativeSeparators(tempDir.path());
+
+    // 1. Primary: Use python3 / python zipfile module to write standard Zip archive container
+    const QString pyScript = QStringLiteral(
         "import zipfile, os, sys\n"
         "src_dir = sys.argv[1]\n"
         "out_file = sys.argv[2]\n"
@@ -83,28 +85,46 @@ bool ZstdArchive::compressArchive(const QString &destPath, const QMap<QString, Q
         "            z.write(full, rel)\n"
     );
 
-    pyProc.start(QStringLiteral("python3"), {QStringLiteral("-c"), script, tempDir.path(), destPath});
-    if (pyProc.waitForStarted(1000) && pyProc.waitForFinished(4000) && pyProc.exitCode() == 0 && QFile::exists(destPath)) {
+    const QStringList pyCmds = {QStringLiteral("python3"), QStringLiteral("python")};
+    for (const QString &pyCmd : pyCmds) {
+        QProcess pyProc;
+        pyProc.start(pyCmd, {QStringLiteral("-c"), pyScript, tempDir.path(), destPath});
+        if (pyProc.waitForStarted(1000) && pyProc.waitForFinished(5000) && pyProc.exitCode() == 0 && QFile::exists(destPath)) {
+            return true;
+        }
+    }
+
+    // 2. Windows Native: PowerShell Compress-Archive
+#if defined(Q_OS_WIN) || defined(_WIN32)
+    QProcess psProc;
+    const QString psCmd = QStringLiteral("Compress-Archive -Path '%1\\*' -DestinationPath '%2' -Force")
+                              .arg(nativeTempDir, nativeDestPath);
+    psProc.start(QStringLiteral("powershell"), {QStringLiteral("-NoProfile"), QStringLiteral("-Command"), psCmd});
+    if (psProc.waitForStarted(1000) && psProc.waitForFinished(8000) && psProc.exitCode() == 0 && QFile::exists(destPath)) {
+        return true;
+    }
+#endif
+
+    // 3. Native tar command (Windows 10+ / Linux / macOS)
+    QProcess tarProc;
+    tarProc.start(QStringLiteral("tar"), {QStringLiteral("-a"), QStringLiteral("-c"), QStringLiteral("-f"), destPath, QStringLiteral("-C"), tempDir.path(), QStringLiteral(".")});
+    if (tarProc.waitForStarted(1000) && tarProc.waitForFinished(5000) && tarProc.exitCode() == 0 && QFile::exists(destPath)) {
         return true;
     }
 
-    // 2. Fallback: 7z a -tzip destPath tempDir/*
+    // 4. 7z fallback
     QProcess process7z;
     process7z.start(QStringLiteral("7z"), {
         QStringLiteral("a"),
         QStringLiteral("-tzip"),
         destPath,
-        QDir(tempDir.path()).filePath(QStringLiteral("metadata.xml")),
-        QDir(tempDir.path()).filePath(QStringLiteral("history.cmt")),
-        QDir(tempDir.path()).filePath(QStringLiteral("chapters")),
-        QDir(tempDir.path()).filePath(QStringLiteral("stylesheet"))
+        QDir(tempDir.path()).filePath(QStringLiteral("*"))
     });
-
-    if (process7z.waitForStarted(1000) && process7z.waitForFinished(4000) && process7z.exitCode() == 0 && QFile::exists(destPath)) {
+    if (process7z.waitForStarted(1000) && process7z.waitForFinished(5000) && process7z.exitCode() == 0 && QFile::exists(destPath)) {
         return true;
     }
 
-    if (error) *error = QStringLiteral("Could not write archive file: %1").arg(destPath);
+    if (error) *error = QStringLiteral("Could not write project archive: %1").arg(destPath);
     return false;
 }
 
@@ -116,9 +136,27 @@ bool ZstdArchive::decompressArchive(const QString &srcPath, QMap<QString, QByteA
         return false;
     }
 
-    // 1. Try extracting using python3 zipfile module
-    QProcess pyProc;
-    const QString script = QStringLiteral(
+    auto readEntriesFromTempDir = [&tempDir, &outEntries]() -> bool {
+        QDirIterator it(tempDir.path(), QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString fullPath = it.next();
+            QString relPath = QDir(tempDir.path()).relativeFilePath(fullPath);
+            if (relPath.startsWith(QLatin1String("./")))
+                relPath = relPath.mid(2);
+
+            QFile f(fullPath);
+            if (f.open(QIODevice::ReadOnly)) {
+                outEntries.insert(relPath, f.readAll());
+            }
+        }
+        return !outEntries.isEmpty();
+    };
+
+    const QString nativeSrcPath = QDir::toNativeSeparators(srcPath);
+    const QString nativeTempDir = QDir::toNativeSeparators(tempDir.path());
+
+    // 1. Primary: Use python3 / python zipfile module to extract archive
+    const QString pyScript = QStringLiteral(
         "import zipfile, sys\n"
         "in_file = sys.argv[1]\n"
         "out_dir = sys.argv[2]\n"
@@ -126,61 +164,49 @@ bool ZstdArchive::decompressArchive(const QString &srcPath, QMap<QString, QByteA
         "    z.extractall(out_dir)\n"
     );
 
-    pyProc.start(QStringLiteral("python3"), {QStringLiteral("-c"), script, srcPath, tempDir.path()});
-    if (pyProc.waitForStarted(1000) && pyProc.waitForFinished(4000) && pyProc.exitCode() == 0) {
-        QDirIterator it(tempDir.path(), QDir::Files, QDirIterator::Subdirectories);
-        while (it.hasNext()) {
-            const QString fullPath = it.next();
-            QString relPath = QDir(tempDir.path()).relativeFilePath(fullPath);
-            if (relPath.startsWith(QLatin1String("./")))
-                relPath = relPath.mid(2);
-
-            QFile f(fullPath);
-            if (f.open(QIODevice::ReadOnly)) {
-                outEntries.insert(relPath, f.readAll());
-            }
+    const QStringList pyCmds = {QStringLiteral("python3"), QStringLiteral("python")};
+    for (const QString &pyCmd : pyCmds) {
+        QProcess pyProc;
+        pyProc.start(pyCmd, {QStringLiteral("-c"), pyScript, srcPath, tempDir.path()});
+        if (pyProc.waitForStarted(1000) && pyProc.waitForFinished(5000) && pyProc.exitCode() == 0) {
+            if (readEntriesFromTempDir())
+                return true;
         }
-        if (!outEntries.isEmpty())
-            return true;
     }
 
-    // 2. Try extracting using unzip
-    QProcess unzipProc;
-    unzipProc.start(QStringLiteral("unzip"), {QStringLiteral("-q"), QStringLiteral("-o"), srcPath, QStringLiteral("-d"), tempDir.path()});
-    if (unzipProc.waitForStarted(1000) && unzipProc.waitForFinished(4000) && unzipProc.exitCode() == 0) {
-        QDirIterator it(tempDir.path(), QDir::Files, QDirIterator::Subdirectories);
-        while (it.hasNext()) {
-            const QString fullPath = it.next();
-            QString relPath = QDir(tempDir.path()).relativeFilePath(fullPath);
-            if (relPath.startsWith(QLatin1String("./")))
-                relPath = relPath.mid(2);
-
-            QFile f(fullPath);
-            if (f.open(QIODevice::ReadOnly)) {
-                outEntries.insert(relPath, f.readAll());
-            }
-        }
-        if (!outEntries.isEmpty())
+    // 2. Windows Native: PowerShell Expand-Archive
+#if defined(Q_OS_WIN) || defined(_WIN32)
+    QProcess psProc;
+    const QString psCmd = QStringLiteral("Expand-Archive -Path '%1' -DestinationPath '%2' -Force")
+                              .arg(nativeSrcPath, nativeTempDir);
+    psProc.start(QStringLiteral("powershell"), {QStringLiteral("-NoProfile"), QStringLiteral("-Command"), psCmd});
+    if (psProc.waitForStarted(1000) && psProc.waitForFinished(8000) && psProc.exitCode() == 0) {
+        if (readEntriesFromTempDir())
             return true;
     }
+#endif
 
-    // 3. Fallback: try tar for legacy tar archives
+    // 3. Try tar (Windows 10+ / Linux / macOS)
     QProcess tarProc;
     tarProc.start(QStringLiteral("tar"), {QStringLiteral("-xf"), srcPath, QStringLiteral("-C"), tempDir.path()});
-    if (tarProc.waitForStarted(1000) && tarProc.waitForFinished(4000) && tarProc.exitCode() == 0) {
-        QDirIterator it(tempDir.path(), QDir::Files, QDirIterator::Subdirectories);
-        while (it.hasNext()) {
-            const QString fullPath = it.next();
-            QString relPath = QDir(tempDir.path()).relativeFilePath(fullPath);
-            if (relPath.startsWith(QLatin1String("./")))
-                relPath = relPath.mid(2);
+    if (tarProc.waitForStarted(1000) && tarProc.waitForFinished(5000) && tarProc.exitCode() == 0) {
+        if (readEntriesFromTempDir())
+            return true;
+    }
 
-            QFile f(fullPath);
-            if (f.open(QIODevice::ReadOnly)) {
-                outEntries.insert(relPath, f.readAll());
-            }
-        }
-        if (!outEntries.isEmpty())
+    // 4. Try unzip
+    QProcess unzipProc;
+    unzipProc.start(QStringLiteral("unzip"), {QStringLiteral("-q"), QStringLiteral("-o"), srcPath, QStringLiteral("-d"), tempDir.path()});
+    if (unzipProc.waitForStarted(1000) && unzipProc.waitForFinished(5000) && unzipProc.exitCode() == 0) {
+        if (readEntriesFromTempDir())
+            return true;
+    }
+
+    // 5. Try 7z
+    QProcess process7z;
+    process7z.start(QStringLiteral("7z"), {QStringLiteral("x"), QStringLiteral("-y"), QStringLiteral("-o") + tempDir.path(), srcPath});
+    if (process7z.waitForStarted(1000) && process7z.waitForFinished(5000) && process7z.exitCode() == 0) {
+        if (readEntriesFromTempDir())
             return true;
     }
 
