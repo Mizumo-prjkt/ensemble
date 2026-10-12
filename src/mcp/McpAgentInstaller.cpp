@@ -1,4 +1,5 @@
 #include "McpAgentInstaller.h"
+#include "McpServer.h"
 #include "debug/debug.hpp"
 #include "utils/AppPaths.h"
 
@@ -699,6 +700,10 @@ bool McpAgentInstaller::installClaudeCodeConfig(
 
 QString McpAgentInstaller::generateManualMarkdown(const QString &executablePath)
 {
+    const QString discoveryPath = QDir::toNativeSeparators(McpServer::discoveryFilePath());
+    const QString jsonEscapedCommand = QString(executablePath).replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+    const QString nativeCommand = QDir::toNativeSeparators(executablePath);
+
     return QStringLiteral(
         "# Ensemble Model Context Protocol (MCP) Manual\n\n"
         "Welcome to the **Ensemble** AI Agent integration guide. This manual describes how autonomous "
@@ -712,7 +717,11 @@ QString McpAgentInstaller::generateManualMarkdown(const QString &executablePath)
         "## 2. Connection Methods\n\n"
         "### A. Direct WebSocket Connection\n"
         "- **Address**: `ws://127.0.0.1:26303` (or auto-assigned port recorded in `mcp.json`)\n"
-        "- **Discovery File**: `~/.config/Ensemble/mcp.json`\n"
+        "- **Discovery Manifest File**:\n"
+        "  - **Windows**: `%LOCALAPPDATA%\\Ensemble\\mcp.json`\n"
+        "  - **Linux**: `~/.config/Ensemble/mcp.json`\n"
+        "  - **macOS**: `~/Library/Application Support/Ensemble/mcp.json`\n"
+        "  - *(Active path on this system: `%1`)*\n"
         "- **Protocol**: JSON-RPC 2.0 (MCP 2024-11-05 specification)\n\n"
         "### B. Stdio CLI Bridge (Claude Desktop / Claude Code / Antigravity)\n"
         "Add Ensemble to your agent's MCP configuration:\n"
@@ -720,16 +729,21 @@ QString McpAgentInstaller::generateManualMarkdown(const QString &executablePath)
         "{\n"
         "  \"mcpServers\": {\n"
         "    \"ensemble\": {\n"
-        "      \"command\": \"%1\",\n"
+        "      \"command\": \"%2\",\n"
         "      \"args\": [\"--mcp-bridge\"]\n"
         "    }\n"
         "  }\n"
         "}\n"
         "```\n\n"
         "Or for Claude Code CLI:\n"
-        "```bash\n"
-        "claude mcp add ensemble \"%1\" --mcp-bridge\n"
-        "```\n\n"
+        "- **Windows (PowerShell / Command Prompt)**:\n"
+        "  ```powershell\n"
+        "  claude mcp add ensemble \"%3\" -- --mcp-bridge\n"
+        "  ```\n"
+        "- **Linux / macOS (Terminal)**:\n"
+        "  ```bash\n"
+        "  claude mcp add ensemble \"%3\" -- --mcp-bridge\n"
+        "  ```\n\n"
         "---\n\n"
         "## 3. Available Tools\n\n"
         "| Tool | Parameters | Description |\n"
@@ -790,10 +804,11 @@ QString McpAgentInstaller::generateManualMarkdown(const QString &executablePath)
         "---\n\n"
         "## 7. Troubleshooting & Diagnostics\n\n"
         "- **Diagnose Connection via CLI**:\n"
-        "  ```bash\n"
-        "  ensemble --mcp-status\n"
-        "  ```\n"
-        "- **Firewall Notice**: Ensemble binds strictly to `127.0.0.1` (localhost loopback). If your client cannot connect, ensure local security software is not blocking loopback TCP sockets.\n"
+        "  - **Windows (PowerShell / Command Prompt)**: `ensemble.exe --mcp-status`\n"
+        "  - **Linux / macOS (Terminal)**: `ensemble --mcp-status`\n\n"
+        "- **Firewall Notice**: Ensemble binds strictly to `127.0.0.1` (localhost loopback). If your client cannot connect:\n"
+        "  - **Windows**: Ensure `ensemble.exe` is permitted through Windows Defender Firewall for local loopback.\n"
+        "  - **Linux**: Verify loopback interface `lo` / `127.0.0.1` is not blocked by `ufw` or `iptables`.\n\n"
         "- **Test in GUI**: Open **Preferences > AI Settings** and click **Test Loopback Connection**.\n"
-    ).arg(executablePath);
+    ).arg(discoveryPath, jsonEscapedCommand, nativeCommand);
 }

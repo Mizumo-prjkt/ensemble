@@ -1,7 +1,10 @@
 #include "HelpGuideDialog.h"
 #include "AppIcon.h"
 #include "themes/ThemeManager.h"
+#include "mcp/McpServer.h"
 
+#include <QCoreApplication>
+#include <QDir>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -414,6 +417,17 @@ void HelpGuideDialog::populateTopics()
         t.icon = QStringLiteral("🤖");
         t.title = QStringLiteral("AI Agent MCP Setup & Co-Writing");
         t.summary = QStringLiteral("Connect Claude Desktop, Claude Code CLI, Cursor, and Gemini Antigravity via embedded MCP server.");
+        const QString discoveryPath = QDir::toNativeSeparators(McpServer::discoveryFilePath());
+        QString appExe = QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
+        if (appExe.isEmpty()) {
+#if defined(Q_OS_WIN)
+            appExe = QStringLiteral("C:\\Program Files\\Ensemble\\ensemble.exe");
+#else
+            appExe = QStringLiteral("/usr/local/bin/ensemble");
+#endif
+        }
+        const QString escapedExeJson = QString(appExe).replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+
         t.contentHtml = QStringLiteral(
             "<h1>🤖 AI Agent MCP Setup & Co-Writing</h1>"
             "<p class='lead'>Ensemble includes a built-in <b>Model Context Protocol (MCP)</b> server that allows autonomous AI models (Claude, Cursor, Gemini Antigravity, etc.) to act as interactive fanfiction co-authors, dialogue editors, and lore consultants in real time.</p>"
@@ -430,12 +444,32 @@ void HelpGuideDialog::populateTopics()
             "</ul>"
             "<h3>Two Connection Modes</h3>"
             "<ol>"
-            "  <li><b>Stdio Bridge Mode (Recommended):</b> The agent launches <code>ensemble --mcp-bridge</code> as a standard JSON-RPC subprocess. The bridge communicates with the running Ensemble desktop instance via local IPC.</li>"
-            "  <li><b>Direct WebSocket Loopback:</b> Ensemble listens on <code>ws://127.0.0.1:26303</code> (or dynamic port). Connection parameters are automatically published to <code>~/.config/Ensemble/mcp.json</code>.</li>"
+            "  <li><b>Stdio Bridge Mode (Recommended):</b> The agent launches Ensemble's bridge as a standard JSON-RPC subprocess via <code>--mcp-bridge</code>. The bridge communicates with the running Ensemble desktop instance via local IPC.</li>"
+            "  <li><b>Direct WebSocket Loopback:</b> Ensemble listens on <code>ws://127.0.0.1:26303</code> (or dynamic port). Connection parameters and active port are automatically published to your system's discovery manifest:<br>"
+            "    • <b>Windows:</b> <code>%LOCALAPPDATA%\\Ensemble\\mcp.json</code><br>"
+            "    • <b>Linux:</b> <code>~/.config/Ensemble/mcp.json</code><br>"
+            "    • <b>macOS:</b> <code>~/Library/Application Support/Ensemble/mcp.json</code><br>"
+            "    <i>(Active path on this machine: <code>%1</code>)</i>"
+            "  </li>"
             "</ol>"
             "<h3>Setup Guide for AI Assistants</h3>"
             "<h4>1. Anthropic Claude Desktop</h4>"
-            "<p>Open Claude Desktop's configuration file (<i>Settings → Developer → Edit Config</i>, or edit <code>~/.config/Claude/claude_desktop_config.json</code> on Linux/macOS, or <code>%APPDATA%\\Claude\\claude_desktop_config.json</code> on Windows):</p>"
+            "<p>Open Claude Desktop's configuration file (<i>Settings → Developer → Edit Config</i>):</p>"
+            "<ul>"
+            "  <li><b>Windows:</b> <code>%APPDATA%\\Claude\\claude_desktop_config.json</code></li>"
+            "  <li><b>Linux:</b> <code>~/.config/Claude/claude_desktop_config.json</code></li>"
+            "  <li><b>macOS:</b> <code>~/Library/Application Support/Claude/claude_desktop_config.json</code></li>"
+            "</ul>"
+            "<p><b>Windows Configuration:</b></p>"
+            "<pre class='code-block'>{\n"
+            "  \"mcpServers\": {\n"
+            "    \"ensemble\": {\n"
+            "      \"command\": \"%2\",\n"
+            "      \"args\": [\"--mcp-bridge\"]\n"
+            "    }\n"
+            "  }\n"
+            "}</pre>"
+            "<p><b>Linux / macOS Configuration:</b></p>"
             "<pre class='code-block'>{\n"
             "  \"mcpServers\": {\n"
             "    \"ensemble\": {\n"
@@ -444,9 +478,15 @@ void HelpGuideDialog::populateTopics()
             "    }\n"
             "  }\n"
             "}</pre>"
-            "<p>Restart Claude Desktop. You will see the 🔨 tool icon appear, indicating that Ensemble's suite of writing tools is active!</p>"
+            "<div class='callout-tip'>"
+            "  <b>💡 1-Click Setup:</b> In Ensemble, open <b>Preferences → AI Settings</b> and click <b>📋 Copy MCP Config</b> to copy the pre-escaped configuration snippet tailored for your system, or click <b>📤 Send MCP Manual &amp; Setup to Agents</b> to configure Claude and Antigravity automatically!"
+            "</div>"
             "<h4>2. Claude Code CLI</h4>"
-            "<p>Add Ensemble directly to Claude Code from your terminal:</p>"
+            "<p>Add Ensemble directly to Claude Code from your terminal or command prompt:</p>"
+            "<p><b>Windows (PowerShell / Command Prompt):</b></p>"
+            "<pre class='code-block'>claude mcp add ensemble \"%3\" -- --mcp-bridge</pre>"
+            "<p><i>(Or <code>claude mcp add ensemble ensemble.exe -- --mcp-bridge</code> if Ensemble is in your system PATH)</i></p>"
+            "<p><b>Linux / macOS (Terminal):</b></p>"
             "<pre class='code-block'>claude mcp add ensemble /usr/local/bin/ensemble -- --mcp-bridge</pre>"
             "<p>Now run <code>claude</code> inside any terminal. You can ask: <i>\"Inspect the current chapter in Ensemble, check for pacing issues, and draft the next scene in chapter 2.\"</i></p>"
             "<h4>3. Cursor IDE</h4>"
@@ -455,10 +495,11 @@ void HelpGuideDialog::populateTopics()
             "  <li>Click <b>+ Add New MCP Server</b>.</li>"
             "  <li>Name: <code>ensemble</code></li>"
             "  <li>Type: <code>command</code></li>"
-            "  <li>Command: <code>/usr/local/bin/ensemble --mcp-bridge</code></li>"
+            "  <li>Command on <b>Windows:</b> <code>\"%3\" --mcp-bridge</code> (or <code>ensemble.exe --mcp-bridge</code>)</li>"
+            "  <li>Command on <b>Linux / macOS:</b> <code>/usr/local/bin/ensemble --mcp-bridge</code></li>"
             "</ul>"
             "<h4>4. Gemini Antigravity</h4>"
-            "<p>Antigravity automatically discovers Ensemble via the configuration file at <code>~/.config/Ensemble/mcp.json</code> or stdio bridge invocation.</p>"
+            "<p>Antigravity automatically discovers Ensemble via the configuration file at <code>%1</code> or by adding the stdio bridge command above to your <code>mcp_config.json</code>.</p>"
             "<h3>Available MCP Tools Reference</h3>"
             "<table border='0' cellpadding='6' cellspacing='0' width='100%'>"
             "  <tr><th>MCP Tool</th><th>Function &amp; Capability</th></tr>"
@@ -485,7 +526,7 @@ void HelpGuideDialog::populateTopics()
             "<div class='callout-note'>"
             "  <b>🔒 Strict Local Security:</b> Ensemble's MCP server strictly binds to <code>127.0.0.1</code> (localhost loopback) and is completely invisible to external networks. You have total privacy and control over your writing."
             "</div>"
-        );
+        ).arg(discoveryPath, escapedExeJson, appExe);
         m_topics.append(t);
     }
 
@@ -692,7 +733,7 @@ void HelpGuideDialog::populateTopics()
             "</ul>"
             "<h3>Skin Flavors</h3>"
             "<ul>"
-            "  <li><b>🤖 Android Material You:</b> Dynamically queries your desktop environment (KDE Plasma DBus, GNOME gsettings, etc.) to extract dominant hues directly from your active desktop wallpaper. Features authentic Material 3 pill buttons (20px radius) and fluid selection highlights.</li>"
+            "  <li><b>🤖 Android Material You:</b> Dynamically queries your desktop environment (Windows Desktop Wallpaper &amp; DWM Accent Color, KDE Plasma DBus, GNOME gsettings, etc.) to extract dominant hues directly from your active desktop wallpaper. Features authentic Material 3 pill buttons (20px radius) and fluid selection highlights.</li>"
             "  <li><b>🐧 KDE UI:</b> Integrates with native KDE Breeze styling (3px button corners, Breeze blue accents).</li>"
             "  <li><b>🖥️ Standard Qt:</b> Uses Qt's native Fusion desktop engine with clean 4px control geometry.</li>"
             "  <li><b>✨ Standard Ensemble:</b> Curated violet and slate aesthetic.</li>"

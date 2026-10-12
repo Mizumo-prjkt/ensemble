@@ -10,6 +10,7 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
+#include <QDir>
 #include <QFrame>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -856,7 +857,8 @@ void SettingsDialog::onMcpTestClicked()
 
 void SettingsDialog::onMcpCopyConfigClicked()
 {
-    const QString exePath = QApplication::applicationFilePath();
+    const QString exePath = QDir::toNativeSeparators(QApplication::applicationFilePath());
+    const QString jsonEscaped = QString(exePath).replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
     const QString configSnippet = QStringLiteral(
         "{\n"
         "  \"mcpServers\": {\n"
@@ -866,7 +868,7 @@ void SettingsDialog::onMcpCopyConfigClicked()
         "    }\n"
         "  }\n"
         "}"
-    ).arg(exePath);
+    ).arg(jsonEscaped);
 
     QApplication::clipboard()->setText(configSnippet);
     if (m_mcpTestResultLabel) {
@@ -941,8 +943,13 @@ void SettingsDialog::onMcpDiagnosticsClicked()
     report += QStringLiteral("2. Windows Firewall: If loopback fails, allow ensemble.exe through Windows Defender Firewall.\n");
     report += QStringLiteral("3. Linux Firewall: Ensure localhost loopback interface (lo / 127.0.0.1) is not blocked by ufw/iptables.\n");
     report += QStringLiteral("4. Stdio Bridge Mode: For clients without native WebSocket MCP support, use:\n");
+#if defined(Q_OS_WIN)
+    report += QStringLiteral("   ensemble.exe --mcp-bridge\n");
+    report += QStringLiteral("5. CLI Health Check: Run 'ensemble.exe --mcp-status' from PowerShell / Command Prompt.\n\n");
+#else
     report += QStringLiteral("   ensemble --mcp-bridge\n");
     report += QStringLiteral("5. CLI Health Check: Run 'ensemble --mcp-status' from terminal to diagnose from command line.\n\n");
+#endif
 
     report += QStringLiteral("--- Recent MCP Log Entries ---\n");
     const QString allLogs = EnsembleDebug::getLogBuffer();

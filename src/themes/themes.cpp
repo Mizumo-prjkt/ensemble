@@ -148,7 +148,16 @@ void ThemeManager::rescanWallpaperColor()
     QString rawPath;
     QString source;
 
-#if defined(Q_OS_LINUX)
+#if defined(Q_OS_WIN)
+    // Query Windows Desktop Wallpaper registry key
+    QSettings winDesktop(QStringLiteral("HKEY_CURRENT_USER\\Control Panel\\Desktop"), QSettings::NativeFormat);
+    const QString winWallpaper = winDesktop.value(QStringLiteral("Wallpaper")).toString();
+    if (!winWallpaper.isEmpty() && QFileInfo::exists(winWallpaper)) {
+        rawPath = winWallpaper;
+        source = QStringLiteral("Windows Desktop Registry");
+        qCDebug(logApp) << "[Theme] Detected wallpaper via Windows registry:" << rawPath;
+    }
+#elif defined(Q_OS_LINUX)
     // 1. Try querying KDE Plasma shell via DBus evaluateScript
     QProcess dbusProc;
     dbusProc.start(QStringLiteral("qdbus6"), {
@@ -250,7 +259,26 @@ void ThemeManager::rescanWallpaperColor()
     }
 
     // Fallback: Check desktop environment accent color
-#if defined(Q_OS_LINUX)
+#if defined(Q_OS_WIN)
+    // Check Windows DWM colorization / accent color
+    QSettings dwm(QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\DWM"), QSettings::NativeFormat);
+    const QVariant val = dwm.value(QStringLiteral("ColorizationColor"));
+    if (val.isValid()) {
+        const uint argb = val.toUInt();
+        const int r = (argb >> 16) & 0xFF;
+        const int g = (argb >> 8) & 0xFF;
+        const int b = argb & 0xFF;
+        const QColor dwmColor(r, g, b);
+        if (dwmColor.isValid() && dwmColor != QColor(0, 0, 0)) {
+            m_materialYouAccentColor = dwmColor;
+            m_wallpaperPath.clear();
+            m_wallpaperName = QStringLiteral("Windows DWM Accent");
+            m_wallpaperStatus = QStringLiteral("Windows System Accent (%1)").arg(dwmColor.name());
+            qCInfo(logApp) << "[Theme] Using Windows DWM accent color:" << dwmColor.name();
+            return;
+        }
+    }
+#elif defined(Q_OS_LINUX)
     QProcess accentProc;
     accentProc.start(QStringLiteral("gsettings"), {QStringLiteral("get"), QStringLiteral("org.gnome.desktop.interface"), QStringLiteral("accent-color")});
     if (accentProc.waitForFinished(1000) && accentProc.exitCode() == 0) {

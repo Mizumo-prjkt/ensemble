@@ -138,13 +138,21 @@ Ensemble exposes an embedded **Model Context Protocol (MCP)** server over localh
 ### Quick Setup for AI Agents
 Export the agent manual and automatically register tool schemas:
 ```bash
+# Linux / macOS
 ensemble --send-mcp-manual-to-agents
+
+# Windows (PowerShell / Command Prompt)
+.\ensemble.exe --send-mcp-manual-to-agents
 ```
 
 ### Checking Server & Firewall Status
 Diagnose loopback connectivity and reachability:
 ```bash
+# Linux / macOS
 ensemble --mcp-status
+
+# Windows (PowerShell / Command Prompt)
+.\ensemble.exe --mcp-status
 ```
 
 ---
@@ -163,7 +171,7 @@ ensemble --mcp-status
 | `Ctrl+Shift+P` | Pop Out WebEngine Preview Window |
 | `Ctrl+F` | Find & Replace |
 | `Ctrl+Shift+L` | Open Lore Graph Studio |
-| `Ctrl+Shift+T` | Open Agentic Thinking & Thoughts Viewer |
+| `Ctrl+Shift+A` | Open AI Agent Thoughts Monitor |
 
 ---
 
