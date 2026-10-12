@@ -151,7 +151,7 @@ jobs:
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2022_64'
-          modules: 'qtwebengine qtwebchannel qtpositioning'
+          modules: 'qtwebengine qtwebchannel qtpositioning qtwebsockets'
           cache: true
 
       - name: Install Inno Setup (Windows)

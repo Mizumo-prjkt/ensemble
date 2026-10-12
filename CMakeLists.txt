@@ -62,7 +62,21 @@ set(QT_NO_ADD_WINDOWS_MANIFEST TRUE)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network WebEngineWidgets WebSockets)
 find_package(Qt6 QUIET COMPONENTS WebEngineQuick)
-find_package(ZLIB REQUIRED)
+find_package(ZLIB QUIET)
+if(NOT TARGET ZLIB::ZLIB)
+    include(FetchContent)
+    FetchContent_Declare(
+        zlib
+        GIT_REPOSITORY https://github.com/madler/zlib.git
+        GIT_TAG        v1.3.1
+    )
+    FetchContent_MakeAvailable(zlib)
+    if(TARGET zlibstatic AND NOT TARGET ZLIB::ZLIB)
+        add_library(ZLIB::ZLIB ALIAS zlibstatic)
+    elseif(TARGET zlib AND NOT TARGET ZLIB::ZLIB)
+        add_library(ZLIB::ZLIB ALIAS zlib)
+    endif()
+endif()
 
 qt_standard_project_setup()
 
@@ -439,6 +453,7 @@ target_link_libraries(test_mcp PRIVATE
 if(WIN32)
     target_link_libraries(test_mcp PRIVATE ws2_32 shlwapi)
 endif()
+set_target_properties(test_mcp PROPERTIES QT_RESOURCE_PREFIX "/")
 qt_add_resources(test_mcp resources/resources.qrc)
 
 enable_testing()
