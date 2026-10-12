@@ -11,8 +11,23 @@
 #include <cassert>
 #include <iostream>
 
+#if defined(_WIN32)
+#include <crtdbg.h>
+#include <stdlib.h>
+#endif
+
 int main(int argc, char *argv[])
 {
+#if defined(_WIN32)
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#if defined(_DEBUG)
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
+#endif
+
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("Ensemble"));

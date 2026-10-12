@@ -381,10 +381,10 @@ class EnsembleBuilder:
         cmd = ["ctest", "--test-dir", str(bdir), "--output-on-failure", "-R", "^test_", "--timeout", "60"]
         if platform.system() == "Windows":
             cmd.extend(["-C", self.config.build_type])
-        test_env = {}
-        if platform.system() == "Linux" and not os.environ.get("DISPLAY"):
+        test_env = dict(os.environ)
+        if not os.environ.get("DISPLAY") or platform.system() == "Windows":
             test_env["QT_QPA_PLATFORM"] = "offscreen"
-        return self.run_cmd(cmd, env=test_env if test_env else None)
+        return self.run_cmd(cmd, env=test_env)
 
 
     def _ensure_appimagetool(self) -> Optional[Path]:
@@ -553,7 +553,11 @@ class EnsembleBuilder:
         windeployqt = shutil.which("windeployqt")
         if windeployqt:
             self.log("[WIN-PKG] Running windeployqt...")
-            self.run_cmd([windeployqt, "--compiler-runtime", str(dist_dir / "ensemble.exe")])
+            deploy_cmd = [windeployqt, "--compiler-runtime"]
+            if self.config.build_type.lower() == "debug":
+                deploy_cmd.append("--release")
+            deploy_cmd.append(str(dist_dir / "ensemble.exe"))
+            self.run_cmd(deploy_cmd)
 
         variant_suffix = "-debug" if self.config.build_type.lower() == "debug" else ""
         zip_stem = f"Ensemble-{self.config.full_version()}-windows-x64{variant_suffix}"

@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.16)
+
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
+endif()
+
 project(ensemble VERSION 1.1.1 LANGUAGES CXX)
+
+if(MSVC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
