@@ -123,6 +123,13 @@ public:
     // Complete language grammar specification (for MCP agents and documentation)
     static QString dslGrammarSpecification();
 
+    // Semantic validation helpers
+    static bool isValidHexOrNamedColor(const QString &c);
+    static bool isValidNodeType(const QString &t);
+    static bool isValidNodeShape(const QString &s);
+    static bool isValidConnectorStyle(const QString &s);
+    static bool isValidArrowType(const QString &a);
+
     // Summary JSON for MCP and logging
     QJsonObject toJson() const;
 

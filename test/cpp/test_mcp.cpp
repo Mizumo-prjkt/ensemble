@@ -1363,6 +1363,299 @@ int main(int argc, char *argv[])
         std::cout << "✓ Ao3HtmlSanitizer completely strips dangerous blocks (<script>, <style>) including all inner text." << std::endl;
     }
 
+    // 42. Test set_workskin_css validation & get_problems diagnostic reporting
+    {
+        // A. Reject malformed CSS by default
+        QJsonObject badCssReq;
+        badCssReq["jsonrpc"] = "2.0";
+        badCssReq["id"] = 70;
+        badCssReq["method"] = "tools/call";
+        badCssReq["params"] = QJsonObject{
+            {"name", "set_workskin_css"},
+            {"arguments", QJsonObject{{"css", "#workskin { color: red;"}}}
+        };
+        QJsonObject badCssResp = sendAndReceive(badCssReq);
+        assert(badCssResp.value("id").toInt() == 70);
+        QJsonObject badRes = badCssResp.value("result").toObject();
+        assert(badRes.value("isError").toBool());
+        QString errText = badRes.value("content").toArray().first().toObject().value("text").toString();
+        assert(errText.contains("CSS syntax validation failed"));
+
+        // B. Allow malformed CSS when allowMalformed is true
+        QJsonObject allowBadReq;
+        allowBadReq["jsonrpc"] = "2.0";
+        allowBadReq["id"] = 71;
+        allowBadReq["method"] = "tools/call";
+        allowBadReq["params"] = QJsonObject{
+            {"name", "set_workskin_css"},
+            {"arguments", QJsonObject{
+                {"css", "#workskin { color: red;"},
+                {"allowMalformed", true}
+            }}
+        };
+        QJsonObject allowBadResp = sendAndReceive(allowBadReq);
+        assert(allowBadResp.value("id").toInt() == 71);
+        QJsonObject allowRes = allowBadResp.value("result").toObject();
+        assert(!allowRes.value("isError").toBool());
+
+        // C. get_problems should now flag the CSS syntax error
+        QJsonObject probReq;
+        probReq["jsonrpc"] = "2.0";
+        probReq["id"] = 72;
+        probReq["method"] = "tools/call";
+        probReq["params"] = QJsonObject{{"name", "get_problems"}, {"arguments", QJsonObject{}}};
+        QJsonObject probResp = sendAndReceive(probReq);
+        assert(probResp.value("id").toInt() == 72);
+        QJsonObject probData = QJsonDocument::fromJson(probResp.value("result").toObject().value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        QJsonArray problems = probData.value("problems").toArray();
+        bool foundCssProblem = false;
+        for (const auto &pVal : problems) {
+            QJsonObject pObj = pVal.toObject();
+            if (pObj.value("category").toString() == "Work Skin CSS" && pObj.value("severity").toString() == "Error") {
+                foundCssProblem = true;
+                break;
+            }
+        }
+        assert(foundCssProblem);
+
+        // D. Restore clean CSS and verify problems are cleared
+        QJsonObject cleanCssReq;
+        cleanCssReq["jsonrpc"] = "2.0";
+        cleanCssReq["id"] = 73;
+        cleanCssReq["method"] = "tools/call";
+        cleanCssReq["params"] = QJsonObject{
+            {"name", "set_workskin_css"},
+            {"arguments", QJsonObject{{"css", "#workskin .system-alert { color: #d9534f; }"}}}
+        };
+        QJsonObject cleanResp = sendAndReceive(cleanCssReq);
+        assert(!cleanResp.value("result").toObject().value("isError").toBool());
+
+        std::cout << "✓ MCP 'set_workskin_css' validation & 'get_problems' diagnostic integration verified." << std::endl;
+    }
+
+    // 43. Test semantic validation for update_lore_graph, add_lore_node, and connect_lore_nodes
+    {
+        // A. Reject invalid node type in DSL
+        QJsonObject badTypeReq;
+        badTypeReq["jsonrpc"] = "2.0";
+        badTypeReq["id"] = 74;
+        badTypeReq["method"] = "tools/call";
+        badTypeReq["params"] = QJsonObject{
+            {"name", "update_lore_graph"},
+            {"arguments", QJsonObject{
+                {"name", "data"},
+                {"dsl", "graph \"Test\"\ndirection LR\nnode c1 \"Hero\" type=spaceship\n"}
+            }}
+        };
+        QJsonObject badTypeResp = sendAndReceive(badTypeReq);
+        assert(badTypeResp.value("id").toInt() == 74);
+        assert(badTypeResp.value("result").toObject().value("isError").toBool());
+
+        // B. Reject invalid node shape in DSL
+        QJsonObject badShapeReq;
+        badShapeReq["jsonrpc"] = "2.0";
+        badShapeReq["id"] = 75;
+        badShapeReq["method"] = "tools/call";
+        badShapeReq["params"] = QJsonObject{
+            {"name", "update_lore_graph"},
+            {"arguments", QJsonObject{
+                {"name", "data"},
+                {"dsl", "graph \"Test\"\ndirection LR\nnode c1 \"Hero\" shape=blob\n"}
+            }}
+        };
+        QJsonObject badShapeResp = sendAndReceive(badShapeReq);
+        assert(badShapeResp.value("id").toInt() == 75);
+        assert(badShapeResp.value("result").toObject().value("isError").toBool());
+
+        // C. Reject invalid color in DSL
+        QJsonObject badColorReq;
+        badColorReq["jsonrpc"] = "2.0";
+        badColorReq["id"] = 76;
+        badColorReq["method"] = "tools/call";
+        badColorReq["params"] = QJsonObject{
+            {"name", "update_lore_graph"},
+            {"arguments", QJsonObject{
+                {"name", "data"},
+                {"dsl", "graph \"Test\"\ndirection LR\nnode c1 \"Hero\" color=\"notacolor\"\n"}
+            }}
+        };
+        QJsonObject badColorResp = sendAndReceive(badColorReq);
+        assert(badColorResp.value("id").toInt() == 76);
+        assert(badColorResp.value("result").toObject().value("isError").toBool());
+
+        // D. Reject connector to nonexistent node in DSL
+        QJsonObject badConnReq;
+        badConnReq["jsonrpc"] = "2.0";
+        badConnReq["id"] = 77;
+        badConnReq["method"] = "tools/call";
+        badConnReq["params"] = QJsonObject{
+            {"name", "update_lore_graph"},
+            {"arguments", QJsonObject{
+                {"name", "data"},
+                {"dsl", "graph \"Test\"\ndirection LR\nnode c1 \"Hero\"\nc1 -> ghost [label=\"meets\"]\n"}
+            }}
+        };
+        QJsonObject badConnResp = sendAndReceive(badConnReq);
+        assert(badConnResp.value("id").toInt() == 77);
+        assert(badConnResp.value("result").toObject().value("isError").toBool());
+
+        // E. Reject add_lore_node with invalid shape or color
+        QJsonObject badAddReq;
+        badAddReq["jsonrpc"] = "2.0";
+        badAddReq["id"] = 78;
+        badAddReq["method"] = "tools/call";
+        badAddReq["params"] = QJsonObject{
+            {"name", "add_lore_node"},
+            {"arguments", QJsonObject{
+                {"id", "bad_node"},
+                {"label", "Bad Node"},
+                {"shape", "blob"}
+            }}
+        };
+        QJsonObject badAddResp = sendAndReceive(badAddReq);
+        assert(badAddResp.value("id").toInt() == 78);
+        assert(badAddResp.value("result").toObject().value("isError").toBool());
+
+        // F. Reject connect_lore_nodes with nonexistent node
+        QJsonObject badConnectReq;
+        badConnectReq["jsonrpc"] = "2.0";
+        badConnectReq["id"] = 79;
+        badConnectReq["method"] = "tools/call";
+        badConnectReq["params"] = QJsonObject{
+            {"name", "connect_lore_nodes"},
+            {"arguments", QJsonObject{
+                {"from", "nonexistent_a"},
+                {"to", "nonexistent_b"}
+            }}
+        };
+        QJsonObject badConnectResp = sendAndReceive(badConnectReq);
+        assert(badConnectResp.value("id").toInt() == 79);
+        assert(badConnectResp.value("result").toObject().value("isError").toBool());
+
+        std::cout << "✓ MCP lore tools semantic validation (types, shapes, colors, connector targets) verified." << std::endl;
+    }
+
+    // 44. Test save_project with saveCopy: true (saves copy without switching active project)
+    {
+        const QString activeBefore = mainWindow.project().filePath();
+        const QString copySavePath = QDir::tempPath() + QStringLiteral("/mcp_test_copy_%1.ao3proj").arg(QDateTime::currentMSecsSinceEpoch());
+
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 80;
+        req["method"] = "tools/call";
+        req["params"] = QJsonObject{
+            {"name", "save_project"},
+            {"arguments", QJsonObject{
+                {"filePath", copySavePath},
+                {"saveCopy", true},
+                {"commitMessage", "Snapshot copy"}
+            }}
+        };
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 80);
+        QJsonObject result = resp.value("result").toObject();
+        assert(!result.value("isError").toBool());
+        QJsonObject data = QJsonDocument::fromJson(result.value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(data.value("isCopy").toBool() == true);
+        assert(data.value("switchedActiveProject").toBool() == false);
+        assert(data.value("savedPath").toString() == copySavePath);
+        assert(QFile::exists(copySavePath));
+        assert(mainWindow.project().filePath() == activeBefore);
+        QFile::remove(copySavePath);
+        std::cout << "✓ MCP 'save_project' with saveCopy: true preserves active project state." << std::endl;
+    }
+
+    // 45. Test manage_lore_data unrecognized field validation, remove_graph default reset, and audit enrichment
+    {
+        // A. Reject unrecognized field
+        QJsonObject badKeyReq;
+        badKeyReq["jsonrpc"] = "2.0";
+        badKeyReq["id"] = 81;
+        badKeyReq["method"] = "tools/call";
+        badKeyReq["params"] = QJsonObject{
+            {"name", "manage_lore_data"},
+            {"arguments", QJsonObject{
+                {"action", "add_history"},
+                {"summary", "Valid summary"},
+                {"unknownBogusKey", 123}
+            }}
+        };
+        QJsonObject badKeyResp = sendAndReceive(badKeyReq);
+        assert(badKeyResp.value("id").toInt() == 81);
+        QJsonObject badKeyRes = badKeyResp.value("result").toObject();
+        assert(badKeyRes.value("isError").toBool());
+        QString badKeyText = badKeyRes.value("content").toArray().first().toObject().value("text").toString();
+        assert(badKeyText.contains("Unrecognized field"));
+        assert(badKeyText.contains("unknownBogusKey"));
+
+        // B. Add history using description fallback
+        QJsonObject histReq;
+        histReq["jsonrpc"] = "2.0";
+        histReq["id"] = 82;
+        histReq["method"] = "tools/call";
+        histReq["params"] = QJsonObject{
+            {"name", "manage_lore_data"},
+            {"arguments", QJsonObject{
+                {"action", "add_history"},
+                {"id", "audit_test_event_1"},
+                {"description", "Crucial turning point in lore"},
+                {"chapterIndex", 1}
+            }}
+        };
+        QJsonObject histResp = sendAndReceive(histReq);
+        assert(histResp.value("id").toInt() == 82);
+        assert(!histResp.value("result").toObject().value("isError").toBool());
+
+        // C. remove_graph on default graph reports resetToEmpty: true and isDefaultGraph: true
+        QJsonObject remGraphReq;
+        remGraphReq["jsonrpc"] = "2.0";
+        remGraphReq["id"] = 83;
+        remGraphReq["method"] = "tools/call";
+        remGraphReq["params"] = QJsonObject{
+            {"name", "manage_lore_data"},
+            {"arguments", QJsonObject{
+                {"action", "remove_graph"},
+                {"graphName", "data"}
+            }}
+        };
+        QJsonObject remGraphResp = sendAndReceive(remGraphReq);
+        assert(remGraphResp.value("id").toInt() == 83);
+        QJsonObject remGraphRes = remGraphResp.value("result").toObject();
+        assert(!remGraphRes.value("isError").toBool());
+        QJsonObject remGraphData = QJsonDocument::fromJson(remGraphRes.value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(remGraphData.value("isDefaultGraph").toBool() == true);
+        assert(remGraphData.value("resetToEmpty").toBool() == true);
+        assert(remGraphData.value("message").toString().contains("reset to an empty graph"));
+
+        // D. Verify enriched audit entry in get_agent_history
+        QJsonObject auditReq;
+        auditReq["jsonrpc"] = "2.0";
+        auditReq["id"] = 84;
+        auditReq["method"] = "tools/call";
+        auditReq["params"] = QJsonObject{
+            {"name", "get_agent_history"},
+            {"arguments", QJsonObject{{"limit", 10}}}
+        };
+        QJsonObject auditResp = sendAndReceive(auditReq);
+        assert(auditResp.value("id").toInt() == 84);
+        QJsonObject auditData = QJsonDocument::fromJson(auditResp.value("result").toObject().value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        QJsonArray entries = auditData.value("entries").toArray();
+        bool foundDetailedLoreAction = false;
+        for (const auto &v : entries) {
+            QJsonObject entry = v.toObject();
+            const QString summary = entry.value("summary").toString();
+            const QString act = entry.value("action").toString();
+            if (act == "manage_lore_data" && summary.contains("audit_test_event_1")) {
+                foundDetailedLoreAction = true;
+                break;
+            }
+        }
+        assert(foundDetailedLoreAction);
+
+        std::cout << "✓ MCP 'manage_lore_data' field validation, default graph reset, and enriched audit logging verified." << std::endl;
+    }
+
     client.close();
     mainWindow.stopMcpServer();
     assert(!server->isRunning());

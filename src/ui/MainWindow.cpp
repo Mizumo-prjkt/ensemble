@@ -1525,7 +1525,21 @@ void MainWindow::updateProblemsDiagnostics() {
   int errorCount = 0;
   int warningCount = 0;
 
-  // 1. Check Work Skin CSS issues
+  // 1. Check Work Skin CSS syntax & structure
+  const QString cssText = m_project.workSkinCss();
+  QStringList cssErrors;
+  CssEditorPane::validateCss(cssText, &cssErrors);
+  for (const QString &err : cssErrors) {
+    ProblemItem item;
+    item.severity = ProblemItem::Error;
+    item.category = QStringLiteral("Work Skin CSS");
+    item.description = err;
+    item.chapterIndex = -1;
+    item.affectedChapters.clear();
+    m_currentProblems.append(item);
+    errorCount++;
+  }
+
   const QStringList cssClasses = m_cssPane ? m_cssPane->cssClassNames() : QStringList();
   const QSet<QString> cssClassSet(cssClasses.begin(), cssClasses.end());
 

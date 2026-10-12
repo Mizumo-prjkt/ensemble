@@ -1,5 +1,6 @@
 #include "LoreGraph.h"
 
+#include <QColor>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
@@ -68,6 +69,55 @@ bool LoreGraph::hasValidMagic(const QByteArray &bytes)
 {
     if (bytes.size() < 8) return false;
     return memcmp(bytes.constData(), kGrphMagicData, 8) == 0;
+}
+
+bool LoreGraph::isValidHexOrNamedColor(const QString &c)
+{
+    if (c.isEmpty()) return true;
+    if (c.startsWith(QLatin1Char('#'))) {
+        static const QRegularExpression hexRe(QStringLiteral("^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"));
+        return hexRe.match(c).hasMatch();
+    }
+    return QColor::fromString(c).isValid();
+}
+
+bool LoreGraph::isValidNodeType(const QString &t)
+{
+    static const QSet<QString> validTypes = {
+        QStringLiteral("character"), QStringLiteral("location"),
+        QStringLiteral("event"), QStringLiteral("item"),
+        QStringLiteral("faction"), QStringLiteral("concept"),
+        QStringLiteral("plot_point")
+    };
+    return validTypes.contains(t.toLower());
+}
+
+bool LoreGraph::isValidNodeShape(const QString &s)
+{
+    static const QSet<QString> validShapes = {
+        QStringLiteral("box"), QStringLiteral("rounded"),
+        QStringLiteral("diamond"), QStringLiteral("ellipse"),
+        QStringLiteral("cylinder"), QStringLiteral("hexagon")
+    };
+    return validShapes.contains(s.toLower());
+}
+
+bool LoreGraph::isValidConnectorStyle(const QString &s)
+{
+    static const QSet<QString> validStyles = {
+        QStringLiteral("solid"), QStringLiteral("dashed"),
+        QStringLiteral("dotted"), QStringLiteral("thick")
+    };
+    return validStyles.contains(s.toLower());
+}
+
+bool LoreGraph::isValidArrowType(const QString &a)
+{
+    static const QSet<QString> validArrows = {
+        QStringLiteral("->"), QStringLiteral("<->"),
+        QStringLiteral("--"), QStringLiteral("-x")
+    };
+    return validArrows.contains(a);
 }
 
 void LoreGraph::addOrUpdateNode(const LoreGraphNode &node)
@@ -500,9 +550,39 @@ bool LoreGraph::fromDsl(const QString &dsl, QString *error)
             if (!m.captured(2).isEmpty()) {
                 auto attrs = parseAttributes(m.captured(2));
                 if (attrs.contains(QStringLiteral("label"))) n.label = attrs.value(QStringLiteral("label"));
-                if (attrs.contains(QStringLiteral("type"))) n.type = attrs.value(QStringLiteral("type")).toLower();
-                if (attrs.contains(QStringLiteral("shape"))) n.shape = attrs.value(QStringLiteral("shape")).toLower();
-                if (attrs.contains(QStringLiteral("color"))) n.color = attrs.value(QStringLiteral("color"));
+                if (attrs.contains(QStringLiteral("type"))) {
+                    const QString t = attrs.value(QStringLiteral("type")).toLower();
+                    if (!isValidNodeType(t)) {
+                        if (error) {
+                            *error = QStringLiteral("Line %1: Invalid node type '%2'. Valid types are character, location, event, item, faction, concept, plot_point.")
+                                         .arg(lineNum + 1).arg(t);
+                        }
+                        return false;
+                    }
+                    n.type = t;
+                }
+                if (attrs.contains(QStringLiteral("shape"))) {
+                    const QString s = attrs.value(QStringLiteral("shape")).toLower();
+                    if (!isValidNodeShape(s)) {
+                        if (error) {
+                            *error = QStringLiteral("Line %1: Invalid node shape '%2'. Valid shapes are box, rounded, diamond, ellipse, cylinder, hexagon.")
+                                         .arg(lineNum + 1).arg(s);
+                        }
+                        return false;
+                    }
+                    n.shape = s;
+                }
+                if (attrs.contains(QStringLiteral("color"))) {
+                    const QString col = attrs.value(QStringLiteral("color"));
+                    if (!isValidHexOrNamedColor(col)) {
+                        if (error) {
+                            *error = QStringLiteral("Line %1: Invalid node color '%2'. Must be a valid hex color or CSS color name.")
+                                         .arg(lineNum + 1).arg(col);
+                        }
+                        return false;
+                    }
+                    n.color = col;
+                }
                 if (attrs.contains(QStringLiteral("loreId"))) n.loreId = attrs.value(QStringLiteral("loreId"));
                 if (attrs.contains(QStringLiteral("notes"))) n.notes = attrs.value(QStringLiteral("notes"));
                 if (attrs.contains(QStringLiteral("x"))) n.x = attrs.value(QStringLiteral("x")).toDouble();
@@ -539,7 +619,17 @@ bool LoreGraph::fromDsl(const QString &dsl, QString *error)
             if (!m.captured(2).isEmpty()) {
                 auto attrs = parseAttributes(m.captured(2));
                 if (attrs.contains(QStringLiteral("label"))) currentBox.label = attrs.value(QStringLiteral("label"));
-                if (attrs.contains(QStringLiteral("color"))) currentBox.color = attrs.value(QStringLiteral("color"));
+                if (attrs.contains(QStringLiteral("color"))) {
+                    const QString col = attrs.value(QStringLiteral("color"));
+                    if (!isValidHexOrNamedColor(col)) {
+                        if (error) {
+                            *error = QStringLiteral("Line %1: Invalid box color '%2'. Must be a valid hex color or CSS color name.")
+                                         .arg(lineNum + 1).arg(col);
+                        }
+                        return false;
+                    }
+                    currentBox.color = col;
+                }
                 if (attrs.contains(QStringLiteral("x"))) currentBox.x = attrs.value(QStringLiteral("x")).toDouble();
                 if (attrs.contains(QStringLiteral("y"))) currentBox.y = attrs.value(QStringLiteral("y")).toDouble();
                 if (attrs.contains(QStringLiteral("w"))) currentBox.width = attrs.value(QStringLiteral("w")).toDouble();
@@ -578,13 +668,41 @@ bool LoreGraph::fromDsl(const QString &dsl, QString *error)
             c.arrowType = connMatch.captured(2);
             c.toNodeId = connMatch.captured(3);
 
+            if (!isValidArrowType(c.arrowType)) {
+                if (error) {
+                    *error = QStringLiteral("Line %1: Invalid connector arrow '%2'. Valid arrows are ->, <->, --, -x.")
+                                 .arg(lineNum + 1).arg(c.arrowType);
+                }
+                return false;
+            }
+
             if (!connMatch.captured(4).isEmpty()) {
                 auto attrs = parseAttributes(connMatch.captured(4));
                 if (attrs.contains(QStringLiteral("id"))) c.id = attrs.value(QStringLiteral("id"));
                 if (attrs.contains(QStringLiteral("label"))) c.label = attrs.value(QStringLiteral("label"));
                 if (attrs.contains(QStringLiteral("relation"))) c.relation = attrs.value(QStringLiteral("relation"));
-                if (attrs.contains(QStringLiteral("style"))) c.style = attrs.value(QStringLiteral("style"));
-                if (attrs.contains(QStringLiteral("color"))) c.color = attrs.value(QStringLiteral("color"));
+                if (attrs.contains(QStringLiteral("style"))) {
+                    const QString st = attrs.value(QStringLiteral("style")).toLower();
+                    if (!isValidConnectorStyle(st)) {
+                        if (error) {
+                            *error = QStringLiteral("Line %1: Invalid connector style '%2'. Valid styles are solid, dashed, dotted, thick.")
+                                         .arg(lineNum + 1).arg(st);
+                        }
+                        return false;
+                    }
+                    c.style = st;
+                }
+                if (attrs.contains(QStringLiteral("color"))) {
+                    const QString col = attrs.value(QStringLiteral("color"));
+                    if (!isValidHexOrNamedColor(col)) {
+                        if (error) {
+                            *error = QStringLiteral("Line %1: Invalid connector color '%2'. Must be a valid hex color or CSS color name.")
+                                         .arg(lineNum + 1).arg(col);
+                        }
+                        return false;
+                    }
+                    c.color = col;
+                }
             }
             if (c.id.isEmpty()) {
                 const QString baseId = QStringLiteral("conn_%1_%2").arg(c.fromNodeId, c.toNodeId);
@@ -626,6 +744,47 @@ bool LoreGraph::fromDsl(const QString &dsl, QString *error)
             *error = QStringLiteral("DSL contains no valid graph declarations or nodes.");
         }
         return false;
+    }
+
+    // Semantic validation: Ensure all referenced node IDs exist in parsedNodes
+    QSet<QString> declaredNodeIds;
+    for (const auto &n : parsedNodes) {
+        declaredNodeIds.insert(n.id);
+    }
+
+    for (const auto &c : parsedConnectors) {
+        if (!declaredNodeIds.contains(c.fromNodeId)) {
+            if (error) {
+                *error = QStringLiteral("Semantic error: Connector references nonexistent source node '%1'.").arg(c.fromNodeId);
+            }
+            return false;
+        }
+        if (!declaredNodeIds.contains(c.toNodeId)) {
+            if (error) {
+                *error = QStringLiteral("Semantic error: Connector references nonexistent target node '%1'.").arg(c.toNodeId);
+            }
+            return false;
+        }
+    }
+
+    for (const auto &b : parsedBoxes) {
+        for (const QString &mId : b.memberNodeIds) {
+            if (!declaredNodeIds.contains(mId)) {
+                if (error) {
+                    *error = QStringLiteral("Semantic error: Box '%1' contains nonexistent member node '%2'.").arg(b.id, mId);
+                }
+                return false;
+            }
+        }
+    }
+
+    for (const auto &f : parsedFollowups) {
+        if (!declaredNodeIds.contains(f.nodeId)) {
+            if (error) {
+                *error = QStringLiteral("Semantic error: Followup references nonexistent node '%1'.").arg(f.nodeId);
+            }
+            return false;
+        }
     }
 
     // Success! Mutate *this now

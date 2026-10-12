@@ -5,6 +5,7 @@
 #include "model/Ao3Project.h"
 #include "model/Chapter.h"
 #include "model/ProjectSerializer.h"
+#include "ui/CssEditorPane.h"
 #include "ui/MainWindow.h"
 
 #include <QFile>
@@ -85,13 +86,10 @@ QString resolveCallerModel(const McpAgentSession &caller, const QJsonObject &arg
     if (args.contains(QStringLiteral("model")) && !args.value(QStringLiteral("model")).toString().trimmed().isEmpty()) {
         return args.value(QStringLiteral("model")).toString().trimmed();
     }
-    if (!caller.model.isEmpty() && caller.model != QStringLiteral("0.1.0")) {
+    if (!caller.model.isEmpty() && caller.model != QStringLiteral("0.1.0") && caller.model != caller.name) {
         return caller.model;
     }
-    if (!caller.name.isEmpty() && caller.name != QStringLiteral("unspecified_agent")) {
-        return caller.name;
-    }
-    return QStringLiteral("assistant");
+    return QStringLiteral("unspecified_model");
 }
 } // namespace
 
@@ -103,11 +101,11 @@ QJsonObject McpHandler::handleInitialize(QWebSocket *client, const QJsonValue &i
     const QString clientVersion = clientInfoObj.value(QStringLiteral("version")).toString();
     const QString clientModel = clientInfoObj.contains(QStringLiteral("model"))
                                     ? clientInfoObj.value(QStringLiteral("model")).toString().trimmed()
-                                    : (clientName.isEmpty() ? QStringLiteral("assistant") : clientName);
+                                    : QString();
 
     qCInfo(logMcp) << "[MCP-DIAGNOSTIC] Checkpoint 4 (Protocol Handshake): Client initialize requested by"
                    << (clientName.isEmpty() ? QStringLiteral("AI agent") : clientName)
-                   << "model:" << clientModel
+                   << "model:" << (clientModel.isEmpty() ? QStringLiteral("(unspecified)") : clientModel)
                    << "client protocolVersion:" << (clientProto.isEmpty() ? QStringLiteral("(unspecified)") : clientProto)
                    << "- Responding with server protocolVersion 2024-11-05";
 
@@ -217,6 +215,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         htmlProp[QStringLiteral("type")] = QStringLiteral("string");
         htmlProp[QStringLiteral("description")] = QStringLiteral("The new HTML content for the chapter.");
         props[QStringLiteral("html")] = htmlProp;
+        QJsonObject modelProp;
+        modelProp[QStringLiteral("type")] = QStringLiteral("string");
+        modelProp[QStringLiteral("description")] = QStringLiteral("Optional AI model identifier (e.g. 'claude-3-7-sonnet', 'gemini-2.5-pro').");
+        props[QStringLiteral("model")] = modelProp;
         schema[QStringLiteral("properties")] = props;
         schema[QStringLiteral("required")] = QJsonArray{QStringLiteral("chapterIndex"), QStringLiteral("html")};
         schema[QStringLiteral("additionalProperties")] = false;
@@ -236,6 +238,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         titleProp[QStringLiteral("type")] = QStringLiteral("string");
         titleProp[QStringLiteral("description")] = QStringLiteral("Optional title for the new chapter.");
         props[QStringLiteral("title")] = titleProp;
+        QJsonObject modelProp;
+        modelProp[QStringLiteral("type")] = QStringLiteral("string");
+        modelProp[QStringLiteral("description")] = QStringLiteral("Optional AI model identifier (e.g. 'claude-3-7-sonnet', 'gemini-2.5-pro').");
+        props[QStringLiteral("model")] = modelProp;
         schema[QStringLiteral("properties")] = props;
         schema[QStringLiteral("additionalProperties")] = false;
         t[QStringLiteral("inputSchema")] = schema;
@@ -254,6 +260,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         idxProp[QStringLiteral("type")] = QStringLiteral("integer");
         idxProp[QStringLiteral("description")] = QStringLiteral("The 0-based index of the chapter to delete.");
         props[QStringLiteral("chapterIndex")] = idxProp;
+        QJsonObject modelProp;
+        modelProp[QStringLiteral("type")] = QStringLiteral("string");
+        modelProp[QStringLiteral("description")] = QStringLiteral("Optional AI model identifier (e.g. 'claude-3-7-sonnet', 'gemini-2.5-pro').");
+        props[QStringLiteral("model")] = modelProp;
         schema[QStringLiteral("properties")] = props;
         schema[QStringLiteral("required")] = QJsonArray{QStringLiteral("chapterIndex")};
         schema[QStringLiteral("additionalProperties")] = false;
@@ -277,6 +287,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         toProp[QStringLiteral("type")] = QStringLiteral("integer");
         toProp[QStringLiteral("description")] = QStringLiteral("The 0-based destination index.");
         props[QStringLiteral("toIndex")] = toProp;
+        QJsonObject modelProp;
+        modelProp[QStringLiteral("type")] = QStringLiteral("string");
+        modelProp[QStringLiteral("description")] = QStringLiteral("Optional AI model identifier (e.g. 'claude-3-7-sonnet', 'gemini-2.5-pro').");
+        props[QStringLiteral("model")] = modelProp;
         schema[QStringLiteral("properties")] = props;
         schema[QStringLiteral("required")] = QJsonArray{QStringLiteral("fromIndex"), QStringLiteral("toIndex")};
         schema[QStringLiteral("additionalProperties")] = false;
@@ -301,7 +315,7 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
     {
         QJsonObject t;
         t[QStringLiteral("name")] = QStringLiteral("set_workskin_css");
-        t[QStringLiteral("description")] = QStringLiteral("Updates the custom AO3 Work Skin CSS for the project and triggers a live Chromium re-render.");
+        t[QStringLiteral("description")] = QStringLiteral("Validates and updates the custom AO3 Work Skin CSS for the project, triggering a live Chromium re-render. Rejects malformed CSS syntax unless allowMalformed is set to true.");
         QJsonObject schema;
         schema[QStringLiteral("type")] = QStringLiteral("object");
         QJsonObject props;
@@ -309,6 +323,14 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         cssProp[QStringLiteral("type")] = QStringLiteral("string");
         cssProp[QStringLiteral("description")] = QStringLiteral("The CSS stylesheet rules.");
         props[QStringLiteral("css")] = cssProp;
+        QJsonObject malProp;
+        malProp[QStringLiteral("type")] = QStringLiteral("boolean");
+        malProp[QStringLiteral("description")] = QStringLiteral("Optional flag to bypass syntax validation and allow malformed CSS (default: false).");
+        props[QStringLiteral("allowMalformed")] = malProp;
+        QJsonObject modelProp;
+        modelProp[QStringLiteral("type")] = QStringLiteral("string");
+        modelProp[QStringLiteral("description")] = QStringLiteral("Optional AI model identifier (e.g. 'claude-3-7-sonnet', 'gemini-2.5-pro').");
+        props[QStringLiteral("model")] = modelProp;
         schema[QStringLiteral("properties")] = props;
         schema[QStringLiteral("required")] = QJsonArray{QStringLiteral("css")};
         schema[QStringLiteral("additionalProperties")] = false;
@@ -356,7 +378,7 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
     {
         QJsonObject t;
         t[QStringLiteral("name")] = QStringLiteral("save_project");
-        t[QStringLiteral("description")] = QStringLiteral("Saves the active project to disk as an .ao3proj archive. Can write to a specific filePath and append a git-like commit to history.cmt.");
+        t[QStringLiteral("description")] = QStringLiteral("Saves the active project to disk as an .ao3proj archive. When filePath is provided, it switches the active project to that path (standard 'Save As' behavior) unless saveCopy is true, which exports a standalone snapshot without altering Ensemble's currently open project.");
         QJsonObject schema;
         schema[QStringLiteral("type")] = QStringLiteral("object");
         QJsonObject props;
@@ -364,6 +386,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         pathProp[QStringLiteral("type")] = QStringLiteral("string");
         pathProp[QStringLiteral("description")] = QStringLiteral("Optional target .ao3proj file path. If omitted, uses the current project file path.");
         props[QStringLiteral("filePath")] = pathProp;
+        QJsonObject copyProp;
+        copyProp[QStringLiteral("type")] = QStringLiteral("boolean");
+        copyProp[QStringLiteral("description")] = QStringLiteral("If true, exports a project copy/snapshot to 'filePath' without switching Ensemble's active project to that file and without resetting dirty status. Defaults to false (Save As behavior).");
+        props[QStringLiteral("saveCopy")] = copyProp;
         QJsonObject msgProp;
         msgProp[QStringLiteral("type")] = QStringLiteral("string");
         msgProp[QStringLiteral("description")] = QStringLiteral("Optional git-like commit message describing the modifications saved into history.cmt.");
@@ -376,6 +402,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         authProp[QStringLiteral("type")] = QStringLiteral("string");
         authProp[QStringLiteral("description")] = QStringLiteral("Optional commit author name (defaults to calling AI model name or project author).");
         props[QStringLiteral("author")] = authProp;
+        QJsonObject modelProp;
+        modelProp[QStringLiteral("type")] = QStringLiteral("string");
+        modelProp[QStringLiteral("description")] = QStringLiteral("Optional AI model identifier (e.g. 'claude-3-7-sonnet', 'gemini-2.5-pro').");
+        props[QStringLiteral("model")] = modelProp;
         schema[QStringLiteral("properties")] = props;
         schema[QStringLiteral("additionalProperties")] = false;
         t[QStringLiteral("inputSchema")] = schema;
@@ -576,6 +606,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         encProp[QStringLiteral("enum")] = QJsonArray{QStringLiteral("utf-8"), QStringLiteral("base64")};
         encProp[QStringLiteral("description")] = QStringLiteral("Optional content encoding: 'utf-8' (default) or 'base64'.");
         props[QStringLiteral("encoding")] = encProp;
+        QJsonObject modelProp;
+        modelProp[QStringLiteral("type")] = QStringLiteral("string");
+        modelProp[QStringLiteral("description")] = QStringLiteral("Optional AI model identifier (e.g. 'claude-3-7-sonnet', 'gemini-2.5-pro').");
+        props[QStringLiteral("model")] = modelProp;
         schema[QStringLiteral("properties")] = props;
         schema[QStringLiteral("required")] = QJsonArray{QStringLiteral("path"), QStringLiteral("content")};
         schema[QStringLiteral("additionalProperties")] = false;
@@ -697,7 +731,7 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
     {
         QJsonObject t;
         t[QStringLiteral("name")] = QStringLiteral("update_lore_graph");
-        t[QStringLiteral("description")] = QStringLiteral("Replaces or updates the .grph narrative graph DSL. Strictly adheres to unique 8-byte magic header \\x89GRPH\\x01\\r\\n and grammar rules. Automatically updates coordinates and live desktop graph canvas.");
+        t[QStringLiteral("description")] = QStringLiteral("Replaces or updates the .grph narrative graph DSL. Strictly adheres to unique 8-byte magic header \\x89GRPH\\x01\\r\\n and grammar rules. Validates syntax and semantic rules: valid node types, shapes, colors, connector styles, and ensures connector and box references point to defined nodes.");
         QJsonObject schema;
         schema[QStringLiteral("type")] = QStringLiteral("object");
         QJsonObject props;
@@ -713,6 +747,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         layoutProp[QStringLiteral("type")] = QStringLiteral("boolean");
         layoutProp[QStringLiteral("description")] = QStringLiteral("Whether to trigger automatic layout positioning (default: false).");
         props[QStringLiteral("autoLayout")] = layoutProp;
+        QJsonObject modelProp;
+        modelProp[QStringLiteral("type")] = QStringLiteral("string");
+        modelProp[QStringLiteral("description")] = QStringLiteral("Optional AI model identifier (e.g. 'claude-3-7-sonnet', 'gemini-2.5-pro').");
+        props[QStringLiteral("model")] = modelProp;
         schema[QStringLiteral("properties")] = props;
         schema[QStringLiteral("required")] = QJsonArray{QStringLiteral("dsl")};
         schema[QStringLiteral("additionalProperties")] = false;
@@ -771,6 +809,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         gNameProp[QStringLiteral("type")] = QStringLiteral("string");
         gNameProp[QStringLiteral("description")] = QStringLiteral("Graph name (default: 'data').");
         props[QStringLiteral("graphName")] = gNameProp;
+        QJsonObject modelProp;
+        modelProp[QStringLiteral("type")] = QStringLiteral("string");
+        modelProp[QStringLiteral("description")] = QStringLiteral("Optional AI model identifier (e.g. 'claude-3-7-sonnet', 'gemini-2.5-pro').");
+        props[QStringLiteral("model")] = modelProp;
         schema[QStringLiteral("properties")] = props;
         schema[QStringLiteral("required")] = QJsonArray{QStringLiteral("id"), QStringLiteral("label")};
         schema[QStringLiteral("additionalProperties")] = false;
@@ -813,6 +855,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         QJsonObject gNameProp;
         gNameProp[QStringLiteral("type")] = QStringLiteral("string");
         props[QStringLiteral("graphName")] = gNameProp;
+        QJsonObject modelProp;
+        modelProp[QStringLiteral("type")] = QStringLiteral("string");
+        modelProp[QStringLiteral("description")] = QStringLiteral("Optional AI model identifier (e.g. 'claude-3-7-sonnet', 'gemini-2.5-pro').");
+        props[QStringLiteral("model")] = modelProp;
         schema[QStringLiteral("properties")] = props;
         schema[QStringLiteral("required")] = QJsonArray{QStringLiteral("fromNodeId"), QStringLiteral("toNodeId")};
         schema[QStringLiteral("additionalProperties")] = false;
@@ -899,6 +945,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         QJsonObject nameProp;
         nameProp[QStringLiteral("type")] = QStringLiteral("string");
         props[QStringLiteral("name")] = nameProp;
+        QJsonObject graphNameProp;
+        graphNameProp[QStringLiteral("type")] = QStringLiteral("string");
+        graphNameProp[QStringLiteral("description")] = QStringLiteral("Name of the graph to remove (alias for 'name').");
+        props[QStringLiteral("graphName")] = graphNameProp;
         QJsonObject catProp;
         catProp[QStringLiteral("type")] = QStringLiteral("string");
         props[QStringLiteral("category")] = catProp;
@@ -977,6 +1027,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         fuProp[QStringLiteral("type")] = QStringLiteral("array");
         fuProp[QStringLiteral("items")] = QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}};
         props[QStringLiteral("neededFollowUps")] = fuProp;
+        QJsonObject modelProp;
+        modelProp[QStringLiteral("type")] = QStringLiteral("string");
+        modelProp[QStringLiteral("description")] = QStringLiteral("Optional AI model identifier (e.g. 'claude-3-7-sonnet', 'gemini-2.5-pro').");
+        props[QStringLiteral("model")] = modelProp;
         schema[QStringLiteral("properties")] = props;
         schema[QStringLiteral("required")] = QJsonArray{QStringLiteral("action")};
         schema[QStringLiteral("additionalProperties")] = true;
@@ -1097,6 +1151,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         posProp[QStringLiteral("enum")] = QJsonArray{QStringLiteral("append"), QStringLiteral("prepend")};
         posProp[QStringLiteral("description")] = QStringLiteral("Where to insert the image (default: 'append').");
         props[QStringLiteral("position")] = posProp;
+        QJsonObject modelProp;
+        modelProp[QStringLiteral("type")] = QStringLiteral("string");
+        modelProp[QStringLiteral("description")] = QStringLiteral("Optional AI model identifier (e.g. 'claude-3-7-sonnet', 'gemini-2.5-pro').");
+        props[QStringLiteral("model")] = modelProp;
         schema[QStringLiteral("properties")] = props;
         schema[QStringLiteral("required")] = QJsonArray{QStringLiteral("chapterIndex"), QStringLiteral("url")};
         schema[QStringLiteral("additionalProperties")] = false;
@@ -1121,6 +1179,14 @@ QJsonObject McpHandler::handleToolsCall(QWebSocket *client, const QJsonValue &id
     toolTimer.start();
 
     QJsonObject toolResult;
+
+    // If caller provided a model in arguments, update the session model cache
+    if (client && m_server && args.contains(QStringLiteral("model"))) {
+        const QString argModel = args.value(QStringLiteral("model")).toString().trimmed();
+        if (!argModel.isEmpty()) {
+            m_server->updateAgentSession(client, QString(), QString(), QString(), QString(), argModel);
+        }
+    }
 
     if (toolName == QStringLiteral("get_project_summary")) {
         toolResult = toolGetProjectSummary(args);
@@ -1848,6 +1914,18 @@ QJsonObject McpHandler::toolSetWorkSkinCss(QWebSocket *client, const QJsonObject
     }
 
     const QString css = args.value(QStringLiteral("css")).toString();
+    const bool allowMalformed = args.value(QStringLiteral("allowMalformed")).toBool(false);
+
+    QStringList cssErrors;
+    if (!allowMalformed && !CssEditorPane::validateCss(css, &cssErrors)) {
+        return makeToolResult(
+            QStringLiteral("CSS syntax validation failed with %1 error(s):\n• %2\nPass 'allowMalformed: true' to force update anyway.")
+                .arg(cssErrors.size())
+                .arg(cssErrors.join(QStringLiteral("\n• "))),
+            true
+        );
+    }
+
     const int oldLen = m_mainWindow->project().workSkinCss().length();
     m_mainWindow->setWorkSkinCssFromMcp(css);
     const int byteDelta = css.length() - oldLen;
@@ -1957,13 +2035,18 @@ QJsonObject McpHandler::toolSaveProject(QWebSocket *client, const QJsonObject &a
     }
 
     Ao3Project &proj = m_mainWindow->project();
+    const QString currentPath = proj.filePath();
     QString targetPath = args.value(QStringLiteral("filePath")).toString().trimmed();
     if (targetPath.isEmpty()) {
-        targetPath = proj.filePath();
+        targetPath = currentPath;
     }
     if (targetPath.isEmpty()) {
         return makeToolResult(QStringLiteral("Cannot save project: no file path specified and project has no current file path."), true);
     }
+
+    const bool saveCopy = args.value(QStringLiteral("saveCopy")).toBool(
+        args.value(QStringLiteral("exportCopy")).toBool(false)
+    );
 
     // Check for git commit message
     QString commitMsg = args.value(QStringLiteral("commitMessage")).toString().trimmed();
@@ -1986,6 +2069,40 @@ QJsonObject McpHandler::toolSaveProject(QWebSocket *client, const QJsonObject &a
         proj.appendHistoryCommit(author, commitMsg);
     }
 
+    const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
+    const QString modifier = caller.name.isEmpty() ? author : caller.name;
+    const QString callerModel = resolveCallerModel(caller, args);
+
+    if (saveCopy) {
+        QString saveErr;
+        const bool saved = ProjectSerializer::save(targetPath, proj, &saveErr);
+        if (saved) {
+            proj.agenticData().appendHistoryEntry(
+                modifier, callerModel, caller.role, QStringLiteral("save_project_copy"),
+                QStringLiteral("Exported project copy to '%1'%2")
+                    .arg(targetPath, commitMsg.isEmpty() ? QString() : QStringLiteral(" (commit: %1)").arg(commitMsg))
+            );
+
+            QJsonObject res;
+            res[QStringLiteral("success")] = true;
+            res[QStringLiteral("filePath")] = targetPath;
+            res[QStringLiteral("savedPath")] = targetPath;
+            res[QStringLiteral("isCopy")] = true;
+            res[QStringLiteral("switchedActiveProject")] = false;
+            res[QStringLiteral("activeProjectFilePath")] = currentPath;
+            res[QStringLiteral("committed")] = !commitMsg.isEmpty();
+            if (!commitMsg.isEmpty()) {
+                res[QStringLiteral("commitAuthor")] = author;
+                res[QStringLiteral("commitMessage")] = commitMsg;
+            }
+            res[QStringLiteral("isDirty")] = proj.isDirty();
+            res[QStringLiteral("message")] = QStringLiteral("Project copy exported successfully to %1 without switching active project.").arg(targetPath);
+            return makeToolJsonResult(res);
+        } else {
+            return makeToolResult(QStringLiteral("Failed to export project copy to %1: %2").arg(targetPath, saveErr), true);
+        }
+    }
+
     proj.setFilePath(targetPath);
     QString saveErr;
     const bool saved = ProjectSerializer::save(targetPath, proj, &saveErr);
@@ -1994,9 +2111,19 @@ QJsonObject McpHandler::toolSaveProject(QWebSocket *client, const QJsonObject &a
         m_mainWindow->updateWindowTitle();
         m_mainWindow->updateStatusBar();
 
+        proj.agenticData().appendHistoryEntry(
+            modifier, callerModel, caller.role, QStringLiteral("save_project"),
+            QStringLiteral("Saved active project to '%1'%2")
+                .arg(targetPath, commitMsg.isEmpty() ? QString() : QStringLiteral(" (commit: %1)").arg(commitMsg))
+        );
+
         QJsonObject res;
         res[QStringLiteral("success")] = true;
         res[QStringLiteral("filePath")] = targetPath;
+        res[QStringLiteral("savedPath")] = targetPath;
+        res[QStringLiteral("isCopy")] = false;
+        res[QStringLiteral("switchedActiveProject")] = true;
+        res[QStringLiteral("activeProjectFilePath")] = targetPath;
         res[QStringLiteral("committed")] = !commitMsg.isEmpty();
         if (!commitMsg.isEmpty()) {
             res[QStringLiteral("commitAuthor")] = author;
@@ -2802,13 +2929,31 @@ QJsonObject McpHandler::toolAddLoreNode(QWebSocket *client, const QJsonObject &a
     }
 
     if (!label.isEmpty()) node.label = label;
-    if (args.contains(QStringLiteral("type"))) node.type = args.value(QStringLiteral("type")).toString();
+    if (args.contains(QStringLiteral("type"))) {
+        const QString t = args.value(QStringLiteral("type")).toString().trimmed();
+        if (!LoreGraph::isValidNodeType(t)) {
+            return makeToolResult(QStringLiteral("Invalid node type '%1'. Valid types are character, location, event, item, faction, concept, plot_point.").arg(t), true);
+        }
+        node.type = t.toLower();
+    }
     if (args.contains(QStringLiteral("x"))) node.x = args.value(QStringLiteral("x")).toDouble();
     if (args.contains(QStringLiteral("y"))) node.y = args.value(QStringLiteral("y")).toDouble();
     if (args.contains(QStringLiteral("width"))) node.width = args.value(QStringLiteral("width")).toDouble();
     if (args.contains(QStringLiteral("height"))) node.height = args.value(QStringLiteral("height")).toDouble();
-    if (args.contains(QStringLiteral("shape"))) node.shape = args.value(QStringLiteral("shape")).toString();
-    if (args.contains(QStringLiteral("color"))) node.color = args.value(QStringLiteral("color")).toString();
+    if (args.contains(QStringLiteral("shape"))) {
+        const QString s = args.value(QStringLiteral("shape")).toString().trimmed();
+        if (!LoreGraph::isValidNodeShape(s)) {
+            return makeToolResult(QStringLiteral("Invalid node shape '%1'. Valid shapes are box, rounded, diamond, ellipse, cylinder, hexagon.").arg(s), true);
+        }
+        node.shape = s.toLower();
+    }
+    if (args.contains(QStringLiteral("color"))) {
+        const QString c = args.value(QStringLiteral("color")).toString().trimmed();
+        if (!LoreGraph::isValidHexOrNamedColor(c)) {
+            return makeToolResult(QStringLiteral("Invalid node color '%1'. Must be a valid hex color or CSS color name.").arg(c), true);
+        }
+        node.color = c;
+    }
     if (args.contains(QStringLiteral("loreId"))) node.loreId = args.value(QStringLiteral("loreId")).toString();
     if (args.contains(QStringLiteral("notes"))) node.notes = args.value(QStringLiteral("notes")).toString();
 
@@ -2859,10 +3004,19 @@ QJsonObject McpHandler::toolConnectLoreNodes(QWebSocket *client, const QJsonObje
         return makeToolResult(QStringLiteral("Target node '%1' not found in graph.").arg(toId), true);
     }
 
-    const QString arrow = args.value(QStringLiteral("arrow")).toString(QStringLiteral("->"));
+    const QString arrow = args.value(QStringLiteral("arrow")).toString(QStringLiteral("->")).trimmed();
+    if (!LoreGraph::isValidArrowType(arrow)) {
+        return makeToolResult(QStringLiteral("Invalid connector arrow '%1'. Valid arrows are ->, <->, --, -x.").arg(arrow), true);
+    }
     const QString label = args.value(QStringLiteral("label")).toString();
-    const QString style = args.value(QStringLiteral("style")).toString(QStringLiteral("solid"));
-    const QString color = args.value(QStringLiteral("color")).toString(QStringLiteral("#94a3b8"));
+    const QString style = args.value(QStringLiteral("style")).toString(QStringLiteral("solid")).trimmed();
+    if (!LoreGraph::isValidConnectorStyle(style)) {
+        return makeToolResult(QStringLiteral("Invalid connector style '%1'. Valid styles are solid, dashed, dotted, thick.").arg(style), true);
+    }
+    const QString color = args.value(QStringLiteral("color")).toString(QStringLiteral("#94a3b8")).trimmed();
+    if (!LoreGraph::isValidHexOrNamedColor(color)) {
+        return makeToolResult(QStringLiteral("Invalid connector color '%1'. Must be a valid hex color or CSS color name.").arg(color), true);
+    }
 
     graph->connectNodes(fromId, toId, arrow, label, style, color);
 
@@ -3088,9 +3242,76 @@ QJsonObject McpHandler::toolManageLoreData(QWebSocket *client, const QJsonObject
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString modifier = caller.name.isEmpty() ? QStringLiteral("AI Agent") : caller.name;
 
+    static const QSet<QString> commonKeys = {
+        QStringLiteral("action"), QStringLiteral("model"),
+        QStringLiteral("thought"), QStringLiteral("reasoning")
+    };
+
+    QSet<QString> allowedKeys = commonKeys;
+    if (action == QStringLiteral("add_entity") || action == QStringLiteral("update_entity")) {
+        allowedKeys.unite(QSet<QString>{QStringLiteral("id"), QStringLiteral("name"), QStringLiteral("category"),
+                            QStringLiteral("description"), QStringLiteral("tags"),
+                            QStringLiteral("associatedCharacters"), QStringLiteral("chaptersReferenced")});
+    } else if (action == QStringLiteral("remove_entity")) {
+        allowedKeys.insert(QStringLiteral("id"));
+    } else if (action == QStringLiteral("add_history") || action == QStringLiteral("update_history")) {
+        allowedKeys.unite(QSet<QString>{QStringLiteral("id"), QStringLiteral("title"), QStringLiteral("eraOrDate"),
+                            QStringLiteral("storyChapter"), QStringLiteral("chapterIndex"), QStringLiteral("chapter"),
+                            QStringLiteral("summary"), QStringLiteral("description"),
+                            QStringLiteral("impact"), QStringLiteral("involvedEntities")});
+    } else if (action == QStringLiteral("remove_history")) {
+        allowedKeys.insert(QStringLiteral("id"));
+    } else if (action == QStringLiteral("add_conflict") || action == QStringLiteral("update_conflict")) {
+        allowedKeys.unite(QSet<QString>{QStringLiteral("id"), QStringLiteral("title"), QStringLiteral("severity"),
+                            QStringLiteral("status"), QStringLiteral("chapterA"), QStringLiteral("chapterB"),
+                            QStringLiteral("description"), QStringLiteral("detectedBy"), QStringLiteral("detectedAt")});
+    } else if (action == QStringLiteral("resolve_conflict")) {
+        allowedKeys.unite(QSet<QString>{QStringLiteral("conflictId"), QStringLiteral("id"),
+                            QStringLiteral("resolution"), QStringLiteral("canonRuling")});
+    } else if (action == QStringLiteral("add_plan") || action == QStringLiteral("update_plan")) {
+        allowedKeys.unite(QSet<QString>{QStringLiteral("id"), QStringLiteral("title"), QStringLiteral("targetChapter"),
+                            QStringLiteral("chapterIndex"), QStringLiteral("chapter"),
+                            QStringLiteral("status"), QStringLiteral("description"), QStringLiteral("loreThread"),
+                            QStringLiteral("thread"), QStringLiteral("category"), QStringLiteral("notes"),
+                            QStringLiteral("neededFollowUps")});
+    } else if (action == QStringLiteral("remove_plan")) {
+        allowedKeys.insert(QStringLiteral("id"));
+    } else if (action == QStringLiteral("add_reference") || action == QStringLiteral("update_reference")) {
+        allowedKeys.unite(QSet<QString>{QStringLiteral("id"), QStringLiteral("title"), QStringLiteral("source"),
+                            QStringLiteral("citation"), QStringLiteral("applicability"),
+                            QStringLiteral("notes"), QStringLiteral("description")});
+    } else if (action == QStringLiteral("remove_reference")) {
+        allowedKeys.insert(QStringLiteral("id"));
+    } else if (action == QStringLiteral("remove_graph")) {
+        allowedKeys.unite(QSet<QString>{QStringLiteral("name"), QStringLiteral("graphName"), QStringLiteral("id")});
+    } else {
+        return makeToolResult(QStringLiteral("Unknown lore management action '%1'.").arg(action), true);
+    }
+
+    QStringList unknownKeys;
+    for (auto it = args.constBegin(); it != args.constEnd(); ++it) {
+        if (!allowedKeys.contains(it.key())) {
+            unknownKeys.append(it.key());
+        }
+    }
+    if (!unknownKeys.isEmpty()) {
+        QStringList allowedList(allowedKeys.begin(), allowedKeys.end());
+        allowedList.sort();
+        return makeToolResult(
+            QStringLiteral("Unrecognized field(s) '%1' for lore action '%2'. Supported fields: %3.")
+                .arg(unknownKeys.join(QStringLiteral(", ")), action, allowedList.join(QStringLiteral(", "))),
+            true
+        );
+    }
+
+    QString historySummary;
+    QString historyDetails;
+    int targetChapter = -1;
+    QJsonObject res;
+
     if (action == QStringLiteral("add_entity") || action == QStringLiteral("update_entity")) {
         const QString id = args.value(QStringLiteral("id")).toString().trimmed();
-        if (id.isEmpty()) return makeToolResult(QStringLiteral("Missing 'id' parameter."), true);
+        if (id.isEmpty()) return makeToolResult(QStringLiteral("Missing required 'id' parameter for entity."), true);
 
         LoreEntity ent;
         if (const LoreEntity *ex = lore.findEntity(id)) {
@@ -3108,22 +3329,40 @@ QJsonObject McpHandler::toolManageLoreData(QWebSocket *client, const QJsonObject
         }
         ent.modified = QDateTime::currentDateTimeUtc();
         lore.addOrUpdateEntity(ent);
+
+        historySummary = QStringLiteral("Added or updated lore entity '%1' ('%2', category: '%3')")
+                             .arg(ent.id, ent.name.isEmpty() ? ent.id : ent.name, ent.category.isEmpty() ? QStringLiteral("general") : ent.category);
+        historyDetails = ent.description;
+        res[QStringLiteral("entityId")] = ent.id;
+        res[QStringLiteral("name")] = ent.name;
     } else if (action == QStringLiteral("remove_entity")) {
         const QString id = args.value(QStringLiteral("id")).toString().trimmed();
         if (id.isEmpty()) return makeToolResult(QStringLiteral("Missing 'id' parameter for remove_entity."), true);
         if (!lore.removeEntity(id)) {
             return makeToolResult(QStringLiteral("Entity '%1' not found in lore database.").arg(id), true);
         }
-    } else if (action == QStringLiteral("add_history")) {
+        historySummary = QStringLiteral("Removed lore entity '%1'").arg(id);
+        res[QStringLiteral("entityId")] = id;
+    } else if (action == QStringLiteral("add_history") || action == QStringLiteral("update_history")) {
         LoreHistoryEvent ev;
         ev.id = args.value(QStringLiteral("id")).toString(QUuid::createUuid().toString(QUuid::WithoutBraces));
         ev.eraOrDate = args.value(QStringLiteral("eraOrDate")).toString();
         ev.title = args.value(QStringLiteral("title")).toString();
-        ev.storyChapter = args.value(QStringLiteral("storyChapter")).toInt(-1);
+        ev.storyChapter = args.value(QStringLiteral("storyChapter")).toInt(
+            args.value(QStringLiteral("chapterIndex")).toInt(
+                args.value(QStringLiteral("chapter")).toInt(-1)
+            )
+        );
         if (args.contains(QStringLiteral("summary"))) {
             ev.summary = args.value(QStringLiteral("summary")).toString();
         } else if (args.contains(QStringLiteral("description"))) {
             ev.summary = args.value(QStringLiteral("description")).toString();
+        }
+        if (ev.summary.trimmed().isEmpty()) {
+            return makeToolResult(QStringLiteral("Missing required 'summary' (or 'description') parameter for history event."), true);
+        }
+        if (ev.title.trimmed().isEmpty()) {
+            ev.title = ev.summary.left(50);
         }
         ev.impact = args.value(QStringLiteral("impact")).toString();
         if (args.contains(QStringLiteral("involvedEntities"))) {
@@ -3132,13 +3371,23 @@ QJsonObject McpHandler::toolManageLoreData(QWebSocket *client, const QJsonObject
             }
         }
         lore.addOrUpdateHistoryEvent(ev);
+
+        historySummary = QStringLiteral("Added lore history event '%1' ('%2'): %3")
+                             .arg(ev.id, ev.title, ev.summary);
+        historyDetails = ev.impact;
+        targetChapter = ev.storyChapter;
+        res[QStringLiteral("historyId")] = ev.id;
+        res[QStringLiteral("title")] = ev.title;
+        res[QStringLiteral("summary")] = ev.summary;
     } else if (action == QStringLiteral("remove_history")) {
         const QString id = args.value(QStringLiteral("id")).toString().trimmed();
         if (id.isEmpty()) return makeToolResult(QStringLiteral("Missing 'id' parameter for remove_history."), true);
         if (!lore.removeHistoryEvent(id)) {
             return makeToolResult(QStringLiteral("History event '%1' not found in lore database.").arg(id), true);
         }
-    } else if (action == QStringLiteral("add_conflict")) {
+        historySummary = QStringLiteral("Removed lore history event '%1'").arg(id);
+        res[QStringLiteral("historyId")] = id;
+    } else if (action == QStringLiteral("add_conflict") || action == QStringLiteral("update_conflict")) {
         LoreConflict conf;
         conf.id = args.value(QStringLiteral("id")).toString(QUuid::createUuid().toString(QUuid::WithoutBraces));
         conf.title = args.value(QStringLiteral("title")).toString();
@@ -3150,8 +3399,15 @@ QJsonObject McpHandler::toolManageLoreData(QWebSocket *client, const QJsonObject
         conf.detectedBy = modifier;
         conf.detectedAt = QDateTime::currentDateTimeUtc();
         lore.addOrUpdateConflict(conf);
+
+        historySummary = QStringLiteral("Logged lore conflict '%1' ('%2', severity: %3)")
+                             .arg(conf.id, conf.title, conf.severity);
+        historyDetails = conf.description;
+        targetChapter = conf.chapterA > 0 ? conf.chapterA - 1 : -1;
+        res[QStringLiteral("conflictId")] = conf.id;
+        res[QStringLiteral("title")] = conf.title;
     } else if (action == QStringLiteral("resolve_conflict")) {
-        const QString conflictId = args.value(QStringLiteral("conflictId")).toString().trimmed();
+        const QString conflictId = args.value(QStringLiteral("conflictId")).toString(args.value(QStringLiteral("id")).toString()).trimmed();
         const QString resolution = args.value(QStringLiteral("resolution")).toString().trimmed();
         const QString canonRuling = args.value(QStringLiteral("canonRuling")).toString();
         if (conflictId.isEmpty() || resolution.isEmpty()) {
@@ -3160,11 +3416,19 @@ QJsonObject McpHandler::toolManageLoreData(QWebSocket *client, const QJsonObject
         if (!lore.resolveConflict(conflictId, resolution, canonRuling, modifier)) {
             return makeToolResult(QStringLiteral("Conflict '%1' not found.").arg(conflictId), true);
         }
+        historySummary = QStringLiteral("Resolved lore conflict '%1': %2").arg(conflictId, resolution);
+        historyDetails = canonRuling;
+        res[QStringLiteral("conflictId")] = conflictId;
+        res[QStringLiteral("resolution")] = resolution;
     } else if (action == QStringLiteral("add_plan") || action == QStringLiteral("update_plan")) {
         LorePlan plan;
         plan.id = args.value(QStringLiteral("id")).toString(QUuid::createUuid().toString(QUuid::WithoutBraces));
         plan.title = args.value(QStringLiteral("title")).toString();
-        plan.targetChapter = args.value(QStringLiteral("targetChapter")).toInt(0);
+        plan.targetChapter = args.value(QStringLiteral("targetChapter")).toInt(
+            args.value(QStringLiteral("chapterIndex")).toInt(
+                args.value(QStringLiteral("chapter")).toInt(0)
+            )
+        );
         plan.status = args.value(QStringLiteral("status")).toString(QStringLiteral("planned"));
         plan.description = args.value(QStringLiteral("description")).toString();
         if (args.contains(QStringLiteral("loreThread"))) {
@@ -3181,13 +3445,22 @@ QJsonObject McpHandler::toolManageLoreData(QWebSocket *client, const QJsonObject
             for (const auto &v : args.value(QStringLiteral("neededFollowUps")).toArray()) plan.neededFollowUps.append(v.toString());
         }
         lore.addOrUpdatePlan(plan);
+
+        historySummary = QStringLiteral("Added lore plan '%1' ('%2', targetChapter: %3)")
+                             .arg(plan.id, plan.title).arg(plan.targetChapter);
+        historyDetails = plan.description;
+        targetChapter = plan.targetChapter > 0 ? plan.targetChapter - 1 : -1;
+        res[QStringLiteral("planId")] = plan.id;
+        res[QStringLiteral("title")] = plan.title;
     } else if (action == QStringLiteral("remove_plan")) {
         const QString id = args.value(QStringLiteral("id")).toString().trimmed();
         if (id.isEmpty()) return makeToolResult(QStringLiteral("Missing 'id' parameter for remove_plan."), true);
         if (!lore.removePlan(id)) {
             return makeToolResult(QStringLiteral("Plan '%1' not found in lore database.").arg(id), true);
         }
-    } else if (action == QStringLiteral("add_reference")) {
+        historySummary = QStringLiteral("Removed lore plan '%1'").arg(id);
+        res[QStringLiteral("planId")] = id;
+    } else if (action == QStringLiteral("add_reference") || action == QStringLiteral("update_reference")) {
         LoreReference ref;
         ref.id = args.value(QStringLiteral("id")).toString(QUuid::createUuid().toString(QUuid::WithoutBraces));
         ref.title = args.value(QStringLiteral("title")).toString();
@@ -3200,31 +3473,55 @@ QJsonObject McpHandler::toolManageLoreData(QWebSocket *client, const QJsonObject
             ref.notes = args.value(QStringLiteral("description")).toString();
         }
         lore.addOrUpdateReference(ref);
+
+        historySummary = QStringLiteral("Added lore reference '%1' ('%2', source: '%3')")
+                             .arg(ref.id, ref.title, ref.source);
+        historyDetails = ref.citation;
+        res[QStringLiteral("referenceId")] = ref.id;
+        res[QStringLiteral("title")] = ref.title;
     } else if (action == QStringLiteral("remove_reference")) {
         const QString id = args.value(QStringLiteral("id")).toString().trimmed();
         if (id.isEmpty()) return makeToolResult(QStringLiteral("Missing 'id' parameter for remove_reference."), true);
         if (!lore.removeReference(id)) {
             return makeToolResult(QStringLiteral("Reference '%1' not found in lore database.").arg(id), true);
         }
+        historySummary = QStringLiteral("Removed lore reference '%1'").arg(id);
+        res[QStringLiteral("referenceId")] = id;
     } else if (action == QStringLiteral("remove_graph")) {
-        const QString graphName = args.value(QStringLiteral("name")).toString(args.value(QStringLiteral("id")).toString()).trimmed();
-        if (graphName.isEmpty()) return makeToolResult(QStringLiteral("Missing 'name' or 'id' parameter for remove_graph."), true);
+        const QString graphName = args.value(QStringLiteral("name")).toString(
+            args.value(QStringLiteral("graphName")).toString(
+                args.value(QStringLiteral("id")).toString()
+            )
+        ).trimmed();
+        if (graphName.isEmpty()) return makeToolResult(QStringLiteral("Missing 'name', 'graphName', or 'id' parameter for remove_graph."), true);
+        const bool isDefault = (graphName == QStringLiteral("data") || graphName.isEmpty());
         if (!lore.removeNamedGraph(graphName)) {
             return makeToolResult(QStringLiteral("Lore graph '%1' not found in lore database.").arg(graphName), true);
         }
-    } else {
-        return makeToolResult(QStringLiteral("Unknown lore management action '%1'.").arg(action), true);
+        res[QStringLiteral("name")] = graphName;
+        res[QStringLiteral("isDefaultGraph")] = isDefault;
+        if (isDefault) {
+            res[QStringLiteral("resetToEmpty")] = true;
+            res[QStringLiteral("message")] = QStringLiteral("The primary default graph 'data' cannot be deleted from the archive; it has been reset to an empty graph (all nodes, connectors, and boxes removed).");
+            res[QStringLiteral("note")] = QStringLiteral("Primary default graph 'data' was reset to an empty state rather than deleted.");
+            historySummary = QStringLiteral("Reset primary lore graph '%1' to empty").arg(graphName);
+        } else {
+            res[QStringLiteral("message")] = QStringLiteral("Lore graph '%1' removed successfully.").arg(graphName);
+            historySummary = QStringLiteral("Removed lore graph '%1'").arg(graphName);
+        }
     }
 
     const QString callerModel = resolveCallerModel(caller, args);
     m_mainWindow->project().markDirtyBy(modifier);
     m_mainWindow->project().agenticData().appendHistoryEntry(
         modifier, callerModel, caller.role, QStringLiteral("manage_lore_data"),
-        QStringLiteral("Performed lore action: %1").arg(action)
+        historySummary,
+        targetChapter,
+        0,
+        historyDetails
     );
     m_mainWindow->updateLoreGraphUi();
 
-    QJsonObject res;
     res[QStringLiteral("success")] = true;
     res[QStringLiteral("action")] = action;
     res[QStringLiteral("entityCount")] = lore.entities().size();

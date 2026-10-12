@@ -21,6 +21,8 @@ public:
     CodeEditor *editor() const { return m_editor; }
     void bindProject(const Ao3Project *project) { m_project = project; }
 
+    static bool validateCss(const QString &css, QStringList *errors = nullptr);
+
 public slots:
     void setCss(const QString &css);
     void updateTheme();

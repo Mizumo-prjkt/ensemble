@@ -317,3 +317,165 @@ void CssEditorPane::parseCssClasses(const QString &css)
     m_classNames = newClasses;
     emit cssClassesChanged(m_classNames);
 }
+
+bool CssEditorPane::validateCss(const QString &css, QStringList *errors)
+{
+    QStringList errList;
+    if (css.trimmed().isEmpty()) {
+        if (errors) *errors = errList;
+        return true;
+    }
+
+    auto getLineNum = [&css](int pos) -> int {
+        int line = 1;
+        for (int i = 0; i < pos && i < css.length(); ++i) {
+            if (css[i] == QLatin1Char('\n')) ++line;
+        }
+        return line;
+    };
+
+    // 1. Check unclosed comments
+    int commentStart = css.indexOf(QStringLiteral("/*"));
+    while (commentStart != -1) {
+        int commentEnd = css.indexOf(QStringLiteral("*/"), commentStart + 2);
+        if (commentEnd == -1) {
+            errList.append(QStringLiteral("Line %1: Unclosed CSS comment (missing '*/').").arg(getLineNum(commentStart)));
+            break;
+        }
+        commentStart = css.indexOf(QStringLiteral("/*"), commentEnd + 2);
+    }
+
+    // 2. Build masked copy of CSS: replace comment contents and string contents with spaces
+    QString masked = css;
+    {
+        // Mask comments
+        int cStart = masked.indexOf(QStringLiteral("/*"));
+        while (cStart != -1) {
+            int cEnd = masked.indexOf(QStringLiteral("*/"), cStart + 2);
+            if (cEnd == -1) {
+                for (int i = cStart + 2; i < masked.length(); ++i) {
+                    if (masked[i] != QLatin1Char('\n')) masked[i] = QLatin1Char(' ');
+                }
+                break;
+            } else {
+                for (int i = cStart + 2; i < cEnd; ++i) {
+                    if (masked[i] != QLatin1Char('\n')) masked[i] = QLatin1Char(' ');
+                }
+                masked[cStart] = QLatin1Char(' ');
+                masked[cStart + 1] = QLatin1Char(' ');
+                masked[cEnd] = QLatin1Char(' ');
+                masked[cEnd + 1] = QLatin1Char(' ');
+                cStart = masked.indexOf(QStringLiteral("/*"), cEnd + 2);
+            }
+        }
+
+        // Mask string literals ('...' and "...")
+        bool inQuote = false;
+        QChar quoteChar;
+        int qStart = -1;
+        for (int i = 0; i < masked.length(); ++i) {
+            QChar ch = masked[i];
+            if (!inQuote) {
+                if (ch == QLatin1Char('"') || ch == QLatin1Char('\'')) {
+                    inQuote = true;
+                    quoteChar = ch;
+                    qStart = i;
+                    masked[i] = QLatin1Char(' ');
+                }
+            } else {
+                if (ch == quoteChar && (i == 0 || masked[i - 1] != QLatin1Char('\\'))) {
+                    inQuote = false;
+                    masked[i] = QLatin1Char(' ');
+                } else if (ch == QLatin1Char('\n')) {
+                    errList.append(QStringLiteral("Line %1: Unclosed string literal.").arg(getLineNum(qStart)));
+                    inQuote = false;
+                } else {
+                    masked[i] = QLatin1Char(' ');
+                }
+            }
+        }
+        if (inQuote) {
+            errList.append(QStringLiteral("Line %1: Unclosed string literal.").arg(getLineNum(qStart)));
+        }
+    }
+
+    // 3. Brace balance and declaration checking
+    int braceDepth = 0;
+    int lastOpenBracePos = -1;
+    QString currentDecl;
+    int declStartPos = 0;
+
+    for (int i = 0; i < masked.length(); ++i) {
+        QChar ch = masked[i];
+        if (ch == QLatin1Char('{')) {
+            braceDepth++;
+            lastOpenBracePos = i;
+            currentDecl.clear();
+            declStartPos = i + 1;
+        } else if (ch == QLatin1Char('}')) {
+            if (braceDepth > 0) {
+                const QString trimmedDecl = currentDecl.trimmed();
+                if (!trimmedDecl.isEmpty() && !trimmedDecl.contains(QLatin1Char('{'))) {
+                    if (!trimmedDecl.startsWith(QLatin1Char('@')) && !trimmedDecl.contains(QLatin1Char(':'))) {
+                        errList.append(QStringLiteral("Line %1: Malformed CSS declaration '%2' (missing colon ':' separating property from value).")
+                            .arg(getLineNum(declStartPos)).arg(trimmedDecl.left(40)));
+                    } else if (trimmedDecl.startsWith(QLatin1Char(':'))) {
+                        errList.append(QStringLiteral("Line %1: Missing CSS property name before colon ':'.")
+                            .arg(getLineNum(declStartPos)));
+                    }
+                }
+                currentDecl.clear();
+                braceDepth--;
+            } else {
+                errList.append(QStringLiteral("Line %1: Unexpected closing brace '}' without opening '{'.")
+                    .arg(getLineNum(i)));
+            }
+        } else if (ch == QLatin1Char(';')) {
+            if (braceDepth > 0) {
+                const QString trimmedDecl = currentDecl.trimmed();
+                if (!trimmedDecl.isEmpty() && !trimmedDecl.contains(QLatin1Char('{'))) {
+                    if (!trimmedDecl.startsWith(QLatin1Char('@')) && !trimmedDecl.contains(QLatin1Char(':'))) {
+                        errList.append(QStringLiteral("Line %1: Malformed CSS declaration '%2' (missing colon ':' separating property from value).")
+                            .arg(getLineNum(declStartPos)).arg(trimmedDecl.left(40)));
+                    } else if (trimmedDecl.startsWith(QLatin1Char(':'))) {
+                        errList.append(QStringLiteral("Line %1: Missing CSS property name before colon ':'.")
+                            .arg(getLineNum(declStartPos)));
+                    }
+                }
+                currentDecl.clear();
+                declStartPos = i + 1;
+            } else {
+                int stmtStart = i - 1;
+                while (stmtStart >= 0 && masked[stmtStart] != QLatin1Char('}') && masked[stmtStart] != QLatin1Char(';')) {
+                    --stmtStart;
+                }
+                const QString stmt = masked.mid(stmtStart + 1, i - stmtStart - 1).trimmed();
+                if (!stmt.isEmpty() && !stmt.startsWith(QLatin1Char('@'))) {
+                    errList.append(QStringLiteral("Line %1: Unexpected semicolon ';' outside CSS declaration block.")
+                        .arg(getLineNum(i)));
+                }
+            }
+        } else {
+            if (braceDepth > 0) {
+                currentDecl += css[i];
+            }
+        }
+    }
+
+    if (braceDepth > 0 && lastOpenBracePos != -1) {
+        errList.append(QStringLiteral("Line %1: Unclosed CSS block (missing closing brace '}').")
+            .arg(getLineNum(lastOpenBracePos)));
+    } else if (braceDepth == 0) {
+        int lastClose = masked.lastIndexOf(QLatin1Char('}'));
+        const QString trailing = (lastClose == -1 ? masked : masked.mid(lastClose + 1)).trimmed();
+        if (!trailing.isEmpty() && !trailing.endsWith(QLatin1Char(';'))) {
+            errList.append(QStringLiteral("Line %1: Incomplete CSS rule: selector '%2' has no declaration block '{ ... }'.")
+                .arg(getLineNum(lastClose == -1 ? 0 : lastClose + 1)).arg(trailing.left(30)));
+        }
+    }
+
+    if (errors) {
+        *errors = errList;
+    }
+    return errList.isEmpty();
+}

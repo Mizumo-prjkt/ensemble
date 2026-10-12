@@ -38,13 +38,16 @@ void AgenticData::ensureDefaultAgentifiers()
     m_agentifiers[QStringLiteral("agents")] = QJsonObject();
 }
 
-static QString makeModelKey(const AgentModelHistoryEntry &entry)
+static void recordModelChange(QMap<QString, AgentModelHistoryEntry> &map, const AgentModelHistoryEntry &entry)
 {
+    const QString agKey = entry.agentName.toLower();
+    map[agKey] = entry;
     if (!entry.model.isEmpty() && entry.model != QStringLiteral("unknown-model") &&
-        entry.model != QStringLiteral("assistant") && entry.model.toLower() != entry.agentName.toLower()) {
-        return QStringLiteral("%1:%2").arg(entry.agentName.toLower(), entry.model.toLower());
+        entry.model != QStringLiteral("assistant") && entry.model != QStringLiteral("unspecified_model") &&
+        entry.model.toLower() != agKey) {
+        map[entry.model.toLower()] = entry;
+        map[QStringLiteral("%1:%2").arg(agKey, entry.model.toLower())] = entry;
     }
-    return entry.agentName.toLower();
 }
 
 void AgenticData::ensureDefaultHistory()
@@ -59,7 +62,7 @@ void AgenticData::ensureDefaultHistory()
         entry.action = QStringLiteral("init");
         entry.summary = QStringLiteral("Agentic data repository initialized for project.");
         m_historyEntries.append(entry);
-        m_lastChangesByModel[makeModelKey(entry)] = entry;
+        recordModelChange(m_lastChangesByModel, entry);
     }
 }
 
@@ -288,7 +291,7 @@ void AgenticData::appendHistoryEntry(const QString &agentName, const QString &mo
     entry.details = details;
 
     m_historyEntries.append(entry);
-    m_lastChangesByModel[makeModelKey(entry)] = entry;
+    recordModelChange(m_lastChangesByModel, entry);
     m_modifiedDate = entry.timestamp;
 }
 
@@ -383,7 +386,7 @@ void AgenticData::setRawModelHistoryXml(const QString &xml)
                     }
                 }
                 m_historyEntries.append(entry);
-                m_lastChangesByModel[makeModelKey(entry)] = entry;
+                recordModelChange(m_lastChangesByModel, entry);
             }
         }
     }
