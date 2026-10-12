@@ -28,17 +28,14 @@ bool ZstdArchive::isZstdArchive(const QString &filePath)
     if (header.isEmpty())
         return false;
 
-    // Check if starts with Zip magic (0x504B0304) or ZSTD magic (0xFD2FB528)
-    if (header.startsWith(kZipMagic) || header.startsWith(kZstdMagic))
+    // Check if starts with Zip magic (0x504B0304 or 0x504B0506) or ZSTD magic (0x28B52FFD)
+    if (header.startsWith(kZipMagic) ||
+        header.startsWith(QByteArray::fromHex("504b0506")) ||
+        header.startsWith(kZstdMagic)) {
         return true;
+    }
 
-    // If file starts with '{' or '[', it's a legacy JSON file
-    const char firstChar = header.trimmed().at(0);
-    if (firstChar == '{' || firstChar == '[')
-        return false;
-
-    // Any non-JSON container file (.ao3proj archive format)
-    return true;
+    return false;
 }
 
 bool ZstdArchive::compressArchive(const QString &destPath, const QMap<QString, QByteArray> &fileEntries, QString *error)

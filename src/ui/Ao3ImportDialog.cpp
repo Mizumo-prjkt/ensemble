@@ -95,7 +95,7 @@ QWidget *Ao3ImportDialog::createDisclaimerStep()
     auto *cancelBtn = new QPushButton(QStringLiteral("Cancel"), page);
     cancelBtn->setStyleSheet(QStringLiteral("padding: 8px 16px; font-weight: bold;"));
 
-    m_agreeBtn = new QPushButton(QStringLiteral("I Understand & Agree (15s)"), page);
+    m_agreeBtn = new QPushButton(QStringLiteral("I Understand && Agree (15s)"), page);
     m_agreeBtn->setEnabled(false);
     m_agreeBtn->setStyleSheet(QStringLiteral(
         "QPushButton {"
@@ -533,16 +533,46 @@ void Ao3ImportDialog::onFullWorkFetched(const Ao3FullWork &work)
     m_logEdit->append(QStringLiteral("[%1] Extracted work '%2' (%3 chapters)")
                           .arg(QTime::currentTime().toString(), work.summary.title, QString::number(work.chapters.size())));
 
+    if (!work.embeddedImages.isEmpty()) {
+        m_logEdit->append(QStringLiteral("[%1] 🖼️ Detected %2 embedded image URL attachment(s) across chapters:")
+                              .arg(QTime::currentTime().toString(), QString::number(work.embeddedImages.size())));
+        for (const auto &img : work.embeddedImages) {
+            m_logEdit->append(QStringLiteral("    • Chapter %1: %2%3")
+                                  .arg(QString::number(img.chapterNumber), img.url,
+                                       img.alt.isEmpty() ? QString() : QStringLiteral(" (Alt: \"%1\")").arg(img.alt)));
+        }
+    }
+
     const bool createNew = (m_importModeCombo->currentIndex() == 0);
     if (createNew) {
         Ao3Project newProj;
         newProj.setTitle(work.summary.title);
-        newProj.setAuthor(m_session->username());
+        const QString author = !work.summary.pseud.isEmpty() ? work.summary.pseud : m_session->username();
+        newProj.setAuthor(author.isEmpty() ? QStringLiteral("Anonymous") : author);
+
+        // Populate AO3 tags and metadata
+        newProj.setRating(work.summary.rating.isEmpty() ? QStringLiteral("Not Rated") : work.summary.rating);
+        newProj.setArchiveWarnings(work.summary.archiveWarnings);
+        newProj.setCategories(work.summary.categories);
+        newProj.setFandoms(work.summary.fandoms);
+        newProj.setRelationships(work.summary.relationships);
+        newProj.setCharacters(work.summary.characters);
+        newProj.setTags(work.summary.tags);
+
+        // Initial Git-like commit entry
+        const int currentWorkId = (m_currentImportIndex < m_selectedWorkIds.size()) ? m_selectedWorkIds.at(m_currentImportIndex) : 0;
+        QString commitMsg = QStringLiteral("Imported story from AO3 (Work ID %1: '%2') with all tags, chapters, and stylesheet.")
+                                .arg(currentWorkId).arg(work.summary.title);
+        if (!work.embeddedImages.isEmpty()) {
+            commitMsg += QStringLiteral(" Includes %1 embedded image URL attachment(s).").arg(work.embeddedImages.size());
+        }
+        newProj.appendHistoryCommit(newProj.author(), commitMsg);
+
         newProj.chapters().clear();
 
+        int orderIdx = 0;
         for (const auto &c : work.chapters) {
-            Chapter chap;
-            chap.setTitle(c.title);
+            Chapter chap(c.title, orderIdx++);
             chap.setHtml(c.bodyHtml);
             newProj.chapters().append(chap);
         }

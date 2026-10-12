@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Ensemble
+GenericName=AO3 Writing Suite & Work Skin Composer
+Comment=Offline rich-text typewriter, live HTML previewer, and custom CSS work skin IDE for Archive of Our Own
+Exec=ensemble %F
+Icon=ensemble
+Terminal=false
+Categories=Office;WordProcessor;TextEditor;Development;
+MimeType=application/x-ao3proj;
+Keywords=AO3;ArchiveOfOurOwn;Writing;Typewriter;Fanfiction;Markdown;HTML;CSS;WorkSkin;
+StartupNotify=true
+StartupWMClass=ensemble

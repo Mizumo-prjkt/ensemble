@@ -11,6 +11,7 @@
 #include <QTextDocument>
 #include <QTextFormat>
 #include <QTextFragment>
+#include <QTextImageFormat>
 #include <QTextList>
 #include <QTextListFormat>
 
@@ -43,6 +44,8 @@ QString escapeHtml(const QString &text)
             out += QStringLiteral("&lt;");
         } else if (c == '>') {
             out += QStringLiteral("&gt;");
+        } else if (c == '"') {
+            out += QStringLiteral("&quot;");
         } else {
             out += c;
         }
@@ -124,7 +127,42 @@ QString exportBlockInline(const QTextBlock &block)
         const QTextFragment fragment = it.fragment();
         if (!fragment.isValid())
             continue;
-        html += wrapInline(fragment.text(), styleFromFormat(fragment.charFormat()));
+
+        const QTextCharFormat charFmt = fragment.charFormat();
+        if (charFmt.isImageFormat()) {
+            const QTextImageFormat imgFmt = charFmt.toImageFormat();
+            const QString src = imgFmt.name();
+            if (!src.isEmpty()) {
+                QString imgTag = QStringLiteral("<img src=\"%1\"").arg(escapeHtml(src));
+                const QString alt = imgFmt.property(QTextFormat::ImageAltText).toString();
+                if (!alt.isEmpty()) {
+                    imgTag += QStringLiteral(" alt=\"%1\"").arg(escapeHtml(alt));
+                }
+                const QString title = imgFmt.property(QTextFormat::ImageTitle).toString();
+                if (!title.isEmpty()) {
+                    imgTag += QStringLiteral(" title=\"%1\"").arg(escapeHtml(title));
+                }
+                if (imgFmt.hasProperty(QTextFormat::ImageWidth) && imgFmt.width() > 0) {
+                    imgTag += QStringLiteral(" width=\"%1\"").arg(static_cast<int>(imgFmt.width()));
+                }
+                if (imgFmt.hasProperty(QTextFormat::ImageHeight) && imgFmt.height() > 0) {
+                    imgTag += QStringLiteral(" height=\"%1\"").arg(static_cast<int>(imgFmt.height()));
+                }
+                const QVariant classProp = imgFmt.property(CssClassProperty);
+                if (classProp.isValid() && !classProp.toString().isEmpty()) {
+                    imgTag += QStringLiteral(" class=\"%1\"").arg(escapeHtml(classProp.toString()));
+                }
+                imgTag += QStringLiteral(" />");
+
+                if (charFmt.isAnchor() && !charFmt.anchorHref().isEmpty()) {
+                    imgTag = QStringLiteral("<a href=\"%1\">%2</a>").arg(escapeHtml(charFmt.anchorHref()), imgTag);
+                }
+                html += imgTag;
+                continue;
+            }
+        }
+
+        html += wrapInline(fragment.text(), styleFromFormat(charFmt));
     }
     return html;
 }
@@ -177,10 +215,19 @@ QString exportBlock(const QTextBlock &block, const QTextDocument *document)
         return QStringLiteral("<blockquote>\n  <p%1>%2</p>\n</blockquote>").arg(classAttr, inner);
     }
 
+    QString alignAttr;
+    if (fmt.alignment().testFlag(Qt::AlignHCenter)) {
+        alignAttr = QStringLiteral(" align=\"center\"");
+    } else if (fmt.alignment().testFlag(Qt::AlignRight)) {
+        alignAttr = QStringLiteral(" align=\"right\"");
+    } else if (fmt.alignment().testFlag(Qt::AlignJustify)) {
+        alignAttr = QStringLiteral(" align=\"justify\"");
+    }
+
     const QString inner = exportBlockInline(block);
     if (inner.isEmpty())
-        return QStringLiteral("<p%1></p>").arg(classAttr);
-    return QStringLiteral("<p%1>%2</p>").arg(classAttr, inner);
+        return QStringLiteral("<p%1%2></p>").arg(alignAttr, classAttr);
+    return QStringLiteral("<p%1%2>%3</p>").arg(alignAttr, classAttr, inner);
 }
 
 QString exportList(QTextList *list)

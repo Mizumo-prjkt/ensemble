@@ -71,7 +71,7 @@ bool isVoidTag(const QString &tag)
     return voidTags.contains(tag);
 }
 
-QString filterAttributes(const QString &tag, const QString &attrBlob)
+QString filterAttributes(const QString &tag, const QString &attrBlob, QSet<QString> *strippedAttrs = nullptr)
 {
     const QSet<QString> allowed = Ao3TagWhitelist::allowedAttributes();
     QStringList kept;
@@ -84,8 +84,12 @@ QString filterAttributes(const QString &tag, const QString &attrBlob)
     while (it.hasNext()) {
         const QRegularExpressionMatch m = it.next();
         const QString name = m.captured(1).toLower();
-        if (!allowed.contains(name))
+        if (!allowed.contains(name)) {
+            if (strippedAttrs) {
+                strippedAttrs->insert(name);
+            }
             continue;
+        }
         QString value = m.captured(2);
         if (value.isNull())
             value = m.captured(3);
@@ -107,12 +111,22 @@ QString repairStack(QStack<QString> stack)
 
 } // namespace
 
-QString Ao3HtmlSanitizer::sanitize(const QString &html)
+SanitizeResult Ao3HtmlSanitizer::sanitizeDetailed(const QString &html)
 {
+    SanitizeResult result;
+    QSet<QString> strippedTagsSet;
+    QSet<QString> strippedAttrsSet;
+
     QString cleaned = unescapeQuoteEntities(html);
-    cleaned.remove(QRegularExpression(QStringLiteral(R"(<!--[\s\S]*?-->)")));
-    if (cleaned.trimmed().isEmpty())
-        return QStringLiteral("<p></p>");
+    if (cleaned.contains(QStringLiteral("<!--"))) {
+        result.wasModified = true;
+        cleaned.remove(QRegularExpression(QStringLiteral(R"(<!--[\s\S]*?-->)")));
+    }
+    if (cleaned.trimmed().isEmpty()) {
+        result.cleanHtml = QStringLiteral("<p></p>");
+        result.wasModified = (html != result.cleanHtml);
+        return result;
+    }
 
     const QSet<QString> allowed = Ao3TagWhitelist::allowedTags();
 
@@ -120,8 +134,8 @@ QString Ao3HtmlSanitizer::sanitize(const QString &html)
         QStringLiteral(R"(<\/?([a-zA-Z][\w:-]*)([^>]*)\/?>)"),
         QRegularExpression::CaseInsensitiveOption);
 
-    QString result;
-    result.reserve(cleaned.size());
+    QString out;
+    out.reserve(cleaned.size());
 
     QStack<QString> openTags;
     int lastPos = 0;
@@ -129,53 +143,75 @@ QString Ao3HtmlSanitizer::sanitize(const QString &html)
     QRegularExpressionMatchIterator it = tagRe.globalMatch(cleaned);
     while (it.hasNext()) {
         const QRegularExpressionMatch m = it.next();
-        result += escapeHtml(cleaned.mid(lastPos, m.capturedStart() - lastPos));
+        out += escapeHtml(cleaned.mid(lastPos, m.capturedStart() - lastPos));
 
         const QString rawTag = m.captured(1);
         const QString tag = normalizeTagName(rawTag);
         const bool closing = m.captured(0).startsWith(QStringLiteral("</"));
         const bool selfClosing = m.captured(0).endsWith(QStringLiteral("/>")) || isVoidTag(tag);
-        const QString attrs = filterAttributes(tag, m.captured(2).trimmed());
+        const QString attrs = filterAttributes(tag, m.captured(2).trimmed(), &strippedAttrsSet);
 
         if (!allowed.contains(tag)) {
+            strippedTagsSet.insert(rawTag.toLower());
             lastPos = m.capturedEnd();
             continue;
         }
 
         if (closing) {
             while (!openTags.isEmpty() && openTags.top() != tag)
-                result += QStringLiteral("</%1>").arg(openTags.pop());
+                out += QStringLiteral("</%1>").arg(openTags.pop());
             if (!openTags.isEmpty() && openTags.top() == tag) {
                 openTags.pop();
-                result += QStringLiteral("</%1>").arg(tag);
+                out += QStringLiteral("</%1>").arg(tag);
             }
         } else if (selfClosing) {
             if (attrs.isEmpty())
-                result += QStringLiteral("<%1 />").arg(tag);
+                out += QStringLiteral("<%1 />").arg(tag);
             else
-                result += QStringLiteral("<%1 %2 />").arg(tag, attrs);
+                out += QStringLiteral("<%1 %2 />").arg(tag, attrs);
         } else {
             if (attrs.isEmpty())
-                result += QStringLiteral("<%1>").arg(tag);
+                out += QStringLiteral("<%1>").arg(tag);
             else
-                result += QStringLiteral("<%1 %2>").arg(tag, attrs);
+                out += QStringLiteral("<%1 %2>").arg(tag, attrs);
             openTags.push(tag);
         }
 
         lastPos = m.capturedEnd();
     }
 
-    result += escapeHtml(cleaned.mid(lastPos));
-    result += repairStack(openTags);
+    out += escapeHtml(cleaned.mid(lastPos));
+    out += repairStack(openTags);
 
     // Strip script/style remnants and inline style attributes defensively.
-    result.remove(QRegularExpression(QStringLiteral(R"(<\/?(?:script|style)[^>]*>)"),
-                                     QRegularExpression::CaseInsensitiveOption));
-    result.remove(QRegularExpression(QStringLiteral(R"(\sstyle\s*=\s*("[^"]*"|'[^']*'|[^\s>]+))"),
-                                     QRegularExpression::CaseInsensitiveOption));
+    static const QRegularExpression scriptStyleRe(QStringLiteral(R"(<\/?(?:script|style)[^>]*>)"),
+                                                  QRegularExpression::CaseInsensitiveOption);
+    if (out.contains(scriptStyleRe)) {
+        strippedTagsSet.insert(QStringLiteral("script"));
+        out.remove(scriptStyleRe);
+    }
 
-    if (result.trimmed().isEmpty())
-        return QStringLiteral("<p></p>");
+    static const QRegularExpression styleAttrRe(QStringLiteral(R"(\sstyle\s*=\s*("[^"]*"|'[^']*'|[^\s>]+))"),
+                                                QRegularExpression::CaseInsensitiveOption);
+    if (out.contains(styleAttrRe)) {
+        strippedAttrsSet.insert(QStringLiteral("style"));
+        out.remove(styleAttrRe);
+    }
+
+    if (out.trimmed().isEmpty())
+        out = QStringLiteral("<p></p>");
+
+    result.cleanHtml = out;
+    result.strippedTags = QStringList(strippedTagsSet.begin(), strippedTagsSet.end());
+    result.strippedTags.sort();
+    result.strippedAttributes = QStringList(strippedAttrsSet.begin(), strippedAttrsSet.end());
+    result.strippedAttributes.sort();
+    result.wasModified = (out != html) || !result.strippedTags.isEmpty() || !result.strippedAttributes.isEmpty();
 
     return result;
+}
+
+QString Ao3HtmlSanitizer::sanitize(const QString &html)
+{
+    return sanitizeDetailed(html).cleanHtml;
 }

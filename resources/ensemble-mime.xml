@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+    <mime-type type="application/x-ao3proj">
+        <comment>Ensemble AO3 Project Archive</comment>
+        <icon name="ensemble"/>
+        <glob pattern="*.ao3proj"/>
+        <glob pattern="*.ao3projasve"/>
+    </mime-type>
+</mime-info>

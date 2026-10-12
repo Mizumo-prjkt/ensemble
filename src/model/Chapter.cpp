@@ -1,4 +1,5 @@
 #include "Chapter.h"
+#include <QTextDocument>
 
 Chapter::Chapter()
     : m_id(QUuid::createUuid())
@@ -11,4 +12,14 @@ Chapter::Chapter(const QString &title, int order)
     , m_title(title)
     , m_order(order)
 {
+}
+
+QString Chapter::toPlainText() const
+{
+    if (m_html.isEmpty()) {
+        return QString();
+    }
+    QTextDocument doc;
+    doc.setHtml(m_html);
+    return doc.toPlainText();
 }

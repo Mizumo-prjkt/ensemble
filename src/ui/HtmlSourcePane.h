@@ -21,6 +21,9 @@ public:
 public slots:
     void setHtml(const QString &html);
     void forceApply();
+    void formatHtml();
+    void updateTheme();
+    void updateSettings();
 
 signals:
     void applyRequested(const QString &html);
@@ -36,9 +39,11 @@ private slots:
 private:
     bool eventFilter(QObject *obj, QEvent *event) override;
     bool tryExpandAutoblock();
+    static QString formatHtmlSource(const QString &rawHtml);
 
     CodeEditor *m_editor = nullptr;
     QPushButton *m_applyButton = nullptr;
+    QPushButton *m_formatButton = nullptr;
     QLabel *m_linterWarning = nullptr;
     QTimer *m_linterTimer = nullptr;
     bool m_blockChanges = false;

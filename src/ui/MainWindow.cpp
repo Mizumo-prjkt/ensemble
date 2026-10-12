@@ -1,7 +1,11 @@
 #include "MainWindow.h"
 
 #include "export/Ao3HtmlSanitizer.h"
+#include "export/Ao3TagWhitelist.h"
 #include "model/ProjectSerializer.h"
+#include <QBuffer>
+#include <QElapsedTimer>
+#include <QPainter>
 #include "ui/AboutDialog.h"
 #include "ui/CreditsDialog.h"
 #include "ui/Ao3ImportDialog.h"
@@ -14,28 +18,49 @@
 #include "ui/MainMenuWindow.h"
 #include "ui/PreviewPane.h"
 #include "ui/ProblemsDialog.h"
+#include "ui/SettingsDialog.h"
+#include "ui/HelpGuideDialog.h"
+#include "ui/AgentThoughtsDialog.h"
+#include "ui/LoreGraphDialog.h"
+#include "ui/ProjectPropertiesDialog.h"
 #include "ui/CodeEditor.h"
+#include "ui/ProjectLoadErrorDialog.h"
 #include "debug/debug.hpp"
+#include "themes/ThemeManager.h"
+#include "mcp/McpServer.h"
+#include "mcp/McpHandler.h"
 
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QTextEdit>
+#include <QWindow>
 #include <QXmlStreamReader>
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QDateTime>
 #include <QDir>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QFileDialog>
+#include <QFileInfo>
+#include <QFileOpenEvent>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMimeData>
+#include <QUrl>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QSplitter>
+#include <QTime>
 #include "AppIcon.h"
+#include "utils/AppPaths.h"
 
 #include <QStatusBar>
 #include <QTabWidget>
@@ -47,6 +72,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   setWindowTitle(QStringLiteral("Ensemble"));
   setWindowIcon(AppIcon::icon());
   resize(1280, 800);
+
+  connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, &MainWindow::onThemeChanged);
+  connect(&ThemeManager::instance(), &ThemeManager::skinFlavorChanged, this, [this](SkinFlavor) {
+    onThemeChanged(ThemeManager::instance().currentTheme());
+  });
 
   m_htmlSyncTimer = new QTimer(this);
   m_htmlSyncTimer->setSingleShot(true);
@@ -74,19 +104,34 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   openAction->setShortcut(QKeySequence::Open);
   connect(openAction, &QAction::triggered, this, &MainWindow::onOpenProject);
 
-  auto *saveAction = fileMenu->addAction(QStringLiteral("&Save"));
-  saveAction->setShortcut(QKeySequence::Save);
-  connect(saveAction, &QAction::triggered, this, &MainWindow::onSaveProject);
+  m_saveAction = fileMenu->addAction(QStringLiteral("&Save"));
+  m_saveAction->setShortcut(QKeySequence::Save);
+  connect(m_saveAction, &QAction::triggered, this, &MainWindow::onSaveProject);
 
-  auto *saveAsAction = fileMenu->addAction(QStringLiteral("Save &As…"));
-  saveAsAction->setShortcut(QKeySequence::SaveAs);
-  connect(saveAsAction, &QAction::triggered, this,
+  m_saveAsAction = fileMenu->addAction(QStringLiteral("Save &As…"));
+  m_saveAsAction->setShortcut(QKeySequence::SaveAs);
+  connect(m_saveAsAction, &QAction::triggered, this,
           &MainWindow::onSaveProjectAs);
+
+  m_closeProjectAction = fileMenu->addAction(QStringLiteral("&Close Project"));
+  m_closeProjectAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+W")));
+  connect(m_closeProjectAction, &QAction::triggered, this,
+          &MainWindow::onCloseProject);
 
   fileMenu->addSeparator();
   auto *importAo3Action = fileMenu->addAction(QStringLiteral("Import from &AO3…"));
   importAo3Action->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+I")));
   connect(importAo3Action, &QAction::triggered, this, &MainWindow::onImportFromAo3);
+
+  fileMenu->addSeparator();
+  m_propertiesAction = fileMenu->addAction(QStringLiteral("P&roperties…"));
+  m_propertiesAction->setShortcuts({QKeySequence(Qt::ALT | Qt::Key_Return), QKeySequence(Qt::ALT | Qt::Key_Enter)});
+  connect(m_propertiesAction, &QAction::triggered, this, &MainWindow::onEditProperties);
+
+  fileMenu->addSeparator();
+  auto *preferencesAction = fileMenu->addAction(QStringLiteral("Preference&s…"));
+  preferencesAction->setShortcut(QKeySequence::Preferences);
+  connect(preferencesAction, &QAction::triggered, this, &MainWindow::onShowSettings);
 
   fileMenu->addSeparator();
   auto *mainMenuAction = fileMenu->addAction(QStringLiteral("&Main Menu…"));
@@ -97,20 +142,20 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   quitAction->setShortcut(QKeySequence::Quit);
   connect(quitAction, &QAction::triggered, this, &QWidget::close);
 
-  auto *exportChapterAction =
+  m_exportChapterAction =
       exportMenu->addAction(QStringLiteral("Export Current &Chapter HTML…"));
-  connect(exportChapterAction, &QAction::triggered, this,
+  connect(m_exportChapterAction, &QAction::triggered, this,
           &MainWindow::onExportChapterHtml);
 
-  auto *exportAllAction =
+  m_exportAllAction =
       exportMenu->addAction(QStringLiteral("Export &All Chapters…"));
-  connect(exportAllAction, &QAction::triggered, this,
+  connect(m_exportAllAction, &QAction::triggered, this,
           &MainWindow::onExportAllChapters);
 
-  auto *copyHtmlAction =
+  m_copyHtmlAction =
       exportMenu->addAction(QStringLiteral("&Copy HTML to Clipboard"));
-  copyHtmlAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+C")));
-  connect(copyHtmlAction, &QAction::triggered, this,
+  m_copyHtmlAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+C")));
+  connect(m_copyHtmlAction, &QAction::triggered, this,
           &MainWindow::onCopyHtmlToClipboard);
 
   // View menu - simplified preview controls
@@ -124,6 +169,65 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   popOutAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+P")));
   connect(popOutAction, &QAction::triggered, this, &MainWindow::onPopOutPreview);
 
+  // View -> Theme
+  viewMenu->addSeparator();
+  auto *themeMenu = viewMenu->addMenu(QStringLiteral("&Theme"));
+  m_darkThemeAction = themeMenu->addAction(QStringLiteral("🌙 &Dark Mode"));
+  m_darkThemeAction->setCheckable(true);
+  m_darkThemeAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+1")));
+
+  m_darkerThemeAction = themeMenu->addAction(QStringLiteral("🖤 &Darker Mode (OLED)"));
+  m_darkerThemeAction->setCheckable(true);
+  m_darkerThemeAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+2")));
+
+  m_lightThemeAction = themeMenu->addAction(QStringLiteral("☀️ &Light Mode"));
+  m_lightThemeAction->setCheckable(true);
+  m_lightThemeAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+3")));
+
+  m_themeGroup = new QActionGroup(this);
+  m_themeGroup->addAction(m_darkThemeAction);
+  m_themeGroup->addAction(m_darkerThemeAction);
+  m_themeGroup->addAction(m_lightThemeAction);
+
+  const AppTheme curTheme = ThemeManager::instance().currentTheme();
+  if (curTheme == AppTheme::Dark) {
+    m_darkThemeAction->setChecked(true);
+  } else if (curTheme == AppTheme::Darker) {
+    m_darkerThemeAction->setChecked(true);
+  } else {
+    m_lightThemeAction->setChecked(true);
+  }
+
+  connect(m_darkThemeAction, &QAction::triggered, this, []() {
+    ThemeManager::instance().setTheme(AppTheme::Dark);
+  });
+  connect(m_darkerThemeAction, &QAction::triggered, this, []() {
+    ThemeManager::instance().setTheme(AppTheme::Darker);
+  });
+  connect(m_lightThemeAction, &QAction::triggered, this, []() {
+    ThemeManager::instance().setTheme(AppTheme::Light);
+  });
+
+  auto *toggleThemeAction = viewMenu->addAction(QStringLiteral("Toggle &Theme"));
+  toggleThemeAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+T")));
+  connect(toggleThemeAction, &QAction::triggered, this, []() {
+    ThemeManager::instance().toggleTheme();
+  });
+
+  viewMenu->addSeparator();
+  auto *agentThoughtsAction = viewMenu->addAction(QStringLiteral("🧠 AI Agent &Thoughts Monitor…"));
+  agentThoughtsAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+A")));
+  connect(agentThoughtsAction, &QAction::triggered, this, &MainWindow::onShowAgentThoughts);
+
+  m_loreGraphAction = viewMenu->addAction(QStringLiteral("🗺️ Lore Graph && Narrative &Map…"));
+  m_loreGraphAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+L")));
+  connect(m_loreGraphAction, &QAction::triggered, this, &MainWindow::onShowLoreGraph);
+
+  viewMenu->addSeparator();
+  auto *viewPrefAction = viewMenu->addAction(QStringLiteral("Preference&s…"));
+  viewPrefAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+,")));
+  connect(viewPrefAction, &QAction::triggered, this, &MainWindow::onShowSettings);
+
   if (EnsembleDebug::isDebugBuild()) {
     viewMenu->addSeparator();
     auto *debugConsoleAction = viewMenu->addAction(QStringLiteral("Debug &Console"));
@@ -132,6 +236,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   }
 
   // Help menu
+  auto *helpGuideAction = helpMenu->addAction(QStringLiteral("📖 Help && User Guide…"));
+  helpGuideAction->setShortcut(QKeySequence::HelpContents);
+  connect(helpGuideAction, &QAction::triggered, this, &MainWindow::onShowHelpGuide);
+
+  helpMenu->addSeparator();
   auto *aboutAction = helpMenu->addAction(QStringLiteral("&About Ensemble"));
   connect(aboutAction, &QAction::triggered, this, &MainWindow::onShowAbout);
 
@@ -185,8 +294,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
           &MainWindow::onOpenProject);
   connect(m_mainMenuWidget, &MainMenuWidget::saveProjectRequested, this,
           &MainWindow::onSaveProject);
+  connect(m_mainMenuWidget, &MainMenuWidget::closeProjectRequested, this,
+          &MainWindow::onCloseProject);
   connect(m_mainMenuWidget, &MainMenuWidget::startWritingRequested, this,
           &MainWindow::onStartWriting);
+  connect(m_mainMenuWidget, &MainMenuWidget::settingsRequested, this,
+          &MainWindow::onShowSettings);
+  connect(m_mainMenuWidget, &MainMenuWidget::helpRequested, this,
+          &MainWindow::onShowHelpGuide);
 
   m_centralStack->addWidget(m_mainMenuWidget); // Index 0
   m_centralStack->addWidget(central);          // Index 1
@@ -236,6 +351,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(m_cssPane->editor(), &QPlainTextEdit::cursorPositionChanged, this, &MainWindow::updateCursorPosition);
 
   qApp->installEventFilter(this);
+  setAcceptDrops(true);
 
   loadCurrentChapterIntoEditors();
   m_cssPane->setCss(m_project.workSkinCss());
@@ -256,80 +372,348 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
           &MainWindow::onReplaceRequested);
   addAction(replaceAction);
 
+  m_hasActiveProject = false;
+  m_project.setDirty(false);
+  updateMainMenuState();
   updateWindowTitle();
   setupStatusBar();
-  schedulePreviewUpdate();
 
-  // Open Welcome UI / Main Menu automatically on startup
-  QTimer::singleShot(0, this, &MainWindow::onShowMainMenu);
+  // 60-second autosave timer
+  m_autosaveTimer = new QTimer(this);
+  m_autosaveTimer->setInterval(60000); // 60 seconds
+  connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::performAutosave);
+  m_autosaveTimer->start();
+
+  // Check for unsaved session crash recovery
+  QTimer::singleShot(250, this, &MainWindow::checkForCrashRecovery);
+
+  // Auto-start MCP server if enabled in preferences
+  QSettings settings(QStringLiteral("Ensemble"), QStringLiteral("Ensemble"));
+  if (settings.value(QStringLiteral("ai/mcpEnabled"), false).toBool()) {
+    const quint16 port = static_cast<quint16>(settings.value(QStringLiteral("ai/mcpPort"), 26303).toUInt());
+    startMcpServer(port);
+  }
+}
+
+MainWindow::~MainWindow() {
+  if (m_mcpServer) {
+    m_mcpServer->disconnect();
+    m_mcpServer->stop();
+  }
 }
 
 void MainWindow::closeEvent(QCloseEvent *event) {
-  if (maybeSave())
+  if (maybeSave(QStringLiteral("closing"), false)) {
+    if (m_mcpServer) {
+      m_mcpServer->stop();
+    }
     event->accept();
-  else
+  } else {
     event->ignore();
+  }
 }
 
-bool MainWindow::maybeSave() {
-  if (!m_project.isDirty())
-    return true;
-
-  const auto reply = QMessageBox::question(
-      this, QStringLiteral("Unsaved Changes"),
-      QStringLiteral("Save changes before closing?"),
-      QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
-      QMessageBox::Save);
-
-  if (reply == QMessageBox::Cancel)
+bool MainWindow::hasUnsavedChanges() const {
+  if (!m_hasActiveProject)
     return false;
-  if (reply == QMessageBox::Discard)
+  if (m_project.isDirty())
     return true;
+  if (m_editorPane && m_editorPane->editor() && m_editorPane->editor()->document() &&
+      m_editorPane->editor()->document()->isModified())
+    return true;
+  if (m_htmlPane && m_htmlPane->editor() && m_htmlPane->editor()->document() &&
+      m_htmlPane->editor()->document()->isModified())
+    return true;
+  if (m_cssPane && m_cssPane->editor() && m_cssPane->editor()->document() &&
+      m_cssPane->editor()->document()->isModified())
+    return true;
+
+  // Untitled project with actual story content
+  if (m_project.filePath().isEmpty()) {
+    if (m_project.chapters().size() > 1)
+      return true;
+    if (m_project.chapters().size() == 1) {
+      const QString chHtml = m_project.chapters().first().html().trimmed();
+      if (!chHtml.isEmpty() && chHtml != QStringLiteral("<p></p>") && chHtml != QStringLiteral("<p><br/></p>"))
+        return true;
+    }
+    QFile defaultCss(QStringLiteral(":/default-work-skin.css"));
+    QString defCss;
+    if (defaultCss.open(QIODevice::ReadOnly | QIODevice::Text))
+      defCss = QString::fromUtf8(defaultCss.readAll());
+    if (m_project.workSkinCss() != defCss && !m_project.workSkinCss().trimmed().isEmpty())
+      return true;
+  }
+  return false;
+}
+
+bool MainWindow::maybeSave(const QString &actionContext, bool forcePromptIfActive) {
+  if (!m_hasActiveProject)
+    return true;
+
+  saveCurrentChapterFromEditors();
+
+  const bool hasChanges = hasUnsavedChanges();
+  if (!hasChanges && !forcePromptIfActive)
+    return true;
+
+  const QString projTitle = m_project.title().isEmpty()
+                                ? QStringLiteral("Untitled Project")
+                                : m_project.title().toHtmlEscaped();
+
+  QMessageBox msgBox(this);
+  msgBox.setWindowTitle(hasChanges ? QStringLiteral("Unsaved Changes")
+                                   : QStringLiteral("Save Active Project"));
+  msgBox.setIcon(hasChanges ? QMessageBox::Warning : QMessageBox::Question);
+  msgBox.setStyleSheet(ThemeManager::instance().getDialogStyleSheet());
+
+  if (hasChanges) {
+    msgBox.setText(QStringLiteral("<h3>Save changes before %1?</h3>"
+                                  "<p>The project <b>%2</b> has unsaved modifications. If you proceed without saving, your changes will be discarded.</p>")
+                       .arg(actionContext, projTitle));
+    msgBox.setInformativeText(QStringLiteral("Do you want to save your work now?"));
+  } else {
+    msgBox.setText(QStringLiteral("<h3>Save project before %1?</h3>"
+                                  "<p>An active project (<b>%2</b>) is currently open in this session.</p>")
+                       .arg(actionContext, projTitle));
+    msgBox.setInformativeText(QStringLiteral("Do you want to save your work before proceeding?"));
+  }
+
+  QPushButton *saveBtn = msgBox.addButton(QStringLiteral("Save"), QMessageBox::AcceptRole);
+  QPushButton *discardBtn = msgBox.addButton(QStringLiteral("Don't Save"), QMessageBox::DestructiveRole);
+  QPushButton *cancelBtn = msgBox.addButton(QStringLiteral("Cancel"), QMessageBox::RejectRole);
+  msgBox.setDefaultButton(saveBtn);
+  msgBox.exec();
+
+  if (msgBox.clickedButton() == cancelBtn) {
+    // User cancelled: abort action, keep window and data alive!
+    return false;
+  }
+
+  if (msgBox.clickedButton() == discardBtn) {
+    // User explicitly chose Don't Save: clean up autosave and allow action
+    removeAutosaveFile();
+    m_project.setDirty(false);
+    if (m_editorPane && m_editorPane->editor() && m_editorPane->editor()->document())
+      m_editorPane->editor()->document()->setModified(false);
+    if (m_htmlPane && m_htmlPane->editor() && m_htmlPane->editor()->document())
+      m_htmlPane->editor()->document()->setModified(false);
+    if (m_cssPane && m_cssPane->editor() && m_cssPane->editor()->document())
+      m_cssPane->editor()->document()->setModified(false);
+    return true;
+  }
+
+  // User clicked Save:
   onSaveProject();
-  return !m_project.isDirty();
+  if (hasUnsavedChanges()) {
+    // User cancelled the file dialog or saving failed: abort action!
+    return false;
+  }
+
+  removeAutosaveFile();
+  return true;
 }
 
 void MainWindow::onNewProject() {
-  if (!maybeSave())
+  if (m_hasActiveProject && !maybeSave(QStringLiteral("creating a new project"), true))
     return;
 
   saveCurrentChapterFromEditors();
+  removeAutosaveFile();
   m_project.resetToNew();
+  m_hasActiveProject = true;
+  m_project.setDirty(false);
   m_chapterSidebar->refresh();
   loadCurrentChapterIntoEditors();
   m_cssPane->setCss(m_project.workSkinCss());
   m_editorPane->setCustomCss(m_project.workSkinCss());
   m_editorPane->setAvailableCssClasses(m_cssPane->cssClassNames());
+  m_project.setDirty(false);
+  if (m_editorPane && m_editorPane->editor() && m_editorPane->editor()->document())
+    m_editorPane->editor()->document()->setModified(false);
+  if (m_htmlPane && m_htmlPane->editor() && m_htmlPane->editor()->document())
+    m_htmlPane->editor()->document()->setModified(false);
+  if (m_cssPane && m_cssPane->editor() && m_cssPane->editor()->document())
+    m_cssPane->editor()->document()->setModified(false);
   updateWindowTitle();
+  updateMainMenuState();
   schedulePreviewUpdate();
   m_centralStack->setCurrentIndex(1);
 }
 
-void MainWindow::onOpenProject() {
-  if (!maybeSave())
-    return;
-
-  const QString path = QFileDialog::getOpenFileName(
-      this, QStringLiteral("Open Project"), QString(),
-      QStringLiteral("AO3 Project (*.ao3proj);;All Files (*)"));
+bool MainWindow::openProjectFile(const QString &path) {
   if (path.isEmpty())
-    return;
+    return false;
 
-  QString error;
-  if (!ProjectSerializer::load(path, m_project, &error)) {
-    QMessageBox::critical(this, QStringLiteral("Open Failed"), error);
-    return;
+  QString cleanPath = path.trimmed();
+  if ((cleanPath.startsWith(QLatin1Char('"')) && cleanPath.endsWith(QLatin1Char('"'))) ||
+      (cleanPath.startsWith(QLatin1Char('\'')) && cleanPath.endsWith(QLatin1Char('\'')))) {
+    cleanPath = cleanPath.mid(1, cleanPath.length() - 2).trimmed();
+  }
+  if (cleanPath.startsWith(QLatin1String("file://"), Qt::CaseInsensitive)) {
+    cleanPath = QUrl(cleanPath).toLocalFile();
+  }
+  const QFileInfo cleanFi(cleanPath);
+  cleanPath = cleanFi.absoluteFilePath();
+
+  if (m_hasActiveProject && !maybeSave(QStringLiteral("opening another project"), true))
+    return false;
+
+  QString loadPath = cleanPath;
+  bool isRecoveredSession = false;
+
+  // Check if companion .ao3projasve exists
+  QString companionAutosave = cleanPath;
+  if (companionAutosave.endsWith(QStringLiteral(".ao3proj"), Qt::CaseInsensitive)) {
+    companionAutosave.chop(8);
+  }
+  companionAutosave += QStringLiteral(".ao3projasve");
+
+  if (cleanPath.endsWith(QStringLiteral(".ao3projasve"), Qt::CaseInsensitive)) {
+    loadPath = cleanPath;
+    isRecoveredSession = true;
+  } else if (QFile::exists(companionAutosave)) {
+    QFileInfo autoFi(companionAutosave);
+    QFileInfo origFi(cleanPath);
+    if (autoFi.lastModified() >= origFi.lastModified()) {
+      QMessageBox msgBox(this);
+      msgBox.setWindowTitle(QStringLiteral("Autosave Recovery Detected"));
+      msgBox.setIcon(QMessageBox::Question);
+      msgBox.setText(QStringLiteral("<h3>Autosave Recovery File Found</h3>"
+                                    "<p>A newer autosaved recovery file (<b>%1</b>) was found from an unsaved session.<br/>"
+                                    "<small>Autosaved on: %2</small><br/>"
+                                    "<small>Last saved on: %3</small></p>"
+                                    "<p>Would you like to recover your unsaved session or open the last explicitly saved file?</p>")
+                         .arg(autoFi.fileName(),
+                              autoFi.lastModified().toString(Qt::ISODate),
+                              origFi.lastModified().toString(Qt::ISODate)));
+      QPushButton *recoverBtn = msgBox.addButton(QStringLiteral("Recover Autosave"), QMessageBox::AcceptRole);
+      QPushButton *openSavedBtn = msgBox.addButton(QStringLiteral("Open Last Saved"), QMessageBox::RejectRole);
+      msgBox.setDefaultButton(recoverBtn);
+      msgBox.exec();
+
+      if (msgBox.clickedButton() == recoverBtn) {
+        loadPath = companionAutosave;
+        isRecoveredSession = true;
+      } else {
+        QFile::remove(companionAutosave);
+      }
+    }
   }
 
+  qCInfo(logApp) << "Opening project with 3-stage validation:" << loadPath;
+  ProjectLoadReport report = ProjectSerializer::loadWithValidation(loadPath, m_project);
+
+  if (!report.success) {
+    qCWarning(logApp) << "Failed to open project file:" << loadPath
+                      << "Stage:" << static_cast<int>(report.failedStage)
+                      << "Reason:" << report.summaryError;
+
+    // Fail straight to Main Menu with an error and a button showing detailed explanation
+    m_hasActiveProject = false;
+    updateMainMenuState();
+    updateWindowTitle();
+    m_centralStack->setCurrentIndex(0);
+
+    ProjectLoadErrorDialog errDialog(report, this);
+    errDialog.exec();
+    return false;
+  }
+
+  // Render project
+  m_hasActiveProject = true;
   m_chapterSidebar->refresh();
   loadCurrentChapterIntoEditors();
   m_cssPane->setCss(m_project.workSkinCss());
   m_editorPane->setCustomCss(m_project.workSkinCss());
   m_editorPane->setAvailableCssClasses(m_cssPane->cssClassNames());
+
+  if (isRecoveredSession) {
+    if (cleanPath.endsWith(QStringLiteral(".ao3projasve"), Qt::CaseInsensitive)) {
+      QString targetProj = cleanPath;
+      targetProj.chop(12);
+      targetProj += QStringLiteral(".ao3proj");
+      m_project.setFilePath(targetProj);
+    } else {
+      m_project.setFilePath(cleanPath);
+    }
+    m_project.setDirty(true);
+    m_lastAutosavePath = companionAutosave;
+    updateWindowTitle();
+    updateMainMenuState();
+    schedulePreviewUpdate();
+    m_centralStack->setCurrentIndex(1); // Workspace
+    statusBar()->showMessage(QStringLiteral("Project successfully recovered from autosave (.ao3projasve)"), 6000);
+    return true;
+  }
+
+  m_project.setDirty(false);
+  if (m_editorPane && m_editorPane->editor() && m_editorPane->editor()->document())
+    m_editorPane->editor()->document()->setModified(false);
+  if (m_htmlPane && m_htmlPane->editor() && m_htmlPane->editor()->document())
+    m_htmlPane->editor()->document()->setModified(false);
+  if (m_cssPane && m_cssPane->editor() && m_cssPane->editor()->document())
+    m_cssPane->editor()->document()->setModified(false);
+
   updateWindowTitle();
+  updateMainMenuState();
   schedulePreviewUpdate();
-  statusBar()->showMessage(QStringLiteral("Opened %1").arg(path), 3000);
-  m_centralStack->setCurrentIndex(1);
+  m_centralStack->setCurrentIndex(1); // Workspace
+
+  if (report.isLegacy) {
+    qCInfo(logApp) << "Legacy project format detected for:" << cleanPath;
+    statusBar()->showMessage(QStringLiteral("Opened legacy project in compatibility mode (saving will output as .ao3proj)"), 6000);
+
+    QMessageBox msgBox(this);
+    msgBox.setIcon(QMessageBox::Information);
+    msgBox.setWindowTitle(QStringLiteral("Legacy Project Format"));
+    msgBox.setText(QStringLiteral("<h3>Legacy Project Format Detected</h3>"
+                                  "<p>This project is saved in an older legacy format (v1 JSON) and has been opened in <b>legacy compatibility mode</b>.</p>"));
+    msgBox.setInformativeText(QStringLiteral(
+        "When you save, Ensemble will automatically upgrade and save it as the standard modern <b>.ao3proj</b> archive container format."));
+    msgBox.setStandardButtons(QMessageBox::Ok);
+    msgBox.setStyleSheet(ThemeManager::instance().getDialogStyleSheet());
+    msgBox.exec();
+  } else {
+    statusBar()->showMessage(QStringLiteral("Opened %1").arg(cleanPath), 3000);
+  }
+
+  return true;
+}
+
+void MainWindow::onOpenProject() {
+  const QString path = QFileDialog::getOpenFileName(
+      this, QStringLiteral("Open Project"), QString(),
+      QStringLiteral("AO3 Project (*.ao3proj *.ao3projasve);;Legacy AO3 JSON (*.json);;All Files (*)"));
+  if (path.isEmpty())
+    return;
+
+  openProjectFile(path);
+}
+
+void MainWindow::onCloseProject() {
+  if (m_hasActiveProject && !maybeSave(QStringLiteral("closing the project"), true))
+    return;
+
+  removeAutosaveFile();
+  m_project.resetToNew();
+  m_hasActiveProject = false;
+  m_project.setDirty(false);
+  m_chapterSidebar->refresh();
+  loadCurrentChapterIntoEditors();
+  m_cssPane->setCss(m_project.workSkinCss());
+  m_editorPane->setCustomCss(m_project.workSkinCss());
+  m_editorPane->setAvailableCssClasses(m_cssPane->cssClassNames());
+  m_project.setDirty(false);
+  if (m_editorPane && m_editorPane->editor() && m_editorPane->editor()->document())
+    m_editorPane->editor()->document()->setModified(false);
+  if (m_htmlPane && m_htmlPane->editor() && m_htmlPane->editor()->document())
+    m_htmlPane->editor()->document()->setModified(false);
+  if (m_cssPane && m_cssPane->editor() && m_cssPane->editor()->document())
+    m_cssPane->editor()->document()->setModified(false);
+  updateWindowTitle();
+  updateMainMenuState();
+  m_centralStack->setCurrentIndex(0);
 }
 
 void MainWindow::onSaveProject() {
@@ -357,17 +741,192 @@ void MainWindow::onSaveProjectAs() {
 bool MainWindow::saveProjectToPath(const QString &path) {
   saveCurrentChapterFromEditors();
 
+  QString finalPath = path;
+  if (!finalPath.endsWith(QStringLiteral(".ao3proj"), Qt::CaseInsensitive)) {
+    // If it was legacy .json or anything else, replace or append .ao3proj
+    int dotIdx = finalPath.lastIndexOf(QLatin1Char('.'));
+    if (dotIdx > 0 && finalPath.mid(dotIdx).contains(QStringLiteral("json"), Qt::CaseInsensitive)) {
+      finalPath = finalPath.left(dotIdx) + QStringLiteral(".ao3proj");
+    } else {
+      finalPath += QStringLiteral(".ao3proj");
+    }
+  }
+
   QString error;
-  if (!ProjectSerializer::save(path, m_project, &error)) {
+  if (!ProjectSerializer::save(finalPath, m_project, &error)) {
     QMessageBox::critical(this, QStringLiteral("Save Failed"), error);
     return false;
   }
 
-  m_project.setFilePath(path);
+  const bool wasLegacy = m_project.isLegacyFormat();
+  m_project.setLegacyFormat(false);
+  m_project.setFilePath(finalPath);
   m_project.setDirty(false);
+  if (m_editorPane && m_editorPane->editor() && m_editorPane->editor()->document())
+    m_editorPane->editor()->document()->setModified(false);
+  if (m_htmlPane && m_htmlPane->editor() && m_htmlPane->editor()->document())
+    m_htmlPane->editor()->document()->setModified(false);
+  if (m_cssPane && m_cssPane->editor() && m_cssPane->editor()->document())
+    m_cssPane->editor()->document()->setModified(false);
+
+  removeAutosaveFile();
   updateWindowTitle();
-  statusBar()->showMessage(QStringLiteral("Saved %1").arg(path), 3000);
+  if (wasLegacy) {
+    statusBar()->showMessage(QStringLiteral("Project upgraded and saved as .ao3proj: %1").arg(finalPath), 4000);
+  } else {
+    statusBar()->showMessage(QStringLiteral("Saved %1").arg(finalPath), 3000);
+  }
   return true;
+}
+
+QString MainWindow::currentAutosaveFilePath() const {
+  if (!m_project.filePath().isEmpty()) {
+    QString path = m_project.filePath();
+    if (path.endsWith(QStringLiteral(".ao3proj"), Qt::CaseInsensitive)) {
+      path.chop(8);
+    }
+    return path + QStringLiteral(".ao3projasve");
+  }
+
+  QString safeTitle = m_project.title().trimmed().toLower();
+  safeTitle.replace(QRegularExpression(QStringLiteral("[^a-z0-9_-]")), QStringLiteral("_"));
+  if (safeTitle.isEmpty()) {
+    safeTitle = QStringLiteral("untitled_project");
+  }
+  return QDir(AppPaths::autosaveDir()).filePath(safeTitle + QStringLiteral(".ao3projasve"));
+}
+
+void MainWindow::performAutosave() {
+  if (!m_hasActiveProject)
+    return;
+
+  saveCurrentChapterFromEditors();
+
+  if (!hasUnsavedChanges())
+    return;
+
+  const QString autosavePath = currentAutosaveFilePath();
+  if (autosavePath.isEmpty())
+    return;
+
+  QFileInfo fi(autosavePath);
+  QDir().mkpath(fi.absolutePath());
+
+  QString err;
+  if (ProjectSerializer::save(autosavePath, m_project, &err)) {
+    const_cast<MainWindow *>(this)->m_lastAutosavePath = autosavePath;
+    qCInfo(logApp) << "60-second autosave written to:" << autosavePath;
+
+    QSettings settings(QStringLiteral("Ensemble"), QStringLiteral("Ensemble"));
+    settings.setValue(QStringLiteral("autosave/hasActiveRecovery"), true);
+    settings.setValue(QStringLiteral("autosave/recoveryFile"), autosavePath);
+    settings.setValue(QStringLiteral("autosave/originalFile"), m_project.filePath());
+    settings.setValue(QStringLiteral("autosave/projectTitle"), m_project.title());
+    settings.setValue(QStringLiteral("autosave/timestamp"), QDateTime::currentDateTime().toString(Qt::ISODate));
+
+    statusBar()->showMessage(QStringLiteral("Autosaved session (%1)").arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss"))), 3000);
+  } else {
+    qCWarning(logApp) << "Autosave failed:" << err;
+  }
+}
+
+void MainWindow::removeAutosaveFile() {
+  const QString autoPath = currentAutosaveFilePath();
+  if (QFile::exists(autoPath)) {
+    QFile::remove(autoPath);
+  }
+  if (!m_lastAutosavePath.isEmpty() && QFile::exists(m_lastAutosavePath)) {
+    QFile::remove(m_lastAutosavePath);
+    m_lastAutosavePath.clear();
+  }
+  clearAutosaveSettings();
+}
+
+void MainWindow::clearAutosaveSettings() {
+  QSettings settings(QStringLiteral("Ensemble"), QStringLiteral("Ensemble"));
+  settings.setValue(QStringLiteral("autosave/hasActiveRecovery"), false);
+  settings.remove(QStringLiteral("autosave/recoveryFile"));
+  settings.remove(QStringLiteral("autosave/originalFile"));
+  settings.remove(QStringLiteral("autosave/projectTitle"));
+  settings.remove(QStringLiteral("autosave/timestamp"));
+}
+
+void MainWindow::checkForCrashRecovery() {
+  if (m_hasActiveProject)
+    return;
+
+  QSettings settings(QStringLiteral("Ensemble"), QStringLiteral("Ensemble"));
+  QString recoveryFile;
+  QString originalFile;
+  QString projectTitle;
+  QString timestampStr;
+
+  if (settings.value(QStringLiteral("autosave/hasActiveRecovery"), false).toBool()) {
+    recoveryFile = settings.value(QStringLiteral("autosave/recoveryFile")).toString();
+    originalFile = settings.value(QStringLiteral("autosave/originalFile")).toString();
+    projectTitle = settings.value(QStringLiteral("autosave/projectTitle")).toString();
+    timestampStr = settings.value(QStringLiteral("autosave/timestamp")).toString();
+  }
+
+  if (recoveryFile.isEmpty() || !QFile::exists(recoveryFile)) {
+    QDir autoDir(AppPaths::autosaveDir());
+    const QStringList files = autoDir.entryList({QStringLiteral("*.ao3projasve")}, QDir::Files, QDir::Time);
+    if (!files.isEmpty()) {
+      recoveryFile = autoDir.filePath(files.first());
+      projectTitle = QFileInfo(recoveryFile).baseName();
+      timestampStr = QFileInfo(recoveryFile).lastModified().toString(Qt::ISODate);
+    }
+  }
+
+  if (recoveryFile.isEmpty() || !QFile::exists(recoveryFile))
+    return;
+
+  QMessageBox msgBox(this);
+  msgBox.setWindowTitle(QStringLiteral("Session Crash Recovery"));
+  msgBox.setIcon(QMessageBox::Information);
+  msgBox.setText(QStringLiteral("<h3>Recover Unsaved Project?</h3>"
+                                "<p>Ensemble detected an autosaved recovery file from a previous session that did not close cleanly:</p>"
+                                "<p><b>%1</b><br/>"
+                                "<small>Autosaved on: %2</small></p>"
+                                "<p>Would you like to recover your unsaved work?</p>")
+                     .arg(projectTitle.isEmpty() ? QFileInfo(recoveryFile).fileName() : projectTitle.toHtmlEscaped(),
+                          timestampStr.isEmpty() ? QFileInfo(recoveryFile).lastModified().toString(Qt::ISODate) : timestampStr));
+  QPushButton *recoverBtn = msgBox.addButton(QStringLiteral("Recover Project"), QMessageBox::AcceptRole);
+  QPushButton *discardBtn = msgBox.addButton(QStringLiteral("Discard"), QMessageBox::DestructiveRole);
+  msgBox.setDefaultButton(recoverBtn);
+  msgBox.exec();
+
+  if (msgBox.clickedButton() == recoverBtn) {
+    qCInfo(logApp) << "Recovering project from autosave:" << recoveryFile;
+    ProjectLoadReport report = ProjectSerializer::loadWithValidation(recoveryFile, m_project);
+    if (report.success) {
+      m_hasActiveProject = true;
+      m_project.setDirty(true);
+      if (!originalFile.isEmpty()) {
+        m_project.setFilePath(originalFile);
+      }
+      m_lastAutosavePath = recoveryFile;
+      m_chapterSidebar->refresh();
+      loadCurrentChapterIntoEditors();
+      m_cssPane->setCss(m_project.workSkinCss());
+      m_editorPane->setCustomCss(m_project.workSkinCss());
+      m_editorPane->setAvailableCssClasses(m_cssPane->cssClassNames());
+      m_project.setDirty(true);
+      updateWindowTitle();
+      updateMainMenuState();
+      schedulePreviewUpdate();
+      m_centralStack->setCurrentIndex(1); // Workspace
+      statusBar()->showMessage(QStringLiteral("Project successfully recovered from autosave (.ao3projasve)"), 6000);
+    } else {
+      qCWarning(logApp) << "Failed to recover from autosave:" << report.summaryError;
+      QMessageBox::warning(this, QStringLiteral("Recovery Failed"),
+                           QStringLiteral("Could not load autosaved file: %1").arg(report.summaryError));
+    }
+  } else {
+    qCInfo(logApp) << "Discarding autosave file:" << recoveryFile;
+    QFile::remove(recoveryFile);
+    clearAutosaveSettings();
+  }
 }
 
 void MainWindow::onExportChapterHtml() {
@@ -438,6 +997,8 @@ void MainWindow::onImportFromAo3() {
 }
 
 void MainWindow::onEditorContentChanged() {
+  if (!m_hasActiveProject)
+    return;
   m_project.setDirty(true);
   updateWindowTitle();
   updateStatusBar();
@@ -471,7 +1032,9 @@ void MainWindow::onHtmlApplyRequested(const QString &html) {
 
   if (Chapter *chapter = m_project.activeChapter()) {
     chapter->setHtml(sanitized);
-    m_project.setDirty(true);
+    if (m_hasActiveProject) {
+      m_project.setDirty(true);
+    }
   }
 
   m_syncInProgress = false;
@@ -488,6 +1051,8 @@ void MainWindow::onHtmlEditingFinished() { m_htmlSourceEditing = false; }
 void MainWindow::onHtmlChanged(const QString &html) {
   // Live preview update from HTML source editing
   m_pendingHtml = html;
+  if (!m_hasActiveProject)
+    return;
   m_project.setDirty(true);
   updateWindowTitle();
   schedulePreviewUpdate();
@@ -503,6 +1068,10 @@ void MainWindow::onTabChanged(int index) {
 }
 
 void MainWindow::onCssChanged(const QString &css) {
+  if (!m_hasActiveProject) {
+    m_editorPane->setCustomCss(css);
+    return;
+  }
   m_project.setWorkSkinCss(css);
   m_project.setDirty(true);
   updateWindowTitle();
@@ -530,6 +1099,8 @@ void MainWindow::onChapterSelected(int index) {
 }
 
 void MainWindow::onChaptersReordered() {
+  if (!m_hasActiveProject)
+    return;
   m_project.setDirty(true);
   updateWindowTitle();
 }
@@ -542,6 +1113,13 @@ void MainWindow::loadCurrentChapterIntoEditors() {
   m_editorPane->setHtml(html);
   m_htmlPane->setHtml(html);
   m_syncInProgress = false;
+
+  if (m_editorPane && m_editorPane->editor() && m_editorPane->editor()->document())
+    m_editorPane->editor()->document()->setModified(false);
+  if (m_htmlPane && m_htmlPane->editor() && m_htmlPane->editor()->document())
+    m_htmlPane->editor()->document()->setModified(false);
+  if (m_cssPane && m_cssPane->editor() && m_cssPane->editor()->document())
+    m_cssPane->editor()->document()->setModified(false);
 
   updateStatusBar();
   m_editorPane->focusEditor();
@@ -594,7 +1172,16 @@ void MainWindow::updateStatusBar() {
 }
 
 void MainWindow::updateWindowTitle() {
-  QString title = m_project.title();
+  if (!m_hasActiveProject) {
+    setWindowTitle(QStringLiteral("Ensemble"));
+    return;
+  }
+
+  QString title = m_project.title().trimmed();
+  if (title.isEmpty()) {
+    title = QStringLiteral("Untitled Work");
+  }
+
   if (m_project.isDirty())
     title += QStringLiteral(" *");
 
@@ -605,9 +1192,62 @@ void MainWindow::updateWindowTitle() {
   setWindowTitle(title);
 }
 
-void MainWindow::onShowMainMenu() { m_centralStack->setCurrentIndex(0); }
+void MainWindow::onShowMainMenu() {
+  updateMainMenuState();
+  m_centralStack->setCurrentIndex(0);
+}
 
-void MainWindow::onStartWriting() { m_centralStack->setCurrentIndex(1); }
+void MainWindow::onStartWriting() {
+  if (!m_hasActiveProject) {
+    m_hasActiveProject = true;
+    m_project.resetToNew();
+    m_project.setDirty(false);
+    updateMainMenuState();
+  }
+  updateWindowTitle();
+  schedulePreviewUpdate();
+  m_centralStack->setCurrentIndex(1);
+}
+
+void MainWindow::onShowHelpGuide() {
+  if (!m_helpGuideDialog) {
+    m_helpGuideDialog = new HelpGuideDialog(this);
+  }
+  m_helpGuideDialog->updateTheme();
+  m_helpGuideDialog->show();
+  m_helpGuideDialog->raise();
+  m_helpGuideDialog->activateWindow();
+}
+
+void MainWindow::updateMainMenuState() {
+  if (m_mainMenuWidget) {
+    m_mainMenuWidget->setProjectState(m_hasActiveProject, m_project.title());
+  }
+  if (m_closeProjectAction) {
+    m_closeProjectAction->setEnabled(m_hasActiveProject);
+  }
+  if (m_saveAction) {
+    m_saveAction->setEnabled(m_hasActiveProject);
+  }
+  if (m_saveAsAction) {
+    m_saveAsAction->setEnabled(m_hasActiveProject);
+  }
+  if (m_exportChapterAction) {
+    m_exportChapterAction->setEnabled(m_hasActiveProject);
+  }
+  if (m_exportAllAction) {
+    m_exportAllAction->setEnabled(m_hasActiveProject);
+  }
+  if (m_copyHtmlAction) {
+    m_copyHtmlAction->setEnabled(m_hasActiveProject);
+  }
+  if (m_propertiesAction) {
+    m_propertiesAction->setEnabled(m_hasActiveProject);
+  }
+  if (m_loreGraphAction) {
+    m_loreGraphAction->setEnabled(m_hasActiveProject);
+  }
+}
 
 void MainWindow::onShowAbout() { m_aboutDialog->exec(); }
 
@@ -695,27 +1335,19 @@ QWidget *MainWindow::activeTextEditor() const {
 
 void MainWindow::setupStatusBar() {
   QStatusBar *sb = statusBar();
-  sb->setStyleSheet(QStringLiteral(
-      "QStatusBar { background-color: #111116; color: #aeb3c6; border-top: 1px solid #282a36; font-size: 11px; padding: 2px 8px; }"
-  ));
+  sb->setStyleSheet(ThemeManager::instance().getStatusBarStyleSheet());
 
   m_statusInfoLabel = new QLabel(QStringLiteral("Ready"), this);
-  m_statusInfoLabel->setStyleSheet(QStringLiteral("color: #aeb3c6; font-size: 11px;"));
   sb->addWidget(m_statusInfoLabel, 1);
 
   // Line and Column Indicator (e.g. Ln 692, Col 31)
   m_lineColLabel = new QLabel(QStringLiteral("Ln 1, Col 1"), this);
-  m_lineColLabel->setStyleSheet(QStringLiteral("color: #aeb3c6; font-size: 11px; padding: 2px 8px;"));
   sb->addPermanentWidget(m_lineColLabel);
 
   // Insert/Overwrite Mode Toggle Button (INS / OVR)
   m_insertModeButton = new QPushButton(QStringLiteral("INS"), this);
   m_insertModeButton->setFlat(true);
   m_insertModeButton->setCursor(Qt::PointingHandCursor);
-  m_insertModeButton->setStyleSheet(QStringLiteral(
-      "QPushButton { color: #aeb3c6; padding: 2px 6px; font-size: 11px; font-weight: bold; border: none; }"
-      "QPushButton:hover { color: #ffffff; background-color: #282a36; border-radius: 3px; }"
-  ));
   connect(m_insertModeButton, &QPushButton::clicked, this, &MainWindow::toggleInsertMode);
   sb->addPermanentWidget(m_insertModeButton);
 
@@ -731,14 +1363,30 @@ void MainWindow::setupStatusBar() {
   m_problemsBadgeButton = new QPushButton(this);
   m_problemsBadgeButton->setFlat(true);
   m_problemsBadgeButton->setCursor(Qt::PointingHandCursor);
-  m_problemsBadgeButton->setStyleSheet(QStringLiteral(
-      "QPushButton { color: #50fa7b; background-color: #192b20; border: 1px solid #1c452b; padding: 2px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; }"
-      "QPushButton:hover { background-color: #243f2f; }"
-  ));
   connect(m_problemsBadgeButton, &QPushButton::clicked, this, &MainWindow::onShowProblemsDialog);
   sb->addPermanentWidget(m_problemsBadgeButton);
 
-  updateProblemsDiagnostics();
+  // MCP Status Badge (🤖 MCP)
+  m_mcpStatusBadge = new QPushButton(this);
+  m_mcpStatusBadge->setFlat(true);
+  m_mcpStatusBadge->setCursor(Qt::PointingHandCursor);
+  m_mcpStatusBadge->setToolTip(QStringLiteral("Model Context Protocol (MCP) Server Status. Click to view AI Agent Thoughts & Monitor."));
+  m_mcpStatusBadge->setText(QStringLiteral("🤖 MCP: Off"));
+  m_mcpStatusBadge->setStyleSheet(QStringLiteral("color: #6272a4; font-size: 11px; padding: 2px 6px;"));
+  connect(m_mcpStatusBadge, &QPushButton::clicked, this, &MainWindow::onShowAgentThoughts);
+  sb->addPermanentWidget(m_mcpStatusBadge);
+
+  // Theme Quick Toggle Button (🌙 / ☀️)
+  m_themeToggleButton = new QPushButton(this);
+  m_themeToggleButton->setFlat(true);
+  m_themeToggleButton->setCursor(Qt::PointingHandCursor);
+  m_themeToggleButton->setToolTip(QStringLiteral("Toggle Dark / Light Theme"));
+  connect(m_themeToggleButton, &QPushButton::clicked, this, []() {
+      ThemeManager::instance().toggleTheme();
+  });
+  sb->addPermanentWidget(m_themeToggleButton);
+
+  onThemeChanged(ThemeManager::instance().currentTheme());
   updateCursorPosition();
 }
 
@@ -801,6 +1449,12 @@ void MainWindow::updateCapsLockState(bool active) {
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+  if (event->type() == QEvent::FileOpen) {
+    auto *fileOpenEvent = static_cast<QFileOpenEvent *>(event);
+    raiseToFront();
+    openProjectFile(fileOpenEvent->file());
+    return true;
+  }
   if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease) {
     auto *keyEvent = static_cast<QKeyEvent *>(event);
     if (keyEvent->key() == Qt::Key_CapsLock) {
@@ -828,6 +1482,44 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
   return QMainWindow::eventFilter(watched, event);
 }
 
+void MainWindow::dragEnterEvent(QDragEnterEvent *event) {
+  if (event->mimeData() && event->mimeData()->hasUrls()) {
+    const QList<QUrl> urls = event->mimeData()->urls();
+    for (const QUrl &url : urls) {
+      if (url.isLocalFile()) {
+        const QString localFile = url.toLocalFile();
+        if (localFile.endsWith(QStringLiteral(".ao3proj"), Qt::CaseInsensitive) ||
+            localFile.endsWith(QStringLiteral(".ao3projasve"), Qt::CaseInsensitive) ||
+            localFile.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) {
+          event->acceptProposedAction();
+          return;
+        }
+      }
+    }
+  }
+  QMainWindow::dragEnterEvent(event);
+}
+
+void MainWindow::dropEvent(QDropEvent *event) {
+  if (event->mimeData() && event->mimeData()->hasUrls()) {
+    const QList<QUrl> urls = event->mimeData()->urls();
+    for (const QUrl &url : urls) {
+      if (url.isLocalFile()) {
+        const QString localFile = url.toLocalFile();
+        if (localFile.endsWith(QStringLiteral(".ao3proj"), Qt::CaseInsensitive) ||
+            localFile.endsWith(QStringLiteral(".ao3projasve"), Qt::CaseInsensitive) ||
+            localFile.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) {
+          event->acceptProposedAction();
+          raiseToFront();
+          openProjectFile(localFile);
+          return;
+        }
+      }
+    }
+  }
+  QMainWindow::dropEvent(event);
+}
+
 void MainWindow::updateProblemsDiagnostics() {
   m_currentProblems.clear();
   int errorCount = 0;
@@ -850,6 +1542,7 @@ void MainWindow::updateProblemsDiagnostics() {
       item.category = QStringLiteral("Work Skin CSS");
       item.description = QStringLiteral("Duplicate CSS class '.%1' defined %2 times in Work Skin.").arg(iter.key()).arg(iter.value());
       item.chapterIndex = -1;
+      item.affectedChapters.clear();
       m_currentProblems.append(item);
       warningCount++;
     }
@@ -857,6 +1550,8 @@ void MainWindow::updateProblemsDiagnostics() {
 
   // 2. Check chapter structural issues & missing CSS classes
   static const QRegularExpression classAttrRe(R"re(class\s*=\s*"([^"]+)")re", QRegularExpression::CaseInsensitiveOption);
+  static const QRegularExpression tagExtractRe(R"(<\/?([a-zA-Z][\w:-]*))");
+  const QSet<QString> allowedTags = Ao3TagWhitelist::allowedTags();
   QMap<QString, QList<int>> missingClassChapters;
 
   int chIdx = 0;
@@ -868,6 +1563,7 @@ void MainWindow::updateProblemsDiagnostics() {
       item.category = QStringLiteral("Chapter Structure");
       item.description = QStringLiteral("Chapter %1 has an empty title.").arg(chIdx + 1);
       item.chapterIndex = chIdx;
+      item.affectedChapters = { chIdx };
       m_currentProblems.append(item);
       warningCount++;
     }
@@ -877,6 +1573,7 @@ void MainWindow::updateProblemsDiagnostics() {
       item.category = QStringLiteral("Chapter Content");
       item.description = QStringLiteral("Chapter %1 (\"%2\") has no body content.").arg(chIdx + 1).arg(ch.title());
       item.chapterIndex = chIdx;
+      item.affectedChapters = { chIdx };
       m_currentProblems.append(item);
       warningCount++;
     }
@@ -900,6 +1597,7 @@ void MainWindow::updateProblemsDiagnostics() {
                                  .arg(line)
                                  .arg(err);
           item.chapterIndex = chIdx;
+          item.affectedChapters = { chIdx };
           m_currentProblems.append(item);
           errorCount++;
           break;
@@ -915,8 +1613,30 @@ void MainWindow::updateProblemsDiagnostics() {
       item.category = QStringLiteral("AO3 Compliance");
       item.description = QStringLiteral("Inline style= attributes detected in Chapter %1 (\"%2\"). AO3 strips inline styles upon posting.").arg(chIdx + 1).arg(ch.title());
       item.chapterIndex = chIdx;
+      item.affectedChapters = { chIdx };
       m_currentProblems.append(item);
       warningCount++;
+    }
+
+    // Scan for disallowed HTML tags according to AO3 whitelist
+    QSet<QString> disallowedInChapter;
+    QRegularExpressionMatchIterator tagIt = tagExtractRe.globalMatch(html);
+    while (tagIt.hasNext()) {
+      const QString tagName = tagIt.next().captured(1).toLower();
+      if (!allowedTags.contains(tagName) && !disallowedInChapter.contains(tagName)) {
+        disallowedInChapter.insert(tagName);
+        ProblemItem item;
+        item.severity = ProblemItem::Warning;
+        item.category = QStringLiteral("AO3 Compliance");
+        item.description = QStringLiteral("Disallowed HTML tag <%1> detected in Chapter %2 (\"%3\"). AO3 will strip this tag upon posting.")
+                               .arg(tagName)
+                               .arg(chIdx + 1)
+                               .arg(ch.title());
+        item.chapterIndex = chIdx;
+        item.affectedChapters = { chIdx };
+        m_currentProblems.append(item);
+        warningCount++;
+      }
     }
 
     // Scan chapter HTML for used CSS classes missing from Work Skin CSS
@@ -954,6 +1674,7 @@ void MainWindow::updateProblemsDiagnostics() {
       item.description = QStringLiteral("CSS class '.%1' is used across %2 chapters, but is missing from Work Skin.").arg(cls).arg(chList.size());
     }
     item.chapterIndex = chList.first();
+    item.affectedChapters = chList;
     m_currentProblems.append(item);
     warningCount++;
   }
@@ -961,25 +1682,106 @@ void MainWindow::updateProblemsDiagnostics() {
   if (!m_problemsBadgeButton)
     return;
 
+  const bool isDark = ThemeManager::instance().isDarkMode();
   if (errorCount > 0) {
     m_problemsBadgeButton->setText(QStringLiteral("⊗ %1  ⚠ %2").arg(errorCount).arg(warningCount));
-    m_problemsBadgeButton->setStyleSheet(QStringLiteral(
+    m_problemsBadgeButton->setStyleSheet(isDark ? QStringLiteral(
         "QPushButton { color: #ff5555; background-color: #3b1818; border: 1px solid #621616; padding: 2px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; }"
         "QPushButton:hover { background-color: #542222; }"
+    ) : QStringLiteral(
+        "QPushButton { color: #dc2626; background-color: #fee2e2; border: 1px solid #fca5a5; padding: 2px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; }"
+        "QPushButton:hover { background-color: #fecaca; }"
     ));
   } else if (warningCount > 0) {
     m_problemsBadgeButton->setText(QStringLiteral("⊗ 0  ⚠ %1").arg(warningCount));
-    m_problemsBadgeButton->setStyleSheet(QStringLiteral(
+    m_problemsBadgeButton->setStyleSheet(isDark ? QStringLiteral(
         "QPushButton { color: #ffb86c; background-color: #2b2718; border: 1px solid #624c16; padding: 2px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; }"
         "QPushButton:hover { background-color: #3f3823; }"
+    ) : QStringLiteral(
+        "QPushButton { color: #d97706; background-color: #fef3c7; border: 1px solid #fde68a; padding: 2px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; }"
+        "QPushButton:hover { background-color: #fde68a; }"
     ));
   } else {
     m_problemsBadgeButton->setText(QStringLiteral("✔ 0 Problems"));
-    m_problemsBadgeButton->setStyleSheet(QStringLiteral(
+    m_problemsBadgeButton->setStyleSheet(isDark ? QStringLiteral(
         "QPushButton { color: #50fa7b; background-color: #192b20; border: 1px solid #1c452b; padding: 2px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; }"
         "QPushButton:hover { background-color: #243f2f; }"
+    ) : QStringLiteral(
+        "QPushButton { color: #15803d; background-color: #dcfce7; border: 1px solid #bbf7d0; padding: 2px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; }"
+        "QPushButton:hover { background-color: #bbf7d0; }"
     ));
   }
+}
+
+void MainWindow::onThemeChanged(AppTheme theme) {
+  if (m_darkThemeAction) m_darkThemeAction->setChecked(theme == AppTheme::Dark);
+  if (m_darkerThemeAction) m_darkerThemeAction->setChecked(theme == AppTheme::Darker);
+  if (m_lightThemeAction) m_lightThemeAction->setChecked(theme == AppTheme::Light);
+
+  const bool isDark = ThemeManager::instance().isDarkMode();
+
+  if (m_statusInfoLabel) {
+    m_statusInfoLabel->setStyleSheet(isDark ? QStringLiteral("color: #aeb3c6; font-size: 11px;")
+                                           : QStringLiteral("color: #475569; font-size: 11px;"));
+  }
+  if (m_lineColLabel) {
+    m_lineColLabel->setStyleSheet(isDark ? QStringLiteral("color: #aeb3c6; font-size: 11px; padding: 2px 8px;")
+                                         : QStringLiteral("color: #475569; font-size: 11px; padding: 2px 8px;"));
+  }
+  if (m_insertModeButton) {
+    m_insertModeButton->setStyleSheet(isDark ? QStringLiteral(
+        "QPushButton { color: #aeb3c6; padding: 2px 6px; font-size: 11px; font-weight: bold; border: none; }"
+        "QPushButton:hover { color: #ffffff; background-color: #282a36; border-radius: 3px; }"
+    ) : QStringLiteral(
+        "QPushButton { color: #475569; padding: 2px 6px; font-size: 11px; font-weight: bold; border: none; }"
+        "QPushButton:hover { color: #0f172a; background-color: #e2e8f0; border-radius: 3px; }"
+    ));
+  }
+  if (m_themeToggleButton) {
+    m_themeToggleButton->setText(isDark ? QStringLiteral("🌙") : QStringLiteral("☀️"));
+    m_themeToggleButton->setStyleSheet(isDark ? QStringLiteral(
+        "QPushButton { color: #f8f8f2; padding: 2px 6px; font-size: 12px; border: none; }"
+        "QPushButton:hover { background-color: #282a36; border-radius: 3px; }"
+    ) : QStringLiteral(
+        "QPushButton { color: #0f172a; padding: 2px 6px; font-size: 12px; border: none; }"
+        "QPushButton:hover { background-color: #e2e8f0; border-radius: 3px; }"
+    ));
+  }
+
+  statusBar()->setStyleSheet(ThemeManager::instance().getStatusBarStyleSheet());
+
+  if (m_chapterSidebar) {
+    m_chapterSidebar->setStyleSheet(ThemeManager::instance().getSidebarStyleSheet());
+  }
+  if (m_mainMenuWidget) {
+    m_mainMenuWidget->updateTheme();
+  }
+  if (m_editorPane) {
+    m_editorPane->updateTheme();
+  }
+  if (m_htmlPane) {
+    m_htmlPane->updateTheme();
+  }
+  if (m_cssPane) {
+    m_cssPane->updateTheme();
+  }
+  if (m_settingsDialog) {
+    m_settingsDialog->updateTheme();
+  }
+  if (m_aboutDialog) {
+    m_aboutDialog->updateTheme();
+  }
+  if (m_creditsDialog) {
+    m_creditsDialog->updateTheme();
+  }
+  if (m_problemsDialog) {
+    m_problemsDialog->updateTheme();
+  }
+  if (m_agentThoughtsDialog) {
+    m_agentThoughtsDialog->updateTheme();
+  }
+
+  updateProblemsDiagnostics();
 }
 
 void MainWindow::onShowProblemsDialog() {
@@ -996,3 +1798,359 @@ void MainWindow::onShowProblemsDialog() {
   m_problemsDialog->raise();
   m_problemsDialog->activateWindow();
 }
+
+void MainWindow::onShowSettings() {
+  if (!m_settingsDialog) {
+    m_settingsDialog = new SettingsDialog(this);
+    connect(m_settingsDialog, &SettingsDialog::editorSettingsChanged, this, [this]() {
+      if (m_editorPane)
+        m_editorPane->updateSettings();
+      if (m_htmlPane)
+        m_htmlPane->updateSettings();
+      if (m_cssPane)
+        m_cssPane->updateSettings();
+    });
+    connect(m_settingsDialog, &SettingsDialog::mcpServerToggled, this, [this](bool enabled) {
+      if (enabled) {
+        startMcpServer();
+      } else {
+        stopMcpServer();
+      }
+    });
+  }
+  m_settingsDialog->setMcpServer(m_mcpServer);
+  m_settingsDialog->show();
+  m_settingsDialog->raise();
+  m_settingsDialog->activateWindow();
+}
+
+void MainWindow::onShowAgentThoughts() {
+  if (!m_agentThoughtsDialog) {
+    m_agentThoughtsDialog = new AgentThoughtsDialog(m_mcpServer, this);
+  } else if (m_mcpServer) {
+    m_agentThoughtsDialog->setMcpServer(m_mcpServer);
+  }
+  m_agentThoughtsDialog->setProject(&m_project);
+  m_agentThoughtsDialog->show();
+  m_agentThoughtsDialog->raise();
+  m_agentThoughtsDialog->activateWindow();
+}
+
+void MainWindow::onShowLoreGraph() {
+  if (!m_hasActiveProject) {
+    return;
+  }
+  if (!m_loreGraphDialog) {
+    m_loreGraphDialog = new LoreGraphDialog(&m_project, this);
+  } else {
+    m_loreGraphDialog->setProject(&m_project);
+  }
+  m_loreGraphDialog->show();
+  m_loreGraphDialog->raise();
+  m_loreGraphDialog->activateWindow();
+}
+
+void MainWindow::onEditProperties() {
+  if (!m_hasActiveProject) {
+    return;
+  }
+  ProjectPropertiesDialog dialog(&m_project, this);
+  if (dialog.exec() == QDialog::Accepted) {
+    updateWindowTitle();
+    updateStatusBar();
+    updateLoreGraphUi();
+  }
+}
+
+void MainWindow::updateLoreGraphUi() {
+  if (m_loreGraphDialog && m_loreGraphDialog->isVisible()) {
+    m_loreGraphDialog->refreshFromProject();
+  }
+}
+
+void MainWindow::raiseToFront() {
+  qCInfo(logApp) << "Bringing existing MainWindow to the front of the desktop...";
+  if (isMinimized()) {
+    showNormal();
+  } else {
+    show();
+  }
+  setWindowState((windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
+  raise();
+  activateWindow();
+  if (auto *wh = windowHandle()) {
+    wh->requestActivate();
+  }
+  QApplication::alert(this, 1500);
+}
+
+void MainWindow::startMcpServer(quint16 preferredPort) {
+  if (!m_mcpServer) {
+    m_mcpServer = new McpServer(this);
+    m_mcpHandler = new McpHandler(m_mcpServer, this, this);
+
+    auto updateBadge = [this]() {
+      if (!m_mcpStatusBadge) return;
+      if (m_mcpServer && m_mcpServer->isRunning()) {
+        const int count = m_mcpServer->clientCount();
+        if (count > 0) {
+          m_mcpStatusBadge->setText(QStringLiteral("🤖 MCP:%1 (%2)").arg(m_mcpServer->port()).arg(count));
+          m_mcpStatusBadge->setToolTip(QStringLiteral("MCP Server listening on ws://127.0.0.1:%1 (%2 AI agent(s) connected). Click to view Agent Thoughts.")
+                                           .arg(m_mcpServer->port()).arg(count));
+        } else {
+          m_mcpStatusBadge->setText(QStringLiteral("🤖 MCP:%1").arg(m_mcpServer->port()));
+          m_mcpStatusBadge->setToolTip(QStringLiteral("MCP Server listening on ws://127.0.0.1:%1 (0 agents connected). Click to view Agent Thoughts.")
+                                           .arg(m_mcpServer->port()));
+        }
+        m_mcpStatusBadge->setStyleSheet(QStringLiteral(
+            "color: #50fa7b; font-weight: bold; font-size: 11px; padding: 2px 6px;"
+        ));
+      } else {
+        m_mcpStatusBadge->setText(QStringLiteral("🤖 MCP: Off"));
+        m_mcpStatusBadge->setToolTip(QStringLiteral("Model Context Protocol (MCP) Server is offline. Click to view Agent Thoughts or configure."));
+        m_mcpStatusBadge->setStyleSheet(QStringLiteral(
+            "color: #6272a4; font-size: 11px; padding: 2px 6px;"
+        ));
+      }
+    };
+
+    connect(m_mcpServer, &McpServer::statusChanged, this, updateBadge);
+    connect(m_mcpServer, &McpServer::agentPresenceChanged, this,
+            [this, updateBadge](int count, const QStringList &names) {
+              Q_UNUSED(count);
+              Q_UNUSED(names);
+              updateBadge();
+            });
+
+    if (m_agentThoughtsDialog) {
+      m_agentThoughtsDialog->setMcpServer(m_mcpServer);
+    }
+  }
+
+  if (!m_mcpServer->isRunning()) {
+    m_mcpServer->start(preferredPort);
+  }
+}
+
+void MainWindow::stopMcpServer() {
+  if (m_mcpServer && m_mcpServer->isRunning()) {
+    m_mcpServer->stop();
+  }
+}
+
+SanitizeResult MainWindow::applyMcpChapterHtml(int chapterIndex, const QString &html) {
+  if (!m_hasActiveProject || chapterIndex < 0 || chapterIndex >= m_project.chapters().size()) {
+    return {};
+  }
+
+  const SanitizeResult result = Ao3HtmlSanitizer::sanitizeDetailed(html);
+  m_project.chapters()[chapterIndex].setHtml(result.cleanHtml);
+  m_project.setDirty(true);
+
+  if (chapterIndex == m_project.activeChapterIndex()) {
+    m_syncInProgress = true;
+    m_editorPane->setHtml(result.cleanHtml);
+    m_htmlPane->setHtml(result.cleanHtml);
+    m_syncInProgress = false;
+    m_htmlSourceEditing = false;
+  }
+
+  updateWindowTitle();
+  updateStatusBar();
+  schedulePreviewUpdate();
+  updateProblemsDiagnostics();
+  return result;
+}
+
+void MainWindow::addChapterFromMcp(const QString &title) {
+  if (!m_hasActiveProject) return;
+  m_project.addChapter(title.isEmpty() ? QStringLiteral("New Chapter") : title);
+  m_project.setDirty(true);
+  m_chapterSidebar->refresh();
+  updateWindowTitle();
+  updateStatusBar();
+}
+
+void MainWindow::deleteChapterFromMcp(int chapterIndex) {
+  if (!m_hasActiveProject) return;
+  if (chapterIndex < 0 || chapterIndex >= m_project.chapters().size()) return;
+
+  m_project.removeChapter(chapterIndex);
+  m_project.setDirty(true);
+  m_chapterSidebar->refresh();
+  loadCurrentChapterIntoEditors();
+  updateWindowTitle();
+  updateStatusBar();
+  schedulePreviewUpdate();
+}
+
+void MainWindow::reorderChaptersFromMcp(int from, int to) {
+  if (!m_hasActiveProject) return;
+  m_project.moveChapter(from, to);
+  m_project.setDirty(true);
+  m_chapterSidebar->refresh();
+  updateWindowTitle();
+}
+
+void MainWindow::setWorkSkinCssFromMcp(const QString &css) {
+  if (!m_hasActiveProject) {
+    m_editorPane->setCustomCss(css);
+    return;
+  }
+  m_project.setWorkSkinCss(css);
+  m_project.setDirty(true);
+  m_cssPane->setCss(css);
+  m_editorPane->setCustomCss(css);
+  updateWindowTitle();
+  schedulePreviewUpdate();
+}
+
+bool MainWindow::saveProjectFromMcp() {
+  if (!m_hasActiveProject) return false;
+  if (m_project.filePath().isEmpty()) return false;
+  return saveProjectToPath(m_project.filePath());
+}
+
+bool MainWindow::loadProjectFromMcp(const QString &path, bool saveCurrent, QString *errorMessage) {
+  if (path.isEmpty() || !QFile::exists(path)) {
+    if (errorMessage) *errorMessage = QStringLiteral("File not found: %1").arg(path);
+    return false;
+  }
+
+  if (m_hasActiveProject && m_project.isDirty() && saveCurrent) {
+    if (!m_project.filePath().isEmpty()) {
+      saveProjectToPath(m_project.filePath());
+    }
+  }
+
+  Ao3Project loadedProj;
+  ProjectLoadReport report = ProjectSerializer::loadWithValidation(path, loadedProj);
+  if (!report.success) {
+    if (errorMessage) *errorMessage = report.summaryError;
+    return false;
+  }
+
+  m_project = loadedProj;
+  m_project.setFilePath(path);
+  m_hasActiveProject = true;
+  m_chapterSidebar->refresh();
+  loadCurrentChapterIntoEditors();
+  m_cssPane->setCss(m_project.workSkinCss());
+  m_editorPane->setCustomCss(m_project.workSkinCss());
+  m_editorPane->setAvailableCssClasses(m_cssPane->cssClassNames());
+
+  m_project.setDirty(false);
+  if (m_editorPane && m_editorPane->editor() && m_editorPane->editor()->document())
+    m_editorPane->editor()->document()->setModified(false);
+  if (m_htmlPane && m_htmlPane->editor() && m_htmlPane->editor()->document())
+    m_htmlPane->editor()->document()->setModified(false);
+  if (m_cssPane && m_cssPane->editor() && m_cssPane->editor()->document())
+    m_cssPane->editor()->document()->setModified(false);
+
+  removeAutosaveFile();
+  clearAutosaveSettings();
+
+  m_centralStack->setCurrentIndex(1);
+  updateMainMenuState();
+  updateWindowTitle();
+  updateStatusBar();
+  schedulePreviewUpdate();
+  updateProblemsDiagnostics();
+  updateLoreGraphUi();
+  return true;
+}
+
+bool MainWindow::reloadProjectFromDisk() {
+  if (!m_hasActiveProject) return false;
+  const QString path = m_project.filePath();
+  if (path.isEmpty() || !QFile::exists(path)) return false;
+
+  qCInfo(logApp) << "Reloading project from disk (discarding unsaved changes):" << path;
+  Ao3Project reloaded;
+  ProjectLoadReport report = ProjectSerializer::loadWithValidation(path, reloaded);
+  if (!report.success) {
+    qCWarning(logApp) << "Failed to reload project from disk:" << report.summaryError;
+    return false;
+  }
+
+  m_project = reloaded;
+  m_hasActiveProject = true;
+  m_chapterSidebar->refresh();
+  loadCurrentChapterIntoEditors();
+  m_cssPane->setCss(m_project.workSkinCss());
+  m_editorPane->setCustomCss(m_project.workSkinCss());
+  m_editorPane->setAvailableCssClasses(m_cssPane->cssClassNames());
+
+  m_project.setDirty(false);
+  if (m_editorPane && m_editorPane->editor() && m_editorPane->editor()->document())
+    m_editorPane->editor()->document()->setModified(false);
+  if (m_htmlPane && m_htmlPane->editor() && m_htmlPane->editor()->document())
+    m_htmlPane->editor()->document()->setModified(false);
+  if (m_cssPane && m_cssPane->editor() && m_cssPane->editor()->document())
+    m_cssPane->editor()->document()->setModified(false);
+
+  removeAutosaveFile();
+  clearAutosaveSettings();
+
+  updateWindowTitle();
+  updateStatusBar();
+  schedulePreviewUpdate();
+  updateProblemsDiagnostics();
+  return true;
+}
+
+QByteArray MainWindow::capturePreviewScreenshot(int chapterIndex) {
+  if (!m_hasActiveProject || chapterIndex < 0 || chapterIndex >= m_project.chapters().size()) {
+    return QByteArray();
+  }
+
+  const Chapter &ch = m_project.chapters().at(chapterIndex);
+  if (m_previewPane) {
+    m_previewPane->updatePreview(ch.title(), ch.html(), m_project.workSkinCss());
+  }
+
+  // Let Chromium engine parse, layout, and render
+  QElapsedTimer timer;
+  timer.start();
+  while (timer.elapsed() < 300) {
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+  }
+
+  QPixmap pixmap;
+  if (m_previewPane) {
+    pixmap = m_previewPane->captureScreenshot();
+  }
+
+  // If pixmap is null or zero-sized (e.g. headless offscreen mode without active GL surface),
+  // fallback to high-fidelity QPainter / QTextDocument rendering so MCP client always receives a valid PNG
+  if (pixmap.isNull() || pixmap.width() <= 0 || pixmap.height() <= 0) {
+    QImage fallbackImg(1024, 768, QImage::Format_ARGB32_Premultiplied);
+    fallbackImg.fill(QColor(QStringLiteral("#121318")));
+    QPainter painter(&fallbackImg);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // Header banner
+    painter.fillRect(QRect(0, 0, 1024, 34), QColor(QStringLiteral("#1a1c23")));
+    painter.setPen(QColor(QStringLiteral("#aeb3c6")));
+    painter.setFont(QFont(QStringLiteral("sans-serif"), 10));
+    painter.drawText(QRect(16, 8, 992, 20), Qt::AlignLeft | Qt::AlignVCenter,
+                     QStringLiteral("Preview: %1 (Rendered with active AO3 Work Skin)").arg(ch.title()));
+
+    // Chapter content with workskin CSS
+    QTextDocument doc;
+    doc.setDefaultStyleSheet(m_project.workSkinCss());
+    doc.setHtml(QStringLiteral("<h2 style='color:#33ccba; font-family:sans-serif;'>%1</h2><div style='color:#e2e2e5; font-family:serif; font-size:15px; line-height:1.6;'>%2</div>")
+                    .arg(ch.title().toHtmlEscaped(), ch.html()));
+    doc.setTextWidth(984);
+    painter.translate(20, 50);
+    doc.drawContents(&painter);
+    pixmap = QPixmap::fromImage(fallbackImg);
+  }
+
+  QByteArray bytes;
+  QBuffer buffer(&bytes);
+  buffer.open(QIODevice::WriteOnly);
+  pixmap.save(&buffer, "PNG");
+  return bytes;
+}
+

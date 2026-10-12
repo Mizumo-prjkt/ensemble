@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.mizumo_prjkt.ensemble</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Ensemble</name>
+  <summary>Offline typewriter and custom work skin composer for Archive of Our Own</summary>
+  <description>
+    <p>
+      Ensemble is a dedicated desktop writing environment designed for authors writing
+      for Archive of Our Own (AO3). It features real-time AO3 HTML simulation, live CSS
+      Work Skin editing, automated HTML sanitization conforming to AO3 whitelists,
+      and an embedded Model Context Protocol (MCP) server for AI agent collaboration.
+    </p>
+  </description>
+  <launchable type="desktop-id">ensemble.desktop</launchable>
+  <url type="homepage">https://github.com/Mizumo-prjkt/ensemble</url>
+  <url type="bugtracker">https://github.com/Mizumo-prjkt/ensemble/issues</url>
+  <categories>
+    <category>Office</category>
+    <category>WordProcessor</category>
+    <category>TextEditor</category>
+    <category>Development</category>
+  </categories>
+  <provides>
+    <mediatype>application/x-ao3proj</mediatype>
+  </provides>
+</component>

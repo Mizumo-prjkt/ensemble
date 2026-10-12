@@ -1,23 +1,8 @@
 @echo off
-set BUILD_TYPE=Debug
+REM Ensemble Build Wrapper (Windows CMD)
+REM Forwards arguments directly to the unified Python build orchestrator build.py
 
-if "%1"=="release" set BUILD_TYPE=Release
-if "%1"=="--release" set BUILD_TYPE=Release
-
-echo ========================================
-echo  Building Ensemble in %BUILD_TYPE% mode (Windows)
-echo ========================================
-
-cmake -B build -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
-if %ERRORLEVEL% NEQ 0 goto error
-
-cmake --build build --config %BUILD_TYPE% --parallel
-if %ERRORLEVEL% NEQ 0 goto error
-
-goto end
-
-:error
-echo Build failed. Please ensure CMake and Qt 6 are installed.
-exit /b 1
-
-:end
+python "%~dp0build.py" %*
+if %ERRORLEVEL% NEQ 0 (
+    exit /b %ERRORLEVEL%
+)

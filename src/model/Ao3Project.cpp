@@ -25,7 +25,7 @@ const Chapter *Ao3Project::activeChapter() const
 
 void Ao3Project::addChapter(const QString &title)
 {
-    const int order = m_chapters.isEmpty() ? 0 : m_chapters.last().order() + 1;
+    const int order = m_chapters.size();
     const QString chapterTitle = title.isEmpty()
         ? QStringLiteral("Chapter %1").arg(m_chapters.size() + 1)
         : title;
@@ -99,13 +99,26 @@ void Ao3Project::resetToNew()
 {
     m_title = QStringLiteral("Untitled Work");
     m_author = QStringLiteral("Anonymous");
+    m_rating = QStringLiteral("Not Rated");
+    m_archiveWarnings.clear();
+    m_categories.clear();
+    m_fandoms.clear();
+    m_relationships.clear();
+    m_characters.clear();
+    m_tags.clear();
     m_createdDate = QDateTime::currentDateTimeUtc();
     m_modifiedDate = QDateTime::currentDateTimeUtc();
     m_historyLog.clear();
     m_filePath.clear();
+    m_lastModifiedBy.clear();
+    m_lastModifiedAt = QDateTime();
     m_dirty = false;
+    m_isLegacyFormat = false;
     m_activeChapterIndex = 0;
     m_chapters.clear();
+    m_agenticData.clear();
+    m_lore.clear();
+    m_lore.ensureDefaults();
 
     QFile defaultCss(QStringLiteral(":/default-work-skin.css"));
     if (defaultCss.open(QIODevice::ReadOnly | QIODevice::Text))

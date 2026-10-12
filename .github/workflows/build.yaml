@@ -1,65 +1,370 @@
-name: Build
-
+name: Build and Deploy
 
 on:
+  push:
+    tags:
+      - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]+*'
   workflow_dispatch:
     inputs:
-      GITHUB_VERSIONING:
-        description: "Version for Github Releases"
+      version_id:
+        description: "Version for release (e.g. 1.1.1)"
         required: true
         type: string
         default: "1.1.1"
-      BUILD_WITH_DEBUG:
-        description: "Build with Debug symbols"
+      build_types:
+        description: "Build variant(s) to compile and package"
+        required: true
+        type: choice
+        options:
+          - Both
+          - Release
+          - Debug
+        default: "Both"
+      overwrite_release:
+        description: "Overwrite/refresh existing tag and release"
         required: true
         type: boolean
-        default: false
+        default: true
+      deploy_release:
+        description: "Deploy to GitHub Releases"
+        required: true
+        type: boolean
+        default: true
 
-
-
+permissions:
+  contents: write
+  packages: write
+  actions: write
 
 jobs:
-  build:
-    name: "Building the App (Linux)"
+  meta:
+    name: "Resolve Release Metadata"
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      packages: write
-      actions: write
-
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag_name: ${{ steps.resolve.outputs.tag_name }}
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Install Deps
+      - name: Resolve Version and Tag
+        id: resolve
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ccache build-essential qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-webengine-dev vulkan-tools libvulkan1
-
-      - name: Build
-        run: |
-          if [[ "${{ inputs.BUILD_WITH_DEBUG }}" == "true" ]]; then
-            bash build.sh debug
+          if [ -n "${{ inputs.version_id }}" ]; then
+            RAW_VER="${{ inputs.version_id }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            RAW_VER="${{ github.ref_name }}"
           else
-            bash build.sh release
+            RAW_VER="1.1.1"
           fi
 
-      - name: Upload to Github Releases
-        uses: softprops/action-gh-release@v3
-        with: 
-          files: |
-             build/ensemble
-          name: Ensemble Release ${{ github.event.inputs.GITHUB_VERSIONING }}
-          tag_name: ${{ github.event.inputs.GITHUB_VERSIONING }}  
-          body: |
-            Ensemble Release<br>
-            Version ${{github.event.inputs.GITHUB_VERSIONING}}
+          # Strip leading 'v' for semantic versioning
+          CLEAN_VER="${RAW_VER#v}"
+          TAG_NAME="v${CLEAN_VER}"
 
-            Notes:
-            This release is for Linux only, find the Windows variant somewhere in this repo or build it yourself.
-            
-            For more information, visit: https://github.com/Mizumo-prjkt/ensemble
+          echo "version=${CLEAN_VER}" >> $GITHUB_OUTPUT
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "### 📦 Release Version: \`${CLEAN_VER}\` (Tag: \`${TAG_NAME}\`)" >> $GITHUB_STEP_SUMMARY
+
+  build:
+    name: ${{ matrix.name }}
+    needs: [meta]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux AppImage
+          - os: ubuntu-24.04
+            target: appimage
+            build_type: Release
+            name: "Linux AppImage (Release)"
+          - os: ubuntu-24.04
+            target: appimage
+            build_type: Debug
+            name: "Linux AppImage (Debug)"
+          # Linux ELF / Tarball
+          - os: ubuntu-24.04
+            target: linux
+            build_type: Release
+            name: "Linux Tarball (Release)"
+          - os: ubuntu-24.04
+            target: linux
+            build_type: Debug
+            name: "Linux Tarball (Debug)"
+          # Windows MSVC
+          - os: windows-2022
+            target: windows
+            build_type: Release
+            name: "Windows x64 (Release)"
+          - os: windows-2022
+            target: windows
+            build_type: Debug
+            name: "Windows x64 (Debug)"
+
+    steps:
+      - name: Check if variant should be built
+        id: check_variant
+        shell: bash
+        run: |
+          REQUESTED="${{ inputs.build_types }}"
+          CURRENT="${{ matrix.build_type }}"
+          if [ -n "$REQUESTED" ] && [ "$REQUESTED" != "Both" ] && [ "$REQUESTED" != "$CURRENT" ]; then
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            echo "Skipping $CURRENT variant because user requested only $REQUESTED."
+          else
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout repository
+        if: steps.check_variant.outputs.should_run == 'true'
+        uses: actions/checkout@v4
+
+      # ---------------- Linux specific setup ----------------
+      - name: Setup ccache (Linux)
+        if: steps.check_variant.outputs.should_run == 'true' && runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ matrix.target }}-${{ matrix.build_type }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ matrix.target }}-${{ matrix.build_type }}-
+            ccache-${{ runner.os }}-${{ matrix.target }}-
+            ccache-${{ runner.os }}-
+
+      - name: Install Dependencies (Linux)
+        if: steps.check_variant.outputs.should_run == 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache ninja-build build-essential qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-webengine-dev libqt6websockets6-dev vulkan-tools libvulkan1 file
+
+      # ---------------- Windows specific setup ----------------
+      - name: Setup Qt 6 (Windows)
+        if: steps.check_variant.outputs.should_run == 'true' && runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.0'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebengine qtwebchannel qtpositioning'
+          cache: true
+
+      - name: Install Inno Setup (Windows)
+        if: steps.check_variant.outputs.should_run == 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+
+      # ---------------- Build & Test & Package ----------------
+      - name: Build, Test & Package (Linux AppImage)
+        if: steps.check_variant.outputs.should_run == 'true' && runner.os == 'Linux' && matrix.target == 'appimage'
         env:
-          GITHUB_TOKEN:  ${{secrets.KEYS}}
-        
-    
+          QT_QPA_PLATFORM: offscreen
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          python3 build.py --target appimage --build-type "${{ matrix.build_type }}" --version-id "${{ needs.meta.outputs.version }}" --download-tools --test
+
+      - name: Build, Test & Package (Linux Tarball)
+        if: steps.check_variant.outputs.should_run == 'true' && runner.os == 'Linux' && matrix.target == 'linux'
+        env:
+          QT_QPA_PLATFORM: offscreen
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          python3 build.py --target linux --build-type "${{ matrix.build_type }}" --version-id "${{ needs.meta.outputs.version }}" --package --test
+
+      - name: Build, Test & Package (Windows)
+        if: steps.check_variant.outputs.should_run == 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python build.py --target windows --build-type "${{ matrix.build_type }}" --version-id "${{ needs.meta.outputs.version }}" --package --installer --test
+
+      # ---------------- Stage and Upload Artifacts ----------------
+      - name: Stage Artifacts (Linux)
+        if: steps.check_variant.outputs.should_run == 'true' && runner.os == 'Linux'
+        run: |
+          mkdir -p artifacts_out
+          if [ "${{ matrix.target }}" = "appimage" ]; then
+            cp -f build/Ensemble-*.AppImage artifacts_out/ 2>/dev/null || true
+          else
+            cp -f build/Ensemble-*-linux-x64*.tar.gz artifacts_out/ 2>/dev/null || true
+            if [ -f "build/ensemble" ]; then
+              SUFFIX=""
+              [ "${{ matrix.build_type }}" = "Debug" ] && SUFFIX="-debug"
+              cp -f build/ensemble "artifacts_out/ensemble-${{ needs.meta.outputs.version }}-linux-x64${SUFFIX}"
+            fi
+          fi
+          ls -la artifacts_out/
+
+      - name: Stage Artifacts (Windows)
+        if: steps.check_variant.outputs.should_run == 'true' && runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p artifacts_out
+          cp -f build/Ensemble-*-windows-x64*.zip artifacts_out/ 2>/dev/null || true
+          cp -f build/Ensemble-*-windows-x64*.exe artifacts_out/ 2>/dev/null || true
+          ls -la artifacts_out/
+
+      - name: Upload Artifacts
+        if: steps.check_variant.outputs.should_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.target }}-${{ matrix.build_type }}
+          path: artifacts_out/*
+          if-no-files-found: ignore
+
+      - name: Record Job Summary
+        if: steps.check_variant.outputs.should_run == 'true'
+        shell: bash
+        run: |
+          if [ -d artifacts_out ] && [ "$(find artifacts_out -type f | wc -l)" -gt 0 ]; then
+            echo "### ✅ ${{ matrix.name }}: Succeeded" >> $GITHUB_STEP_SUMMARY
+            echo "Artifacts produced:" >> $GITHUB_STEP_SUMMARY
+            for f in artifacts_out/*; do
+              [ -e "$f" ] && echo "- \`$(basename "$f")\` ($(du -h "$f" | cut -f1))" >> $GITHUB_STEP_SUMMARY
+            done
+          else
+            echo "### ⚠️ ${{ matrix.name }}: No artifacts staged (Build or Tests may have failed)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  deploy:
+    name: "Deploy GitHub Release"
+    needs: [meta, build]
+    if: always() && !cancelled() && needs.meta.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.deploy_release != false)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.KEYS || secrets.RELEASE_TOKEN || secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Fetch Git tags and notes
+        run: |
+          git fetch --tags --force || true
+          git fetch origin 'refs/notes/*:refs/notes/*' || true
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'artifacts-*'
+          merge-multiple: true
+          path: dist
+
+      - name: Validate artifacts
+        id: validate
+        run: |
+          mkdir -p dist
+          echo "Downloaded artifacts:"
+          ls -lh dist/
+          COUNT=$(find dist -maxdepth 1 -type f | wc -l)
+          echo "Found $COUNT artifact(s)."
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::No build target produced release artifacts. Nothing to deploy."
+            exit 1
+          fi
+
+      - name: Generate Checksums & Release Body
+        id: release_notes
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS 2>/dev/null || true
+          cd ..
+
+          TAG_NAME="${{ needs.meta.outputs.tag_name }}"
+          VER="${{ needs.meta.outputs.version }}"
+
+          # Extract git tag notes/annotation or commit message
+          TAG_MSG=$(git tag -l --format='%(contents)' "$TAG_NAME" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;};/\n$/ba')
+          if [ -z "$TAG_MSG" ] && [ -n "${{ github.ref_name }}" ]; then
+            TAG_MSG=$(git tag -l --format='%(contents)' "${{ github.ref_name }}" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;};/\n$/ba')
+          fi
+          if [ -z "$TAG_MSG" ]; then
+            TAG_MSG=$(git notes show "$TAG_NAME" 2>/dev/null || git notes show HEAD 2>/dev/null || true)
+          fi
+          if [ -z "$TAG_MSG" ]; then
+            TAG_MSG=$(git log -1 --pretty=%B | sed -e :a -e '/^\n*$/{$d;N;};/\n$/ba')
+          fi
+          if [ -z "$TAG_MSG" ]; then
+            TAG_MSG="Ensemble Release ${VER}"
+          fi
+
+          cat << 'EOF' > release_body.md
+          ## Release Notes
+          EOF
+          echo "$TAG_MSG" >> release_body.md
+          cat << 'EOF' >> release_body.md
+
+          ---
+
+          ### Available Binaries & Packages
+          | Package | File | Size |
+          | :--- | :--- | :--- |
+          EOF
+
+          for f in dist/*; do
+            if [ -f "$f" ]; then
+              FNAME=$(basename "$f")
+              FSIZE=$(du -h "$f" | cut -f1)
+              DESC="Release Asset"
+              case "$FNAME" in
+                *.AppImage) DESC="Linux AppImage (Standalone Executable)" ;;
+                *linux*.tar.gz) DESC="Linux Portable Archive" ;;
+                *windows*.zip) DESC="Windows Portable (Bundled Qt)" ;;
+                *setup*.exe) DESC="Windows Installer (Inno Setup)" ;;
+                ensemble-*) DESC="Linux Raw Binary" ;;
+                SHA256SUMS) DESC="Verification Checksums" ;;
+              esac
+              echo "| $DESC | \`$FNAME\` | $FSIZE |" >> release_body.md
+            fi
+          done
+
+          cat << 'EOF' >> release_body.md
+
+          ### Verification (SHA256 Checksums)
+          ```text
+          EOF
+          cat dist/SHA256SUMS >> release_body.md
+          echo '```' >> release_body.md
+
+          cat << 'EOF' >> release_body.md
+
+          ---
+          *Automated multi-platform CI build for Ensemble.*
+          EOF
+
+          cat release_body.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Refresh / Override Git Tag
+        run: |
+          TAG_NAME="${{ needs.meta.outputs.tag_name }}"
+          OVERWRITE="${{ inputs.overwrite_release }}"
+          TAG_EXISTS=false
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            TAG_EXISTS=true
+          fi
+
+          if [ "$OVERWRITE" = "true" ] || [ "$TAG_EXISTS" = "false" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Refreshing tag $TAG_NAME to point to commit ${GITHUB_SHA}..."
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a -f "$TAG_NAME" -m "Ensemble Release ${{ needs.meta.outputs.version }}"
+            git push -f origin "$TAG_NAME" || echo "Note: Git push tag returned non-zero (may be protected or handled by action)"
+          fi
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.meta.outputs.tag_name }}
+          name: Ensemble Release ${{ needs.meta.outputs.version }}
+          body_path: release_body.md
+          files: |
+            dist/*
+          overwrite: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.KEYS || secrets.RELEASE_TOKEN || secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}

@@ -1,0 +1,1090 @@
+#include "mcp/McpServer.h"
+#include "mcp/McpHandler.h"
+#include "mcp/McpAgentInstaller.h"
+#include "ui/MainWindow.h"
+#include "ui/AgentThoughtsDialog.h"
+#include "model/Ao3Project.h"
+
+#include <QApplication>
+#include <QDir>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QStandardPaths>
+#include <QTimer>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QtWebSockets/QWebSocket>
+#include <cassert>
+#include <iostream>
+
+int main(int argc, char *argv[])
+{
+    qputenv("QT_QPA_PLATFORM", "offscreen");
+    QApplication app(argc, argv);
+    app.setApplicationName(QStringLiteral("Ensemble"));
+    QStandardPaths::setTestModeEnabled(true);
+
+    std::cout << "Testing Ensemble MCP Protocol, Tools, Resources & Loopback..." << std::endl;
+
+    // 1. Launch MainWindow with embedded MCP server
+    MainWindow mainWindow;
+    QMetaObject::invokeMethod(&mainWindow, "onNewProject");
+    mainWindow.startMcpServer(26303);
+
+    McpServer *server = mainWindow.mcpServer();
+    assert(server != nullptr);
+    assert(server->isRunning());
+    assert(server->port() > 0);
+    std::cout << "✓ MCP server running on port " << server->port() << std::endl;
+
+    // 2. Connect client WebSocket to test live JSON-RPC roundtrip
+    QWebSocket client;
+    QEventLoop loop;
+    QTimer timer;
+    timer.setSingleShot(true);
+    timer.setInterval(4000);
+
+    QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QObject::connect(&client, &QWebSocket::connected, &loop, &QEventLoop::quit);
+
+    timer.start();
+    client.open(QUrl(server->serverUrl()));
+    loop.exec();
+    assert(client.isValid());
+    std::cout << "✓ Client successfully connected to " << server->serverUrl().toStdString() << std::endl;
+
+    auto sendAndReceive = [&](const QJsonObject &request) -> QJsonObject {
+        QJsonObject response;
+        QEventLoop reqLoop;
+        QTimer reqTimer;
+        reqTimer.setSingleShot(true);
+        reqTimer.setInterval(3000);
+
+        auto conn = QObject::connect(&client, &QWebSocket::textMessageReceived, [&](const QString &msg) {
+            QJsonDocument doc = QJsonDocument::fromJson(msg.toUtf8());
+            if (doc.isObject()) {
+                response = doc.object();
+                reqLoop.quit();
+            }
+        });
+        QObject::connect(&reqTimer, &QTimer::timeout, &reqLoop, &QEventLoop::quit);
+
+        reqTimer.start();
+        client.sendTextMessage(QString::fromUtf8(QJsonDocument(request).toJson(QJsonDocument::Compact)));
+        reqLoop.exec();
+
+        QObject::disconnect(conn);
+        return response;
+    };
+
+    // 3. Test "initialize"
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 1;
+        req["method"] = "initialize";
+        req["params"] = QJsonObject();
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 1);
+        QJsonObject result = resp.value("result").toObject();
+        assert(result.value("protocolVersion").toString() == "2024-11-05");
+        assert(result.value("serverInfo").toObject().value("name").toString() == "ensemble");
+        std::cout << "✓ MCP 'initialize' verified." << std::endl;
+    }
+
+    // 4. Test "ping"
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 2;
+        req["method"] = "ping";
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 2);
+        assert(resp.contains("result"));
+        std::cout << "✓ MCP 'ping' verified." << std::endl;
+    }
+
+    // 5. Test "tools/list"
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 3;
+        req["method"] = "tools/list";
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 3);
+        QJsonArray tools = resp.value("result").toObject().value("tools").toArray();
+        assert(tools.size() >= 30);
+
+        QStringList toolNames;
+        for (const auto &t : tools) {
+            toolNames << t.toObject().value("name").toString();
+        }
+        assert(toolNames.contains("get_project_summary"));
+        assert(toolNames.contains("list_chapters"));
+        assert(toolNames.contains("get_chapter"));
+        assert(toolNames.contains("update_chapter_html"));
+        assert(toolNames.contains("add_chapter"));
+        assert(toolNames.contains("delete_chapter"));
+        assert(toolNames.contains("reorder_chapters"));
+        assert(toolNames.contains("get_workskin_css"));
+        assert(toolNames.contains("set_workskin_css"));
+        assert(toolNames.contains("get_problems"));
+        assert(toolNames.contains("save_project"));
+        assert(toolNames.contains("reload_project"));
+        assert(toolNames.contains("get_preview_screenshot"));
+        assert(toolNames.contains("get_agent_presence"));
+        assert(toolNames.contains("register_agent_presence"));
+        assert(toolNames.contains("test_firewall_connection"));
+        assert(toolNames.contains("get_agentic_summary"));
+        assert(toolNames.contains("read_agentic_file"));
+        assert(toolNames.contains("write_agentic_file"));
+        assert(toolNames.contains("append_agent_history"));
+        assert(toolNames.contains("get_agent_history"));
+        assert(toolNames.contains("post_agent_thought"));
+        assert(toolNames.contains("get_lore_graph"));
+        assert(toolNames.contains("update_lore_graph"));
+        assert(toolNames.contains("add_lore_node"));
+        assert(toolNames.contains("connect_lore_nodes"));
+        assert(toolNames.contains("move_lore_node"));
+        assert(toolNames.contains("get_lore_data"));
+        assert(toolNames.contains("manage_lore_data"));
+        assert(toolNames.contains("update_project_metadata"));
+        std::cout << "✓ MCP 'tools/list' verified (" << tools.size() << " tools registered, including all 8 lore & metadata tools)." << std::endl;
+    }
+
+    // 6. Test "tools/call" -> test_firewall_connection
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 4;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "test_firewall_connection";
+        params["arguments"] = QJsonObject();
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 4);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+        std::cout << "✓ MCP 'test_firewall_connection' tool verified." << std::endl;
+    }
+
+    // 7. Test "tools/call" -> register_agent_presence (Agent 1: Antigravity)
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 5;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "register_agent_presence";
+        QJsonObject args;
+        args["agentName"] = "antigravity";
+        args["role"] = "co-author";
+        args["workingNote"] = "Reviewing story structure";
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 5);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+        QJsonArray content = resp.value("result").toObject().value("content").toArray();
+        assert(!content.isEmpty());
+        QJsonObject data = QJsonDocument::fromJson(content.first().toObject().value("text").toString().toUtf8()).object();
+        assert(data.value("success").toBool() == true);
+        assert(data.value("name").toString() == "antigravity");
+        assert(data.value("role").toString() == "co-author");
+        std::cout << "✓ MCP 'register_agent_presence' (Agent 1: Antigravity) verified." << std::endl;
+    }
+
+    // 8. Connect Agent 2 (Claude) and test multi-agent mutual awareness!
+    {
+        QWebSocket client2;
+        QEventLoop loop2;
+        QTimer timer2;
+        timer2.setSingleShot(true);
+        timer2.setInterval(3000);
+
+        QObject::connect(&timer2, &QTimer::timeout, &loop2, &QEventLoop::quit);
+        QObject::connect(&client2, &QWebSocket::connected, &loop2, &QEventLoop::quit);
+
+        timer2.start();
+        client2.open(QUrl(server->serverUrl()));
+        loop2.exec();
+        assert(client2.isValid());
+
+        auto sendAndReceive2 = [&](const QJsonObject &request) -> QJsonObject {
+            QJsonObject response;
+            QEventLoop reqLoop;
+            QTimer reqTimer;
+            reqTimer.setSingleShot(true);
+            reqTimer.setInterval(3000);
+
+            auto conn = QObject::connect(&client2, &QWebSocket::textMessageReceived, [&](const QString &msg) {
+                QJsonDocument doc = QJsonDocument::fromJson(msg.toUtf8());
+                if (doc.isObject()) {
+                    response = doc.object();
+                    reqLoop.quit();
+                }
+            });
+            QObject::connect(&reqTimer, &QTimer::timeout, &reqLoop, &QEventLoop::quit);
+
+            reqTimer.start();
+            client2.sendTextMessage(QString::fromUtf8(QJsonDocument(request).toJson(QJsonDocument::Compact)));
+            reqLoop.exec();
+            QObject::disconnect(conn);
+            return response;
+        };
+
+        // Initialize Agent 2 as "claude"
+        {
+            QJsonObject req;
+            req["jsonrpc"] = "2.0";
+            req["id"] = 10;
+            req["method"] = "initialize";
+            QJsonObject clientInfo;
+            clientInfo["name"] = "claude";
+            clientInfo["version"] = "1.0.0";
+            QJsonObject p;
+            p["clientInfo"] = clientInfo;
+            p["protocolVersion"] = "2024-11-05";
+            req["params"] = p;
+            QJsonObject resp = sendAndReceive2(req);
+            assert(resp.value("id").toInt() == 10);
+        }
+
+        // Register Agent 2 presence as "reviewer"
+        {
+            QJsonObject req;
+            req["jsonrpc"] = "2.0";
+            req["id"] = 11;
+            req["method"] = "tools/call";
+            QJsonObject params;
+            params["name"] = "register_agent_presence";
+            QJsonObject args;
+            args["agentName"] = "claude";
+            args["role"] = "reviewer";
+            args["workingNote"] = "Analyzing Work Skin CSS";
+            params["arguments"] = args;
+            req["params"] = params;
+
+            QJsonObject resp = sendAndReceive2(req);
+            assert(resp.value("id").toInt() == 11);
+            QJsonArray content = resp.value("result").toObject().value("content").toArray();
+            QJsonObject data = QJsonDocument::fromJson(content.first().toObject().value("text").toString().toUtf8()).object();
+            assert(data.value("success").toBool() == true);
+            assert(data.value("connectedCount").toInt() == 2);
+            QJsonArray others = data.value("otherActiveAgents").toArray();
+            assert(!others.isEmpty());
+            assert(others.first().toObject().value("name").toString() == "antigravity");
+            std::cout << "✓ Multi-Agent Awareness: Claude discovered Antigravity in session." << std::endl;
+        }
+
+        // Query get_agent_presence from Agent 1 (Antigravity) and verify it sees Claude
+        {
+            QJsonObject req;
+            req["jsonrpc"] = "2.0";
+            req["id"] = 6;
+            req["method"] = "tools/call";
+            QJsonObject params;
+            params["name"] = "get_agent_presence";
+            params["arguments"] = QJsonObject();
+            req["params"] = params;
+
+            QJsonObject resp = sendAndReceive(req);
+            assert(resp.value("id").toInt() == 6);
+            QJsonArray content = resp.value("result").toObject().value("content").toArray();
+            QJsonObject data = QJsonDocument::fromJson(content.first().toObject().value("text").toString().toUtf8()).object();
+            assert(data.value("connectedCount").toInt() == 2);
+            assert(data.value("callingAgentName").toString() == "antigravity");
+            QJsonArray agents = data.value("agents").toArray();
+            assert(agents.size() == 2);
+            std::cout << "✓ Multi-Agent Awareness: Antigravity discovered Claude in session." << std::endl;
+        }
+
+        client2.close();
+    }
+
+    // 9. Test "resources/list" and "resources/read" for ensemble://agents
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 7;
+        req["method"] = "resources/list";
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 7);
+        QJsonArray resources = resp.value("result").toObject().value("resources").toArray();
+        assert(resources.size() >= 4);
+
+        QStringList uris;
+        for (const auto &r : resources) {
+            uris << r.toObject().value("uri").toString();
+        }
+        assert(uris.contains("ensemble://project"));
+        assert(uris.contains("ensemble://workskin/css"));
+        assert(uris.contains("ensemble://problems"));
+        assert(uris.contains("ensemble://agents"));
+        assert(uris.contains("ensemble://agentic/index"));
+        assert(uris.contains("ensemble://agentic/history"));
+        std::cout << "✓ MCP 'resources/list' verified (including ensemble://agentic/index & history)." << std::endl;
+
+        // Read ensemble://agents
+        QJsonObject readReq;
+        readReq["jsonrpc"] = "2.0";
+        readReq["id"] = 8;
+        readReq["method"] = "resources/read";
+        QJsonObject readParams;
+        readParams["uri"] = "ensemble://agents";
+        readReq["params"] = readParams;
+
+        QJsonObject readResp = sendAndReceive(readReq);
+        assert(readResp.value("id").toInt() == 8);
+        QJsonArray contents = readResp.value("result").toObject().value("contents").toArray();
+        assert(!contents.isEmpty());
+        assert(contents.first().toObject().value("mimeType").toString() == "application/json");
+        std::cout << "✓ MCP 'resources/read' ensemble://agents verified." << std::endl;
+
+        // Read ensemble://agentic/index
+        readReq["id"] = 9;
+        readParams["uri"] = "ensemble://agentic/index";
+        readReq["params"] = readParams;
+        readResp = sendAndReceive(readReq);
+        assert(readResp.value("id").toInt() == 9);
+        contents = readResp.value("result").toObject().value("contents").toArray();
+        assert(!contents.isEmpty());
+        assert(contents.first().toObject().value("mimeType").toString() == "application/json");
+        std::cout << "✓ MCP 'resources/read' ensemble://agentic/index verified." << std::endl;
+    }
+
+    // 10. Test write_agentic_file (shared scope and private localized agent scope)
+    {
+        // 10a. Write shared memory file
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 20;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "write_agentic_file";
+        QJsonObject args;
+        args["scope"] = "shared";
+        args["path"] = "shared_notes.txt";
+        args["content"] = "This is collaborative memory shared between AI models.";
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 20);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+        std::cout << "✓ MCP 'write_agentic_file' (shared) verified." << std::endl;
+
+        // 10b. Write private localized agent file
+        req["id"] = 21;
+        args["scope"] = "private";
+        args["agent"] = "antigravity";
+        args["path"] = "scratchpad.json";
+        args["content"] = "{\"plan\": [\"inspect chapter 1\", \"check tags\"]}";
+        params["arguments"] = args;
+        req["params"] = params;
+
+        resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 21);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+        std::cout << "✓ MCP 'write_agentic_file' (private antigravity) verified." << std::endl;
+
+        // 10c. Write agentic file without specifying scope (MUST default to 'shared'!)
+        req["id"] = 210;
+        QJsonObject noScopeArgs;
+        noScopeArgs["path"] = "default_scope_test.txt";
+        noScopeArgs["content"] = "Omitting scope must default to shared storage across all agents.";
+        params["arguments"] = noScopeArgs;
+        req["params"] = params;
+
+        resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 210);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+        QJsonArray wrContent = resp.value("result").toObject().value("content").toArray();
+        QJsonObject wrData = QJsonDocument::fromJson(wrContent.first().toObject().value("text").toString().toUtf8()).object();
+        assert(wrData.value("scope").toString() == "shared");
+        std::cout << "✓ MCP 'write_agentic_file' omitted scope defaults to 'shared' verified." << std::endl;
+    }
+
+    // 11. Test read_agentic_file
+    {
+        // Read shared file
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 22;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "read_agentic_file";
+        QJsonObject args;
+        args["scope"] = "shared";
+        args["path"] = "shared_notes.txt";
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 22);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+        QJsonArray content = resp.value("result").toObject().value("content").toArray();
+        QJsonObject data = QJsonDocument::fromJson(content.first().toObject().value("text").toString().toUtf8()).object();
+        assert(data.value("content").toString().contains("collaborative memory"));
+        std::cout << "✓ MCP 'read_agentic_file' (shared) verified." << std::endl;
+
+        // Read file written without scope (defaults to shared)
+        req["id"] = 220;
+        args["path"] = "default_scope_test.txt";
+        params["arguments"] = args;
+        req["params"] = params;
+        resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 220);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+
+        // Read private file
+        req["id"] = 23;
+        args["scope"] = "private";
+        args["agent"] = "antigravity";
+        args["path"] = "scratchpad.json";
+        params["arguments"] = args;
+        req["params"] = params;
+
+        resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 23);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+        content = resp.value("result").toObject().value("content").toArray();
+        data = QJsonDocument::fromJson(content.first().toObject().value("text").toString().toUtf8()).object();
+        assert(data.value("content").toString().contains("inspect chapter 1"));
+        std::cout << "✓ MCP 'read_agentic_file' (private antigravity) verified." << std::endl;
+
+        // Read special root agentic files (agent_model_history.xml & index.json)
+        req["id"] = 231;
+        QJsonObject readHistArgs;
+        readHistArgs["path"] = "agent_model_history.xml";
+        params["arguments"] = readHistArgs;
+        req["params"] = params;
+        resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 231);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+        content = resp.value("result").toObject().value("content").toArray();
+        data = QJsonDocument::fromJson(content.first().toObject().value("text").toString().toUtf8()).object();
+        assert(data.value("content").toString().contains("agent-model-history"));
+
+        req["id"] = 232;
+        readHistArgs["path"] = "index.json";
+        params["arguments"] = readHistArgs;
+        req["params"] = params;
+        resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 232);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+        std::cout << "✓ MCP 'read_agentic_file' special root files (history XML & index JSON) verified." << std::endl;
+    }
+
+    // 12. Test append_agent_history
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 24;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "append_agent_history";
+        QJsonObject args;
+        args["agentName"] = "antigravity";
+        args["model"] = "gemini-2.5-pro";
+        args["action"] = "StylingAudit";
+        args["summary"] = "Validated workskin responsive grid classes";
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 24);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+        std::cout << "✓ MCP 'append_agent_history' verified." << std::endl;
+    }
+
+    // 13. Test post_agent_thought (AI reasoning and input reflection monitor)
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 25;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "post_agent_thought";
+        QJsonObject args;
+        args["thought"] = "Analyzing potential margin collapse between chapter title and work skin CSS banner.";
+        args["agentName"] = "antigravity";
+        QJsonArray tags;
+        tags.append("css");
+        tags.append("layout");
+        args["tags"] = tags;
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 25);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+        std::cout << "✓ MCP 'post_agent_thought' verified." << std::endl;
+    }
+
+    // 14. Test get_agentic_summary
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 26;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "get_agentic_summary";
+        params["arguments"] = QJsonObject();
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 26);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+        QJsonArray content = resp.value("result").toObject().value("content").toArray();
+        QJsonObject data = QJsonDocument::fromJson(content.first().toObject().value("text").toString().toUtf8()).object();
+        assert(data.value("sharedBytes").toInt() > 0);
+        assert(data.value("agentUsage").toObject().contains("antigravity"));
+        assert(data.contains("lastChangesByModel"));
+        std::cout << "✓ MCP 'get_agentic_summary' verified." << std::endl;
+    }
+
+    // 15. Test get_agent_history (Retrieving audit trail and model changes)
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 27;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "get_agent_history";
+        QJsonObject args;
+        args["limit"] = 50;
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 27);
+        assert(resp.value("result").toObject().value("isError").toBool() == false);
+        QJsonArray content = resp.value("result").toObject().value("content").toArray();
+        QJsonObject data = QJsonDocument::fromJson(content.first().toObject().value("text").toString().toUtf8()).object();
+        assert(data.value("returnedCount").toInt() > 0);
+        assert(data.contains("lastChangesByModel"));
+        QJsonObject lastChanges = data.value("lastChangesByModel").toObject();
+        assert(lastChanges.contains("antigravity"));
+        assert(!lastChanges.value("antigravity").toObject().value("action").toString().isEmpty());
+        std::cout << "✓ MCP 'get_agent_history' verified with " << data.value("returnedCount").toInt()
+                  << " entries and model changes tracking." << std::endl;
+    }
+
+    // 16. Verify McpServer activity logging and AgentThoughtsDialog integration
+    {
+        QList<AgentActivityEvent> acts = server->recentActivities();
+        assert(!acts.isEmpty());
+
+        bool foundThought = false;
+        bool foundToolCall = false;
+        for (const auto &act : acts) {
+            if (act.type == AgentActivityEvent::Type::Thought) {
+                foundThought = true;
+                assert(act.agentName == "antigravity");
+                assert(act.thought.contains("margin collapse"));
+            }
+            if (act.title.contains("write_agentic_file")) {
+                foundToolCall = true;
+                assert(act.type == AgentActivityEvent::Type::DataModification);
+                assert(!act.inputData.isEmpty()); // Verified input arguments captured!
+            }
+        }
+        assert(foundThought);
+        assert(foundToolCall);
+        std::cout << "✓ McpServer recorded agent activities with input parameters and model thoughts." << std::endl;
+
+        // Instantiate AgentThoughtsDialog with server and verify UI initialization & model history integration
+        AgentThoughtsDialog thoughtsDialog(server);
+        thoughtsDialog.setProject(&mainWindow.project());
+        thoughtsDialog.updateTheme();
+        thoughtsDialog.refreshModelHistory();
+        thoughtsDialog.show();
+        assert(thoughtsDialog.windowTitle().contains("Monitor"));
+
+        // Verify tree widget columns and Date & Time formatting
+        QList<QTreeWidget *> trees = thoughtsDialog.findChildren<QTreeWidget *>();
+        assert(trees.size() >= 2);
+        QTreeWidget *eventTree = nullptr;
+        for (auto *tree : trees) {
+            if (tree->headerItem()->text(1) == "Agent") {
+                eventTree = tree;
+                break;
+            }
+        }
+        assert(eventTree != nullptr);
+        assert(eventTree->headerItem()->text(0) == "Date & Time");
+        assert(eventTree->topLevelItemCount() > 0);
+
+        // Verify that topLevelItem(0) date & time contains yyyy-MM-dd HH:mm:ss format
+        QString dateSample = eventTree->topLevelItem(0)->text(0);
+        assert(dateSample.length() == 19);
+        assert(dateSample.at(4) == QLatin1Char('-') && dateSample.at(7) == QLatin1Char('-'));
+        assert(dateSample.at(10) == QLatin1Char(' ') && dateSample.at(13) == QLatin1Char(':'));
+
+        const int initialCount = eventTree->topLevelItemCount();
+
+        // Verify deduplication: calling setMcpServer again must NOT duplicate events
+        thoughtsDialog.setMcpServer(server);
+        assert(eventTree->topLevelItemCount() == initialCount);
+
+        // Verify out-of-order timestamp insertion: older events (e.g. 04:28) must never appear after newer events (04:33)
+        AgentActivityEvent evNew;
+        evNew.id = "test-event-new-433";
+        evNew.timestamp = QDateTime::fromString("2026-10-12T04:33:00Z", Qt::ISODate);
+        evNew.agentName = "claude";
+        evNew.role = "reviewer";
+        evNew.type = AgentActivityEvent::Type::DataInspection;
+        evNew.title = "Read Project Data: get_project_summary";
+        evNew.thought = "Analyzing latest state";
+        thoughtsDialog.addActivityEvent(evNew);
+
+        AgentActivityEvent evOld;
+        evOld.id = "test-event-old-428";
+        evOld.timestamp = QDateTime::fromString("2026-10-12T04:28:00Z", Qt::ISODate);
+        evOld.agentName = "claude-ai";
+        evOld.role = "co-author";
+        evOld.type = AgentActivityEvent::Type::DataInspection;
+        evOld.title = "Read Project Data: get_agent_presence";
+        evOld.thought = "Initial connection check";
+        thoughtsDialog.addActivityEvent(evOld);
+
+        // Verify evOld (04:28) is placed before evNew (04:33) in the tree
+        int idxOld = -1;
+        int idxNew = -1;
+        for (int i = 0; i < eventTree->topLevelItemCount(); ++i) {
+            QString id = eventTree->topLevelItem(i)->data(0, Qt::UserRole).toString();
+            if (id == "test-event-old-428") {
+                idxOld = i;
+            }
+            if (id == "test-event-new-433") {
+                idxNew = i;
+            }
+        }
+        assert(idxOld >= 0 && idxNew >= 0);
+        assert(idxOld < idxNew); // Chronological sorting verified!
+
+        // Verify deduplication when adding same event again
+        const int countBeforeDupe = eventTree->topLevelItemCount();
+        thoughtsDialog.addActivityEvent(evOld);
+        assert(eventTree->topLevelItemCount() == countBeforeDupe);
+
+        thoughtsDialog.close();
+        std::cout << "✓ AgentThoughtsDialog verified: Date & Time formatting, chronological sorting, and deduplication." << std::endl;
+    }
+
+    // 21. Test "tools/call" -> get_lore_graph
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 40;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "get_lore_graph";
+        params["arguments"] = QJsonObject{{"name", "data"}, {"includeGrammar", true}};
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 40);
+        QJsonObject result = resp.value("result").toObject();
+        assert(!result.value("isError").toBool());
+        QJsonObject content = result.value("content").toArray().first().toObject();
+        QJsonObject parsed = QJsonDocument::fromJson(content.value("text").toString().toUtf8()).object();
+        assert(parsed.value("magicHeaderValid").toBool() == true);
+        assert(parsed.value("magicHeaderHex").toString() == "89 47 52 50 48 01 0D 0A");
+        assert(!parsed.value("rawDsl").toString().isEmpty());
+        assert(!parsed.value("grammarSpecification").toString().isEmpty());
+        std::cout << "✓ MCP 'get_lore_graph' verified (.grph DSL, unique magic bytes, and grammar guide returned)." << std::endl;
+    }
+
+    // 22. Test "tools/call" -> add_lore_node
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 41;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "add_lore_node";
+        QJsonObject args;
+        args["id"] = "mcp_climax";
+        args["label"] = "Climax Battle";
+        args["type"] = "plot_point";
+        args["x"] = 800.0;
+        args["y"] = 350.0;
+        args["shape"] = "diamond";
+        args["color"] = "#ef4444";
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 41);
+        QJsonObject result = resp.value("result").toObject();
+        assert(!result.value("isError").toBool());
+        std::cout << "✓ MCP 'add_lore_node' verified (node 'mcp_climax' added)." << std::endl;
+    }
+
+    // 23. Test "tools/call" -> connect_lore_nodes
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 42;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "connect_lore_nodes";
+        QJsonObject args;
+        args["fromNodeId"] = "inciting_incident";
+        args["toNodeId"] = "mcp_climax";
+        args["arrow"] = "->";
+        args["label"] = "leads directly to";
+        args["style"] = "solid";
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 42);
+        QJsonObject result = resp.value("result").toObject();
+        assert(!result.value("isError").toBool());
+        std::cout << "✓ MCP 'connect_lore_nodes' verified ('inciting_incident' -> 'mcp_climax')." << std::endl;
+    }
+
+    // 24. Test "tools/call" -> move_lore_node
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 43;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "move_lore_node";
+        QJsonObject args;
+        args["nodeId"] = "mcp_climax";
+        args["x"] = 850.0;
+        args["y"] = 400.0;
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 43);
+        QJsonObject result = resp.value("result").toObject();
+        assert(!result.value("isError").toBool());
+        std::cout << "✓ MCP 'move_lore_node' verified (moved to 850, 400)." << std::endl;
+    }
+
+    // 25. Test "tools/call" -> manage_lore_data & get_lore_data
+    {
+        // Add entity
+        {
+            QJsonObject req;
+            req["jsonrpc"] = "2.0";
+            req["id"] = 44;
+            req["method"] = "tools/call";
+            QJsonObject params;
+            params["name"] = "manage_lore_data";
+            QJsonObject args;
+            args["action"] = "add_entity";
+            args["id"] = "shadow_emperor";
+            args["name"] = "The Shadow Emperor";
+            args["category"] = "Character";
+            args["description"] = "Ruler of the veiled dynasty.";
+            args["tags"] = QJsonArray{QStringLiteral("villain"), QStringLiteral("magic")};
+            params["arguments"] = args;
+            req["params"] = params;
+
+            QJsonObject resp = sendAndReceive(req);
+            assert(resp.value("id").toInt() == 44);
+            assert(!resp.value("result").toObject().value("isError").toBool());
+        }
+
+        // Add conflict
+        {
+            QJsonObject req;
+            req["jsonrpc"] = "2.0";
+            req["id"] = 45;
+            req["method"] = "tools/call";
+            QJsonObject params;
+            params["name"] = "manage_lore_data";
+            QJsonObject args;
+            args["action"] = "add_conflict";
+            args["id"] = "throne_succession";
+            args["title"] = "Succession Timeline Discrepancy";
+            args["chapterA"] = 1;
+            args["chapterB"] = 3;
+            args["description"] = "Chapter 1 claims Emperor died in Year 50, Chapter 3 mentions him active in Year 55.";
+            params["arguments"] = args;
+            req["params"] = params;
+
+            QJsonObject resp = sendAndReceive(req);
+            assert(resp.value("id").toInt() == 45);
+            assert(!resp.value("result").toObject().value("isError").toBool());
+        }
+
+        // Resolve conflict
+        {
+            QJsonObject req;
+            req["jsonrpc"] = "2.0";
+            req["id"] = 46;
+            req["method"] = "tools/call";
+            QJsonObject params;
+            params["name"] = "manage_lore_data";
+            QJsonObject args;
+            args["action"] = "resolve_conflict";
+            args["conflictId"] = "throne_succession";
+            args["resolution"] = "The Emperor feigned his death in Year 50 and operated covertly until Year 55.";
+            args["canonRuling"] = "Covert survival canon confirmed";
+            params["arguments"] = args;
+            req["params"] = params;
+
+            QJsonObject resp = sendAndReceive(req);
+            assert(resp.value("id").toInt() == 46);
+            assert(!resp.value("result").toObject().value("isError").toBool());
+        }
+
+        // Verify get_lore_data
+        {
+            QJsonObject req;
+            req["jsonrpc"] = "2.0";
+            req["id"] = 47;
+            req["method"] = "tools/call";
+            QJsonObject params;
+            params["name"] = "get_lore_data";
+            params["arguments"] = QJsonObject{{"section", "all"}};
+            req["params"] = params;
+
+            QJsonObject resp = sendAndReceive(req);
+            assert(resp.value("id").toInt() == 47);
+            QJsonObject result = resp.value("result").toObject();
+            assert(!result.value("isError").toBool());
+            QJsonObject content = result.value("content").toArray().first().toObject();
+            QJsonObject loreObj = QJsonDocument::fromJson(content.value("text").toString().toUtf8()).object();
+            assert(loreObj.value("entities").toArray().size() >= 1);
+            assert(loreObj.value("resolvedConflicts").toArray().size() >= 1);
+            assert(loreObj.value("manifestFiles").toArray().size() == 8);
+            std::cout << "✓ MCP 'manage_lore_data' & 'get_lore_data' verified (entities, conflicts, resolutions, all 7 files + .grph)." << std::endl;
+        }
+    }
+
+    // 26. Test "tools/call" -> update_project_metadata
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 48;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "update_project_metadata";
+        QJsonObject args;
+        args["rating"] = "Mature";
+        args["archiveWarnings"] = QJsonArray{QStringLiteral("No Archive Warnings Apply")};
+        args["categories"] = QJsonArray{QStringLiteral("M/M"), QStringLiteral("Multi")};
+        args["fandoms"] = QJsonArray{QStringLiteral("Original Lore Fandom")};
+        args["relationships"] = QJsonArray{QStringLiteral("Hero/Mentor")};
+        args["characters"] = QJsonArray{QStringLiteral("Hero"), QStringLiteral("Mentor")};
+        args["tags"] = QJsonArray{QStringLiteral("Slow Burn"), QStringLiteral("Angst with a Happy Ending")};
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 48);
+        QJsonObject result = resp.value("result").toObject();
+        assert(!result.value("isError").toBool());
+
+        // Verify with get_project_summary
+        QJsonObject sumReq;
+        sumReq["jsonrpc"] = "2.0";
+        sumReq["id"] = 49;
+        sumReq["method"] = "tools/call";
+        QJsonObject sumParams;
+        sumParams["name"] = "get_project_summary";
+        sumParams["arguments"] = QJsonObject();
+        sumReq["params"] = sumParams;
+
+        QJsonObject sumResp = sendAndReceive(sumReq);
+        assert(sumResp.value("id").toInt() == 49);
+        QJsonObject sumContent = sumResp.value("result").toObject().value("content").toArray().first().toObject();
+        QJsonObject sumData = QJsonDocument::fromJson(sumContent.value("text").toString().toUtf8()).object();
+        assert(sumData.value("rating").toString() == "Mature");
+        assert(sumData.value("tags").toArray().contains(QJsonValue("Slow Burn")));
+        assert(sumData.value("fandoms").toArray().contains(QJsonValue("Original Lore Fandom")));
+        assert(sumData.contains("loreSummary"));
+        assert(sumData.value("loreSummary").toObject().value("entityCount").toInt() >= 1);
+        std::cout << "✓ MCP 'update_project_metadata' verified with AO3 tags and enriched 'get_project_summary'." << std::endl;
+    }
+
+    // 31. Test add_history_commit (git-like history.cmt)
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 50;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "add_history_commit";
+        QJsonObject args;
+        args["author"] = "Miku Agent";
+        args["message"] = "feat: added new lore nodes and updated relationship tags";
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 50);
+        QJsonObject result = resp.value("result").toObject();
+        assert(!result.value("isError").toBool());
+        QJsonObject cData = QJsonDocument::fromJson(result.value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(cData.value("success").toBool() == true);
+        assert(!cData.value("hash").toString().isEmpty());
+        assert(cData.value("author").toString() == "Miku Agent");
+        assert(cData.value("message").toString() == "feat: added new lore nodes and updated relationship tags");
+        std::cout << "✓ MCP 'add_history_commit' verified with git-like hash and author." << std::endl;
+    }
+
+    // 32. Test get_project_history
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 51;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "get_project_history";
+        QJsonObject args;
+        args["limit"] = 10;
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 51);
+        QJsonObject result = resp.value("result").toObject();
+        assert(!result.value("isError").toBool());
+        QJsonObject hData = QJsonDocument::fromJson(result.value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(hData.value("totalCommits").toInt() >= 1);
+        QJsonArray commits = hData.value("commits").toArray();
+        assert(commits.size() >= 1);
+        QJsonObject firstCommit = commits.first().toObject();
+        assert(!firstCommit.value("hash").toString().isEmpty());
+        assert(firstCommit.value("message").toString().contains("feat: added new lore nodes"));
+        assert(hData.value("rawHistory").toString().contains("commit "));
+        std::cout << "✓ MCP 'get_project_history' parsed commits array and raw history.cmt verified." << std::endl;
+    }
+
+    // 33. Test save_project with filePath and commitMessage
+    const QString mcpSavePath = QDir::tempPath() + QStringLiteral("/mcp_test_story_%1.ao3proj").arg(QDateTime::currentMSecsSinceEpoch());
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 52;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "save_project";
+        QJsonObject args;
+        args["filePath"] = mcpSavePath;
+        args["commitMessage"] = "chore: saved project archive via MCP loopback";
+        args["author"] = "Miku Agent";
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 52);
+        QJsonObject result = resp.value("result").toObject();
+        assert(!result.value("isError").toBool());
+        assert(QFile::exists(mcpSavePath));
+        std::cout << "✓ MCP 'save_project' with commitMessage and target path verified." << std::endl;
+    }
+
+    // 34. Test load_project
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 53;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "load_project";
+        QJsonObject args;
+        args["filePath"] = mcpSavePath;
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 53);
+        QJsonObject result = resp.value("result").toObject();
+        assert(!result.value("isError").toBool());
+        QJsonObject lData = QJsonDocument::fromJson(result.value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(lData.value("success").toBool() == true);
+        assert(lData.value("filePath").toString() == mcpSavePath);
+        assert(lData.value("rating").toString() == "Mature");
+        assert(lData.value("commitCount").toInt() >= 2);
+        std::cout << "✓ MCP 'load_project' successfully loaded saved project with metadata and commit history." << std::endl;
+
+        QFile::remove(mcpSavePath);
+    }
+
+    // 35. Test insert_image_embed
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 54;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "insert_image_embed";
+        QJsonObject args;
+        args["chapterIndex"] = 0;
+        args["url"] = "https://images.example.com/illustration_scene.png";
+        args["alt"] = "Hero confronting dragon";
+        args["title"] = "Chapter 1 Climax";
+        args["width"] = 750;
+        args["height"] = 500;
+        args["alignment"] = "center";
+        args["wrapInLink"] = true;
+        args["position"] = "append";
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 54);
+        QJsonObject result = resp.value("result").toObject();
+        assert(!result.value("isError").toBool());
+        QJsonObject data = QJsonDocument::fromJson(result.value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(data.value("success").toBool() == true);
+        assert(data.value("url").toString() == "https://images.example.com/illustration_scene.png");
+        assert(data.value("embeddedHtml").toString().contains("<img src=\"https://images.example.com/illustration_scene.png\""));
+        assert(data.value("embeddedHtml").toString().contains("alt=\"Hero confronting dragon\""));
+        assert(data.value("embeddedHtml").toString().contains("<p align=\"center\">"));
+        std::cout << "✓ MCP 'insert_image_embed' inserted image URL attachment successfully." << std::endl;
+    }
+
+    // 36. Test list_image_embeds
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 55;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "list_image_embeds";
+        QJsonObject args;
+        args["chapterIndex"] = 0;
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 55);
+        QJsonObject result = resp.value("result").toObject();
+        assert(!result.value("isError").toBool());
+        QJsonObject data = QJsonDocument::fromJson(result.value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(data.value("totalImageEmbeds").toInt() >= 1);
+        QJsonArray embeds = data.value("imageEmbeds").toArray();
+        assert(embeds.size() >= 1);
+        assert(embeds.first().toObject().value("url").toString() == "https://images.example.com/illustration_scene.png");
+        assert(embeds.first().toObject().value("alt").toString() == "Hero confronting dragon");
+        std::cout << "✓ MCP 'list_image_embeds' returned active project image embeds." << std::endl;
+    }
+
+    client.close();
+    mainWindow.stopMcpServer();
+    assert(!server->isRunning());
+
+    std::cout << "All MCP JSON-RPC protocol, tools, multi-agent presence, and loopback tests passed successfully!" << std::endl;
+    return 0;
+}

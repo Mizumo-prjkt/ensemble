@@ -1,6 +1,7 @@
 #include "PreviewPane.h"
 #include "debug/debug.hpp"
 
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QVBoxLayout>
@@ -129,4 +130,13 @@ void PreviewPane::updatePreview(const QString &chapterTitle,
   qCDebug(logPreview) << "Executing live DOM mutation update for chapter:"
                       << chapterTitle << "HTML bytes:" << html.length();
   m_view->page()->runJavaScript(js);
+}
+
+QPixmap PreviewPane::captureScreenshot() {
+  if (!m_view) return QPixmap();
+  if (m_view->width() < 100 || m_view->height() < 100) {
+    m_view->resize(1024, 768);
+  }
+  QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+  return m_view->grab();
 }

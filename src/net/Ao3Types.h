@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 struct Ao3Pseud {
     QString name;
@@ -21,6 +22,16 @@ struct Ao3WorkSummary {
     QDateTime lastUpdated;
     bool isComplete = false;
     bool isDraft = false;
+
+    // AO3 Metadata & Tags
+    QString rating = QStringLiteral("Not Rated");
+    QStringList archiveWarnings;
+    QStringList categories;
+    QStringList fandoms;
+    QStringList relationships;
+    QStringList characters;
+    QStringList tags;
+    QString summaryText;
 };
 
 struct Ao3ChapterContent {
@@ -31,10 +42,18 @@ struct Ao3ChapterContent {
     QString notesEnd;
 };
 
+struct Ao3ImageEmbed {
+    QString url;
+    QString alt;
+    QString title;
+    int chapterNumber = 1;
+};
+
 struct Ao3FullWork {
     Ao3WorkSummary summary;
     QList<Ao3ChapterContent> chapters;
     QString workSkinCss;
+    QList<Ao3ImageEmbed> embeddedImages;
 };
 
 struct Ao3WorkSkin {

@@ -5,6 +5,8 @@
 
 class CodeEditor;
 class QLabel;
+class QPushButton;
+class QFrame;
 class Ao3Project;
 
 class CssEditorPane : public QWidget
@@ -21,17 +23,27 @@ public:
 
 public slots:
     void setCss(const QString &css);
+    void updateTheme();
+    void updateSettings();
 
 signals:
     void cssChanged(const QString &css);
     void cssClassesChanged(const QStringList &classNames);
 
+private slots:
+    void toggleIssueDetails();
+
 private:
     void parseCssClasses(const QString &css);
 
     CodeEditor *m_editor = nullptr;
-    QLabel *m_warningLabel = nullptr;
+    QFrame *m_issueCard = nullptr;
+    QLabel *m_issueSummaryLabel = nullptr;
+    QLabel *m_issueDetailsLabel = nullptr;
+    QPushButton *m_toggleDetailsBtn = nullptr;
+    QLabel *m_titleLabel = nullptr;
     const Ao3Project *m_project = nullptr;
     bool m_blockChanges = false;
+    bool m_detailsExpanded = false;
     QStringList m_classNames;
 };

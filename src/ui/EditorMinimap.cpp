@@ -1,4 +1,5 @@
 #include "EditorMinimap.h"
+#include "themes/ThemeManager.h"
 
 #include <QMouseEvent>
 #include <QPainter>
@@ -13,7 +14,10 @@ EditorMinimap::EditorMinimap(QWidget *parent)
 {
     setFixedWidth(90);
     setCursor(Qt::PointingHandCursor);
-    setStyleSheet(QStringLiteral("background-color: #18181f; border-left: 1px solid #282833;"));
+
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this](AppTheme) {
+        update();
+    });
 }
 
 void EditorMinimap::setTargetEditor(QTextEdit *editor)
@@ -60,7 +64,16 @@ void EditorMinimap::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
     QPainter painter(this);
-    painter.fillRect(rect(), QColor(QStringLiteral("#14141a")));
+
+    const bool isDark = ThemeManager::instance().isDarkMode();
+    const QColor bgCol = isDark ? QColor(QStringLiteral("#14151a")) : QColor(QStringLiteral("#f8fafc"));
+    const QColor borderCol = isDark ? QColor(QStringLiteral("#282a36")) : QColor(QStringLiteral("#cbd5e1"));
+
+    painter.fillRect(rect(), bgCol);
+
+    // Left border separator
+    painter.setPen(borderCol);
+    painter.drawLine(0, 0, 0, height());
 
     QTextDocument *doc = activeDocument();
     QScrollBar *sb = activeScrollBar();
@@ -91,28 +104,28 @@ void EditorMinimap::paintEvent(QPaintEvent *event)
             int lineWidth = qMax(3, (lineLength * (width() - 16)) / 70);
 
             // Color code based on headings, links, work skins, or normal text
-            QColor blockColor = QColor(QStringLiteral("#555768"));
+            QColor blockColor = isDark ? QColor(QStringLiteral("#555768")) : QColor(QStringLiteral("#94a3b8"));
             if (block.blockFormat().headingLevel() > 0) {
-                blockColor = QColor(QStringLiteral("#ffb86c")); // Gold amber for headings
+                blockColor = isDark ? QColor(QStringLiteral("#ffb86c")) : QColor(QStringLiteral("#d97706")); // Gold amber for headings
             } else {
                 for (QTextBlock::iterator fragIt = block.begin(); !fragIt.atEnd(); ++fragIt) {
                     const QTextFragment frag = fragIt.fragment();
                     if (frag.isValid()) {
                         const QTextCharFormat charFmt = frag.charFormat();
                         if (charFmt.isAnchor()) {
-                            blockColor = QColor(QStringLiteral("#8be9fd")); // Cyan for links
+                            blockColor = isDark ? QColor(QStringLiteral("#8be9fd")) : QColor(QStringLiteral("#0284c7")); // Cyan/blue for links
                             break;
                         } else if (charFmt.hasProperty(QTextFormat::Property::UserProperty + 1)) {
-                            blockColor = QColor(QStringLiteral("#50fa7b")); // Emerald green for Work Skin CSS
+                            blockColor = isDark ? QColor(QStringLiteral("#50fa7b")) : QColor(QStringLiteral("#059669")); // Green for Work Skin CSS
                             break;
                         }
                     }
                 }
-                if (blockColor == QColor(QStringLiteral("#555768"))) {
+                if (blockColor == (isDark ? QColor(QStringLiteral("#555768")) : QColor(QStringLiteral("#94a3b8")))) {
                     if (text.startsWith(QLatin1Char('<')) || text.startsWith(QLatin1Char('#')) || text.startsWith(QLatin1Char('.'))) {
-                        blockColor = QColor(QStringLiteral("#8be9fd")); // Accent blue/cyan for tags/selectors
+                        blockColor = isDark ? QColor(QStringLiteral("#8be9fd")) : QColor(QStringLiteral("#6366f1")); // Accent blue/indigo for tags/selectors
                     } else if (text.startsWith(QLatin1Char('/')) || text.startsWith(QLatin1String("<!--"))) {
-                        blockColor = QColor(QStringLiteral("#6272a4")); // Muted green/purple for comments
+                        blockColor = isDark ? QColor(QStringLiteral("#6272a4")) : QColor(QStringLiteral("#64748b")); // Muted for comments
                     }
                 }
             }
@@ -139,8 +152,13 @@ void EditorMinimap::paintEvent(QPaintEvent *event)
         viewportY = qBound(0, viewportY, height() - viewportH);
 
         // Highlight box overlay
-        painter.fillRect(QRect(0, viewportY, width(), viewportH), QColor(255, 255, 255, 25));
-        painter.setPen(QPen(QColor(QStringLiteral("#6272a4")), 1));
+        if (isDark) {
+            painter.fillRect(QRect(0, viewportY, width(), viewportH), QColor(255, 255, 255, 25));
+            painter.setPen(QPen(QColor(QStringLiteral("#bd93f9")), 1));
+        } else {
+            painter.fillRect(QRect(0, viewportY, width(), viewportH), QColor(99, 102, 241, 35));
+            painter.setPen(QPen(QColor(QStringLiteral("#6366f1")), 1));
+        }
         painter.drawRect(QRect(0, viewportY, width() - 1, viewportH - 1));
     }
 }

@@ -12,3 +12,7 @@ ao3-typewriter
 compile_commands.json
 .cache/
 build-win/
+__pycache__/
+tools/
+*.AppImage
+dist/

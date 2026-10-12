@@ -19,6 +19,8 @@ public:
     QString html() const { return m_html; }
     void setHtml(const QString &html) { m_html = html; }
 
+    QString toPlainText() const;
+
 private:
     QUuid m_id;
     QString m_title;

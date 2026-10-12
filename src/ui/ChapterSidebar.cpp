@@ -1,6 +1,7 @@
 #include "ChapterSidebar.h"
 
 #include "model/Ao3Project.h"
+#include "themes/ThemeManager.h"
 
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -17,6 +18,11 @@ ChapterSidebar::ChapterSidebar(QWidget *parent)
 {
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(4, 4, 4, 4);
+
+    setStyleSheet(ThemeManager::instance().getSidebarStyleSheet());
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this](AppTheme) {
+        setStyleSheet(ThemeManager::instance().getSidebarStyleSheet());
+    });
 
     auto *label = new QLabel(QStringLiteral("Chapters"), this);
     m_list = new QListWidget(this);

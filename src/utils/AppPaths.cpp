@@ -29,10 +29,18 @@ QString sessionFilePath()
     return QDir(appDataDir()).filePath(QStringLiteral("session.json"));
 }
 
+QString autosaveDir()
+{
+    const QString path = QDir(appDataDir()).filePath(QStringLiteral("autosaves"));
+    QDir().mkpath(path);
+    return path;
+}
+
 void ensureDirectoriesExist()
 {
     appDataDir();
     appConfigDir();
+    autosaveDir();
 }
 
 } // namespace AppPaths

@@ -11,6 +11,9 @@ class HtmlSyntaxHighlighter : public QSyntaxHighlighter
 public:
     explicit HtmlSyntaxHighlighter(QTextDocument *parent = nullptr);
 
+public slots:
+    void updateThemeColors();
+
 protected:
     void highlightBlock(const QString &text) override;
 

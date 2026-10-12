@@ -19,6 +19,9 @@ QString logFilePath();
 // Path to user session data
 QString sessionFilePath();
 
+// Directory for emergency session autosaves (.ao3projasve)
+QString autosaveDir();
+
 // Ensure all application directories exist on disk
 void ensureDirectoriesExist();
 

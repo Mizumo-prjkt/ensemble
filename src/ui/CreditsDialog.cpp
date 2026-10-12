@@ -1,5 +1,6 @@
 #include "CreditsDialog.h"
 #include "AppIcon.h"
+#include "themes/ThemeManager.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -25,54 +26,82 @@ CreditsDialog::CreditsDialog(QWidget *parent) : QDialog(parent) {
   resize(860, 560);
   setMinimumSize(700, 460);
 
-  setStyleSheet(QStringLiteral(
+  populateEntries();
+  setupUi();
+  updateTheme();
+
+  connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this,
+          [this](AppTheme) { updateTheme(); });
+  connect(&ThemeManager::instance(), &ThemeManager::skinFlavorChanged, this,
+          [this](SkinFlavor) { updateTheme(); });
+
+  if (!m_entries.isEmpty()) {
+    m_listWidget->setCurrentRow(0);
+  }
+}
+
+void CreditsDialog::updateTheme() {
+  const bool isDark = ThemeManager::instance().isDarkMode();
+  const QString bg = ThemeManager::instance().windowBgColor().name();
+  const QString card = ThemeManager::instance().cardBgColor().name();
+  const QString text = ThemeManager::instance().primaryTextColor().name();
+  const QString muted = ThemeManager::instance().mutedTextColor().name();
+  const QString border = ThemeManager::instance().borderColor().name();
+  const QString accent = ThemeManager::instance().accentColor().name();
+  const QString accentHover = ThemeManager::instance().accentHoverColor().name();
+  const int btnRad = ThemeManager::instance().buttonRadius();
+  const int cRad = ThemeManager::instance().cardRadius();
+  const int inRad = ThemeManager::instance().inputRadius();
+  const QString btnPad = ThemeManager::instance().buttonPadding();
+
+  setStyleSheet(isDark ? QStringLiteral(
       "QDialog {"
-      "  background-color: #14151a;"
-      "  color: #f8f8f2;"
+      "  background-color: %1;"
+      "  color: %2;"
       "  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;"
       "}"
       "QLineEdit {"
-      "  background-color: #21222c;"
-      "  color: #f8f8f2;"
-      "  border: 1px solid #343746;"
-      "  border-radius: 6px;"
+      "  background-color: %3;"
+      "  color: %2;"
+      "  border: 1px solid %4;"
+      "  border-radius: %5px;"
       "  padding: 6px 12px;"
       "  font-size: 12px;"
       "}"
       "QLineEdit:focus {"
-      "  border-color: #bd93f9;"
+      "  border-color: %6;"
       "}"
       "QListWidget {"
-      "  background-color: #1a1b23;"
-      "  border: 1px solid #282a36;"
-      "  border-radius: 8px;"
+      "  background-color: %3;"
+      "  border: 1px solid %4;"
+      "  border-radius: %7px;"
       "  padding: 4px;"
-      "  color: #f8f8f2;"
+      "  color: %2;"
       "}"
       "QListWidget::item {"
       "  padding: 8px 10px;"
-      "  border-radius: 6px;"
+      "  border-radius: %5px;"
       "  margin-bottom: 2px;"
       "}"
       "QListWidget::item:hover {"
       "  background-color: #282a36;"
-      "  color: #50fa7b;"
+      "  color: %6;"
       "}"
       "QListWidget::item:selected {"
-      "  background-color: #3b335a;"
-      "  color: #bd93f9;"
+      "  background-color: %6;"
+      "  color: #ffffff;"
       "  font-weight: 600;"
       "}"
       "QFrame#detailCard {"
-      "  background-color: #1a1b23;"
-      "  border: 1px solid #282a36;"
-      "  border-radius: 8px;"
+      "  background-color: %3;"
+      "  border: 1px solid %4;"
+      "  border-radius: %7px;"
       "}"
       "QPlainTextEdit {"
       "  background-color: #14151a;"
-      "  color: #d4d4d4;"
-      "  border: 1px solid #282a36;"
-      "  border-radius: 6px;"
+      "  color: #f8f8f2;"
+      "  border: 1px solid %4;"
+      "  border-radius: %5px;"
       "  padding: 8px;"
       "  font-family: 'Consolas', 'Monospace', monospace;"
       "  font-size: 11px;"
@@ -80,34 +109,139 @@ CreditsDialog::CreditsDialog(QWidget *parent) : QDialog(parent) {
       "}"
       "QPushButton {"
       "  background-color: #282a36;"
-      "  color: #f8f8f2;"
-      "  border: 1px solid #44475a;"
-      "  border-radius: 6px;"
-      "  padding: 6px 14px;"
+      "  color: %2;"
+      "  border: 1px solid %4;"
+      "  border-radius: %8px;"
+      "  padding: %9;"
       "  font-size: 12px;"
       "  font-weight: 600;"
       "}"
       "QPushButton:hover {"
       "  background-color: #343746;"
-      "  border-color: #6272a4;"
-      "  color: #50fa7b;"
+      "  border-color: %6;"
+      "  color: %6;"
       "}"
       "QPushButton#closeBtn {"
-      "  background-color: #7f5af0;"
+      "  background-color: %6;"
       "  color: #ffffff;"
       "  border: none;"
-      "  padding: 7px 20px;"
+      "  border-radius: %8px;"
+      "  padding: 8px 24px;"
       "  font-weight: bold;"
       "}"
       "QPushButton#closeBtn:hover {"
-      "  background-color: #6c47d9;"
-      "}"));
+      "  background-color: %10;"
+      "}"
+  ).arg(bg, text, card, border).arg(inRad).arg(accent).arg(cRad).arg(btnRad).arg(btnPad, accentHover) : QStringLiteral(
+      "QDialog {"
+      "  background-color: %1;"
+      "  color: %2;"
+      "  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;"
+      "}"
+      "QLineEdit {"
+      "  background-color: #ffffff;"
+      "  color: %2;"
+      "  border: 1px solid %3;"
+      "  border-radius: %4px;"
+      "  padding: 6px 12px;"
+      "  font-size: 12px;"
+      "}"
+      "QLineEdit:focus {"
+      "  border-color: %5;"
+      "}"
+      "QListWidget {"
+      "  background-color: #ffffff;"
+      "  border: 1px solid %3;"
+      "  border-radius: %6px;"
+      "  padding: 4px;"
+      "  color: %2;"
+      "}"
+      "QListWidget::item {"
+      "  padding: 8px 10px;"
+      "  border-radius: %4px;"
+      "  margin-bottom: 2px;"
+      "}"
+      "QListWidget::item:hover {"
+      "  background-color: #f1f5f9;"
+      "  color: %2;"
+      "}"
+      "QListWidget::item:selected {"
+      "  background-color: %5;"
+      "  color: #ffffff;"
+      "  font-weight: 600;"
+      "}"
+      "QFrame#detailCard {"
+      "  background-color: #ffffff;"
+      "  border: 1px solid %3;"
+      "  border-radius: %6px;"
+      "}"
+      "QPlainTextEdit {"
+      "  background-color: #f8fafc;"
+      "  color: %2;"
+      "  border: 1px solid %3;"
+      "  border-radius: %4px;"
+      "  padding: 8px;"
+      "  font-family: 'Consolas', 'Monospace', monospace;"
+      "  font-size: 11px;"
+      "  line-height: 1.4;"
+      "}"
+      "QPushButton {"
+      "  background-color: #f1f5f9;"
+      "  color: %2;"
+      "  border: 1px solid %3;"
+      "  border-radius: %7px;"
+      "  padding: %8;"
+      "  font-size: 12px;"
+      "  font-weight: 600;"
+      "}"
+      "QPushButton:hover {"
+      "  background-color: #e2e8f0;"
+      "  border-color: %5;"
+      "  color: %5;"
+      "}"
+      "QPushButton#closeBtn {"
+      "  background-color: %5;"
+      "  color: #ffffff;"
+      "  border: none;"
+      "  border-radius: %7px;"
+      "  padding: 8px 24px;"
+      "  font-weight: bold;"
+      "}"
+      "QPushButton#closeBtn:hover {"
+      "  background-color: %9;"
+      "}"
+  ).arg(bg, text, border).arg(inRad).arg(accent).arg(cRad).arg(btnRad).arg(btnPad, accentHover));
 
-  populateEntries();
-  setupUi();
-
-  if (!m_entries.isEmpty()) {
-    m_listWidget->setCurrentRow(0);
+  if (m_headerTitle) {
+    m_headerTitle->setStyleSheet(QStringLiteral("font-size: 18px; font-weight: 700; color: %1;").arg(text));
+  }
+  if (m_headerSubTitle) {
+    m_headerSubTitle->setStyleSheet(QStringLiteral("font-size: 12px; color: %1;").arg(muted));
+  }
+  if (m_titleLabel) {
+    m_titleLabel->setStyleSheet(QStringLiteral("font-size: 16px; font-weight: 700; color: %1;").arg(text));
+  }
+  if (m_authorLabel) {
+    m_authorLabel->setStyleSheet(QStringLiteral("font-size: 12px; color: %1;").arg(muted));
+  }
+  if (m_descLabel) {
+    // High-contrast primary text color ensures crystal-clear readability on all monitors
+    m_descLabel->setStyleSheet(QStringLiteral("font-size: 13px; color: %1; line-height: 1.5;").arg(text));
+  }
+  if (m_licenseSectionLabel) {
+    m_licenseSectionLabel->setStyleSheet(QStringLiteral("font-size: 11px; font-weight: 700; color: %1; margin-top: 4px;").arg(muted));
+  }
+  if (m_licenseBadge) {
+    m_licenseBadge->setStyleSheet(isDark ? QStringLiteral(
+        "background-color: #064e3b; color: #a7f3d0; border: 1px solid #059669; "
+        "border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: 600;"
+    ) : QStringLiteral(
+        "background-color: #ecfdf5; color: #065f46; border: 1px solid #10b981; "
+        "border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: 600;"
+    ));
+  }
+  if (m_footerNote) {
+    m_footerNote->setStyleSheet(QStringLiteral("font-size: 11px; color: %1;").arg(muted));
   }
 }
 
@@ -386,17 +520,14 @@ void CreditsDialog::setupUi() {
 
   auto *headerTextLayout = new QVBoxLayout();
   headerTextLayout->setSpacing(2);
-  auto *title =
+  m_headerTitle =
       new QLabel(QStringLiteral("Open Source & Third-Party Credits"), this);
-  title->setStyleSheet(
-      QStringLiteral("font-size: 18px; font-weight: 700; color: #8be9fd;"));
-  auto *subTitle =
+  m_headerSubTitle =
       new QLabel(QStringLiteral("Ensemble is powered by and built upon these "
                                 "excellent open-source projects."),
                  this);
-  subTitle->setStyleSheet(QStringLiteral("font-size: 12px; color: #6272a4;"));
-  headerTextLayout->addWidget(title);
-  headerTextLayout->addWidget(subTitle);
+  headerTextLayout->addWidget(m_headerTitle);
+  headerTextLayout->addWidget(m_headerSubTitle);
 
   headerLayout->addWidget(headerIcon);
   headerLayout->addLayout(headerTextLayout, 1);
@@ -430,9 +561,9 @@ void CreditsDialog::setupUi() {
           &CreditsDialog::onItemSelectionChanged);
 
   // Right: Detail Panel
-  auto *detailCard = new QFrame(splitter);
-  detailCard->setObjectName(QStringLiteral("detailCard"));
-  auto *detailLayout = new QVBoxLayout(detailCard);
+  m_detailCard = new QFrame(splitter);
+  m_detailCard->setObjectName(QStringLiteral("detailCard"));
+  auto *detailLayout = new QVBoxLayout(m_detailCard);
   detailLayout->setContentsMargins(16, 16, 16, 16);
   detailLayout->setSpacing(10);
 
@@ -441,59 +572,47 @@ void CreditsDialog::setupUi() {
   auto *metaTextLayout = new QVBoxLayout();
   metaTextLayout->setSpacing(2);
 
-  m_titleLabel = new QLabel(detailCard);
-  m_titleLabel->setStyleSheet(
-      QStringLiteral("font-size: 16px; font-weight: 700; color: #f8f8f2;"));
+  m_titleLabel = new QLabel(m_detailCard);
 
-  m_authorLabel = new QLabel(detailCard);
-  m_authorLabel->setStyleSheet(
-      QStringLiteral("font-size: 12px; color: #94a3b8;"));
+  m_authorLabel = new QLabel(m_detailCard);
 
   metaTextLayout->addWidget(m_titleLabel);
   metaTextLayout->addWidget(m_authorLabel);
   metaHeader->addLayout(metaTextLayout, 1);
 
-  m_licenseBadge = new QLabel(detailCard);
-  m_licenseBadge->setStyleSheet(QStringLiteral(
-      "background-color: #282a36; color: #50fa7b; border: 1px solid #1c452b; "
-      "border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: "
-      "600;"));
+  m_licenseBadge = new QLabel(m_detailCard);
   metaHeader->addWidget(m_licenseBadge, 0, Qt::AlignTop);
 
   detailLayout->addLayout(metaHeader);
 
-  m_descLabel = new QLabel(detailCard);
-  m_descLabel->setStyleSheet(
-      QStringLiteral("font-size: 12px; color: #bd93f9; line-height: 1.4;"));
+  m_descLabel = new QLabel(m_detailCard);
   m_descLabel->setWordWrap(true);
   detailLayout->addWidget(m_descLabel);
 
   // License text view
-  auto *licenseSectionLabel =
-      new QLabel(QStringLiteral("LICENSE NOTICE"), detailCard);
-  licenseSectionLabel->setStyleSheet(QStringLiteral(
-      "font-size: 11px; font-weight: 700; color: #6272a4; margin-top: 4px;"));
-  detailLayout->addWidget(licenseSectionLabel);
+  m_licenseSectionLabel =
+      new QLabel(QStringLiteral("LICENSE NOTICE"), m_detailCard);
+  detailLayout->addWidget(m_licenseSectionLabel);
 
-  m_licenseEdit = new QPlainTextEdit(detailCard);
+  m_licenseEdit = new QPlainTextEdit(m_detailCard);
   m_licenseEdit->setReadOnly(true);
   m_licenseEdit->setLineWrapMode(QPlainTextEdit::WidgetWidth);
   detailLayout->addWidget(m_licenseEdit, 1);
 
   // Button bar in detail card
   auto *detailButtonRow = new QHBoxLayout();
-  m_copyNoticeLabel = new QLabel(detailCard);
+  m_copyNoticeLabel = new QLabel(m_detailCard);
   m_copyNoticeLabel->setStyleSheet(
       QStringLiteral("color: #50fa7b; font-size: 11px; font-weight: 600;"));
   m_copyNoticeLabel->hide();
 
   m_copyLicenseBtn =
-      new QPushButton(QStringLiteral("📋 Copy License"), detailCard);
+      new QPushButton(QStringLiteral("📋 Copy License"), m_detailCard);
   connect(m_copyLicenseBtn, &QPushButton::clicked, this,
           &CreditsDialog::onCopyLicenseClicked);
 
   m_visitWebsiteBtn =
-      new QPushButton(QStringLiteral("🌐 Visit Website"), detailCard);
+      new QPushButton(QStringLiteral("🌐 Visit Website"), m_detailCard);
   connect(m_visitWebsiteBtn, &QPushButton::clicked, this,
           &CreditsDialog::onVisitWebsiteClicked);
 
@@ -504,7 +623,7 @@ void CreditsDialog::setupUi() {
   detailLayout->addLayout(detailButtonRow);
 
   splitter->addWidget(m_listWidget);
-  splitter->addWidget(detailCard);
+  splitter->addWidget(m_detailCard);
   splitter->setStretchFactor(0, 1);
   splitter->setStretchFactor(1, 2);
 
@@ -512,20 +631,21 @@ void CreditsDialog::setupUi() {
 
   // Footer actions
   auto *footerRow = new QHBoxLayout();
-  auto *footerNote =
+  m_footerNote =
       new QLabel(QStringLiteral("All trademarks and registered trademarks are "
                                 "the property of their respective owners."),
                  this);
-  footerNote->setStyleSheet(QStringLiteral("font-size: 11px; color: #6272a4;"));
 
-  auto *closeBtn = new QPushButton(QStringLiteral("Close"), this);
-  closeBtn->setObjectName(QStringLiteral("closeBtn"));
-  connect(closeBtn, &QPushButton::clicked, this, &QDialog::accept);
+  m_closeBtn = new QPushButton(QStringLiteral("Close"), this);
+  m_closeBtn->setObjectName(QStringLiteral("closeBtn"));
+  connect(m_closeBtn, &QPushButton::clicked, this, &QDialog::accept);
 
-  footerRow->addWidget(footerNote);
+  footerRow->addWidget(m_footerNote);
   footerRow->addStretch();
-  footerRow->addWidget(closeBtn);
+  footerRow->addWidget(m_closeBtn);
   mainLayout->addLayout(footerRow);
+
+  updateTheme();
 }
 
 void CreditsDialog::onFilterChanged(const QString &text) {

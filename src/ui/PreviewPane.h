@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QPixmap>
 #include <QWidget>
 
 class QWebEngineView;
@@ -10,6 +11,8 @@ class PreviewPane : public QWidget
 
 public:
     explicit PreviewPane(QWidget *parent = nullptr);
+
+    QPixmap captureScreenshot();
 
 public slots:
     void updatePreview(const QString &chapterTitle, const QString &html, const QString &css);

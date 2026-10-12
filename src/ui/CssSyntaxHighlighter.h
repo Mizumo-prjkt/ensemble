@@ -11,6 +11,9 @@ class CssSyntaxHighlighter : public QSyntaxHighlighter
 public:
     explicit CssSyntaxHighlighter(QTextDocument *parent = nullptr);
 
+public slots:
+    void updateThemeColors();
+
 protected:
     void highlightBlock(const QString &text) override;
 

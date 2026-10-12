@@ -28,10 +28,15 @@ public slots:
     void setCustomCss(const QString &css);
     void setAvailableCssClasses(const QStringList &classes);
     void runSpellAndGrammarChecks();
+    void updateTheme();
+    void updateSettings();
 
 signals:
     void contentChanged();
     void htmlExported(const QString &html);
+
+protected:
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private slots:
     void onBold();
@@ -44,23 +49,27 @@ private slots:
     void onBulletList();
     void onNumberedList();
     void onInsertLink();
+    void onInsertImageEmbed();
     void onInsertHorizontalRule();
     void onCodeBlock();
-    void onDocumentChanged();
     void onApplyCssClass(const QString &className);
+    void onDocumentChanged();
+    void showEditorContextMenu(const QPoint &pos);
 
 private:
     void setupToolbar();
     void mergeCharFormat(const QTextCharFormat &format);
     void mergeBlockFormat(const QTextBlockFormat &format);
-    void showEditorContextMenu(const QPoint &pos);
+    void handleEditorTooltip(class QHelpEvent *helpEvent);
+    void fetchRemoteImagesInDocument();
 
+    QToolBar *m_toolbar = nullptr;
     QTextEdit *m_editor = nullptr;
     EditorMinimap *m_minimap = nullptr;
-    QToolBar *m_toolbar = nullptr;
     SpellChecker *m_spellChecker = nullptr;
     QTimer *m_spellTimer = nullptr;
-    bool m_blockChanges = false;
-    QStringList m_availableCssClasses;
+    class QNetworkAccessManager *m_imageNam = nullptr;
     QString m_customCss;
+    QStringList m_availableCssClasses;
+    bool m_blockChanges = false;
 };

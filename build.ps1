@@ -1,18 +1,10 @@
-param(
-    [string]$Mode = "Debug"
-)
+# Ensemble Build Wrapper (PowerShell)
+# Forwards arguments directly to the unified Python build orchestrator build.py
 
 $ErrorActionPreference = "Stop"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-if ($Mode -eq "release" -or $Mode -eq "--release") {
-    $BuildType = "Release"
-} else {
-    $BuildType = "Debug"
+python "$ScriptDir\build.py" @args
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
 }
-
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host " Building Ensemble in $BuildType mode (Windows)" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
-
-cmake -B build -DCMAKE_BUILD_TYPE=$BuildType
-cmake --build build --config $BuildType --parallel

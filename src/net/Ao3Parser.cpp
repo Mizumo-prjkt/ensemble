@@ -43,6 +43,53 @@ QString Ao3Parser::parseUsername(const QByteArray &htmlData)
     return QString();
 }
 
+static QString sanitizeTagText(QString tag)
+{
+    tag.replace(QStringLiteral("&amp;"), QStringLiteral("&"));
+    tag.replace(QStringLiteral("&quot;"), QStringLiteral("\""));
+    tag.replace(QStringLiteral("&#39;"), QStringLiteral("'"));
+    tag.replace(QStringLiteral("&lt;"), QStringLiteral("<"));
+    tag.replace(QStringLiteral("&gt;"), QStringLiteral(">"));
+    return tag.trimmed();
+}
+
+static QStringList extractTagsFromDd(const QString &html, const QString &ddClass)
+{
+    QStringList result;
+    QRegularExpression reDd(QStringLiteral("<dd[^>]+class=[\"'][^\"']*") + ddClass + QStringLiteral("[^\"']*tags[^\"']*[\"'][^>]*>(.*?)</dd>"),
+                            QRegularExpression::DotMatchesEverythingOption);
+    const auto match = reDd.match(html);
+    if (match.hasMatch()) {
+        QRegularExpression reTag(QStringLiteral("<a[^>]+class=[\"']tag[\"'][^>]*>([^<]+)</a>"));
+        auto it = reTag.globalMatch(match.captured(1));
+        while (it.hasNext()) {
+            const QString tag = sanitizeTagText(it.next().captured(1));
+            if (!tag.isEmpty() && !result.contains(tag)) {
+                result.append(tag);
+            }
+        }
+    }
+    return result;
+}
+
+static QStringList extractAuthors(const QString &html)
+{
+    QStringList authors;
+    QRegularExpression reByline(QStringLiteral("<h3[^>]+class=[\"'][^\"']*byline[^\"']*heading[^\"']*[\"'][^>]*>(.*?)</h3>"),
+                                QRegularExpression::DotMatchesEverythingOption);
+    const auto bMatch = reByline.match(html);
+    const QString searchArea = bMatch.hasMatch() ? bMatch.captured(1) : html;
+    QRegularExpression reAuthor(QStringLiteral("<a[^>]+rel=[\"']author[\"'][^>]*>([^<]+)</a>"));
+    auto it = reAuthor.globalMatch(searchArea);
+    while (it.hasNext()) {
+        const QString author = sanitizeTagText(it.next().captured(1));
+        if (!author.isEmpty() && !authors.contains(author)) {
+            authors.append(author);
+        }
+    }
+    return authors;
+}
+
 QList<Ao3Pseud> Ao3Parser::parsePseudsList(const QByteArray &htmlData)
 {
     const QString html = QString::fromUtf8(htmlData);
@@ -152,6 +199,43 @@ QList<Ao3WorkSummary> Ao3Parser::parseWorksList(const QByteArray &htmlData)
             w.totalChapters = 1;
         }
 
+        // Tags: warnings, relationships, characters, freeform
+        QRegularExpression reTagsList(QStringLiteral("<li[^>]*class=[\"']([^\"']+)[\"'][^>]*>\\s*<a[^>]*class=[\"']tag[\"'][^>]*>([^<]+)</a>"));
+        auto itTag = reTagsList.globalMatch(block);
+        while (itTag.hasNext()) {
+            const auto m = itTag.next();
+            const QString cls = m.captured(1);
+            const QString tagText = sanitizeTagText(m.captured(2));
+            if (cls.contains(QStringLiteral("warning"))) {
+                if (!w.archiveWarnings.contains(tagText)) w.archiveWarnings.append(tagText);
+            } else if (cls.contains(QStringLiteral("relationship"))) {
+                if (!w.relationships.contains(tagText)) w.relationships.append(tagText);
+            } else if (cls.contains(QStringLiteral("character"))) {
+                if (!w.characters.contains(tagText)) w.characters.append(tagText);
+            } else if (cls.contains(QStringLiteral("freeform"))) {
+                if (!w.tags.contains(tagText)) w.tags.append(tagText);
+            }
+        }
+
+        // Required tags (rating & category)
+        QRegularExpression reReqRating(QStringLiteral("<span[^>]+class=[\"'][^\"']*rating-([a-z-]+)[^\"']*[\"'][^>]*title=[\"']([^\"']+)[\"']"));
+        const auto rMatch = reReqRating.match(block);
+        if (rMatch.hasMatch()) {
+            w.rating = rMatch.captured(2).trimmed();
+        }
+
+        QRegularExpression reReqCat(QStringLiteral("<span[^>]+class=[\"'][^\"']*category-([a-z-]+)[^\"']*[\"'][^>]*title=[\"']([^\"']+)[\"']"));
+        const auto cCatMatch = reReqCat.match(block);
+        if (cCatMatch.hasMatch()) {
+            const QString catTitle = cCatMatch.captured(2).trimmed();
+            for (const QString &c : catTitle.split(QLatin1Char(','))) {
+                const QString trimmedCat = c.trimmed();
+                if (!trimmedCat.isEmpty() && !w.categories.contains(trimmedCat)) {
+                    w.categories.append(trimmedCat);
+                }
+            }
+        }
+
         works.append(w);
     }
 
@@ -215,6 +299,57 @@ Ao3FullWork Ao3Parser::parseFullWork(const QByteArray &htmlData)
     const auto tHeaderMatch = reTitleHeader.match(html);
     if (tHeaderMatch.hasMatch()) {
         fullWork.summary.title = tHeaderMatch.captured(1).remove(QRegularExpression(QStringLiteral("<[^>]+>"))).trimmed();
+    }
+
+    // Extract Work Author / Pseud
+    const QStringList authors = extractAuthors(html);
+    if (!authors.isEmpty()) {
+        fullWork.summary.pseud = authors.join(QStringLiteral(", "));
+    }
+
+    // Extract Rating
+    const QStringList ratings = extractTagsFromDd(html, QStringLiteral("rating"));
+    if (!ratings.isEmpty()) {
+        fullWork.summary.rating = ratings.first();
+    } else {
+        QRegularExpression reRate(QStringLiteral("<dd[^>]+class=[\"'][^\"']*rating[^\"']*tags[^\"']*[\"'][^>]*>(.*?)</dd>"),
+                                  QRegularExpression::DotMatchesEverythingOption);
+        const auto rMatch = reRate.match(html);
+        if (rMatch.hasMatch()) {
+            fullWork.summary.rating = sanitizeTagText(rMatch.captured(1).remove(QRegularExpression(QStringLiteral("<[^>]+>"))));
+        }
+    }
+    if (fullWork.summary.rating.isEmpty()) {
+        fullWork.summary.rating = QStringLiteral("Not Rated");
+    }
+
+    // Extract Archive Warnings
+    fullWork.summary.archiveWarnings = extractTagsFromDd(html, QStringLiteral("warning"));
+
+    // Extract Categories
+    fullWork.summary.categories = extractTagsFromDd(html, QStringLiteral("category"));
+
+    // Extract Fandoms
+    fullWork.summary.fandoms = extractTagsFromDd(html, QStringLiteral("fandom"));
+    if (!fullWork.summary.fandoms.isEmpty()) {
+        fullWork.summary.fandom = fullWork.summary.fandoms.join(QStringLiteral(", "));
+    }
+
+    // Extract Relationships
+    fullWork.summary.relationships = extractTagsFromDd(html, QStringLiteral("relationship"));
+
+    // Extract Characters
+    fullWork.summary.characters = extractTagsFromDd(html, QStringLiteral("character"));
+
+    // Extract Freeform Additional Tags
+    fullWork.summary.tags = extractTagsFromDd(html, QStringLiteral("freeform"));
+
+    // Extract Summary Block
+    QRegularExpression reSummary(QStringLiteral("<div[^>]+class=[\"'][^\"']*summary[^\"']*module[^\"']*[\"'][^>]*>\\s*<blockquote[^>]*class=[\"']userstuff[\"'][^>]*>(.*?)</blockquote>"),
+                                 QRegularExpression::DotMatchesEverythingOption);
+    const auto sumMatch = reSummary.match(html);
+    if (sumMatch.hasMatch()) {
+        fullWork.summary.summaryText = sumMatch.captured(1).remove(QRegularExpression(QStringLiteral("<[^>]+>"))).trimmed();
     }
 
     // Extract Work Skin CSS
@@ -295,6 +430,42 @@ Ao3FullWork Ao3Parser::parseFullWork(const QByteArray &htmlData)
         body.remove(QRegularExpression(QStringLiteral(R"(<!--[\s\S]*?-->)")));
         chap.bodyHtml = body.trimmed();
         fullWork.chapters.append(chap);
+    }
+
+    // Scan all chapters for embedded <img> tags
+    static const QRegularExpression reImg(
+        QStringLiteral(R"(<img\b([^>]*?)\/?>)"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression reSrc(
+        QStringLiteral(R"(src\s*=\s*["']([^"']+)["'])"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression reAlt(
+        QStringLiteral(R"(alt\s*=\s*["']([^"']*)["'])"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression reTitle(
+        QStringLiteral(R"(title\s*=\s*["']([^"']*)["'])"),
+        QRegularExpression::CaseInsensitiveOption);
+
+    for (const auto &chap : fullWork.chapters) {
+        auto itImg = reImg.globalMatch(chap.bodyHtml);
+        while (itImg.hasNext()) {
+            const QString tagAttrs = itImg.next().captured(1);
+            const auto mSrc = reSrc.match(tagAttrs);
+            if (mSrc.hasMatch()) {
+                Ao3ImageEmbed embed;
+                embed.url = mSrc.captured(1).trimmed();
+                const auto mAlt = reAlt.match(tagAttrs);
+                if (mAlt.hasMatch()) {
+                    embed.alt = sanitizeTagText(mAlt.captured(1));
+                }
+                const auto mTit = reTitle.match(tagAttrs);
+                if (mTit.hasMatch()) {
+                    embed.title = sanitizeTagText(mTit.captured(1));
+                }
+                embed.chapterNumber = chap.chapterNumber;
+                fullWork.embeddedImages.append(embed);
+            }
+        }
     }
 
     return fullWork;

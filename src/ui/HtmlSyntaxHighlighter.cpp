@@ -1,25 +1,40 @@
 #include "HtmlSyntaxHighlighter.h"
+#include "themes/ThemeManager.h"
 
 HtmlSyntaxHighlighter::HtmlSyntaxHighlighter(QTextDocument *parent)
     : QSyntaxHighlighter(parent)
 {
-    // VSCode / IDE-like colors (dark theme suitable)
-    tagFormat.setForeground(QColor(QStringLiteral("#569CD6"))); // Blue for tags
+    updateThemeColors();
+
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this](AppTheme) {
+        updateThemeColors();
+        rehighlight();
+    });
+
+    commentStartExpression = QRegularExpression(R"(<!--)");
+    commentEndExpression = QRegularExpression(R"(-->)");
+}
+
+void HtmlSyntaxHighlighter::updateThemeColors()
+{
+    highlightingRules.clear();
+
+    const ThemeManager &tm = ThemeManager::instance();
+
+    tagFormat.setForeground(tm.syntaxTagColor());
     tagFormat.setFontWeight(QFont::Bold);
 
-    attributeFormat.setForeground(QColor(QStringLiteral("#9CDCFE"))); // Light Blue for attributes
+    attributeFormat.setForeground(tm.syntaxAttributeColor());
 
-    valueFormat.setForeground(QColor(QStringLiteral("#CE9178"))); // Orange/brown for values
+    valueFormat.setForeground(tm.syntaxValueColor());
 
-    commentFormat.setForeground(QColor(QStringLiteral("#6A9955"))); // Green for comments
+    commentFormat.setForeground(tm.syntaxCommentColor());
     commentFormat.setFontItalic(true);
 
-    entityFormat.setForeground(QColor(QStringLiteral("#DCDCAA"))); // Light yellow for entities like &amp;
-
-    // Rules
-    HighlightingRule rule;
+    entityFormat.setForeground(tm.syntaxEntityColor());
 
     // 1. Attribute Values (quoted strings)
+    HighlightingRule rule;
     rule.pattern = QRegularExpression(R"("[^"]*"|'[^']*')");
     rule.format = valueFormat;
     highlightingRules.append(rule);
@@ -38,9 +53,6 @@ HtmlSyntaxHighlighter::HtmlSyntaxHighlighter(QTextDocument *parent)
     rule.pattern = QRegularExpression(R"(&[a-zA-Z0-9#]+;)");
     rule.format = entityFormat;
     highlightingRules.append(rule);
-
-    commentStartExpression = QRegularExpression(R"(<!--)");
-    commentEndExpression = QRegularExpression(R"(-->)");
 }
 
 void HtmlSyntaxHighlighter::highlightBlock(const QString &text)
@@ -58,19 +70,22 @@ void HtmlSyntaxHighlighter::highlightBlock(const QString &text)
     setCurrentBlockState(0);
 
     int startIndex = 0;
-    if (previousBlockState() != 1)
+    if (previousBlockState() != 1) {
         startIndex = text.indexOf(commentStartExpression);
+    }
 
     while (startIndex >= 0) {
         QRegularExpressionMatch match = commentEndExpression.match(text, startIndex);
         int endIndex = match.capturedStart();
         int commentLength = 0;
+
         if (endIndex == -1) {
             setCurrentBlockState(1);
             commentLength = text.length() - startIndex;
         } else {
             commentLength = endIndex - startIndex + match.capturedLength();
         }
+
         setFormat(startIndex, commentLength, commentFormat);
         startIndex = text.indexOf(commentStartExpression, startIndex + commentLength);
     }

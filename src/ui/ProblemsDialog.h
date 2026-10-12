@@ -1,10 +1,13 @@
 #pragma once
 
 #include <QDialog>
+#include <QList>
 #include <QStringList>
 
 class QTreeWidget;
 class QTreeWidgetItem;
+class QLabel;
+class QPushButton;
 class Ao3Project;
 
 struct ProblemItem {
@@ -13,6 +16,7 @@ struct ProblemItem {
     QString category;
     QString description;
     int chapterIndex = -1; // -1 for CSS or project level
+    QList<int> affectedChapters; // List of chapter indices affected by this problem
 };
 
 class ProblemsDialog : public QDialog
@@ -25,6 +29,9 @@ public:
 
     void setProblems(const QList<ProblemItem> &problems);
 
+public slots:
+    void updateTheme();
+
 signals:
     void chapterSelected(int chapterIndex);
     void cssTabRequested();
@@ -34,5 +41,7 @@ private slots:
 
 private:
     QTreeWidget *m_treeWidget = nullptr;
+    QLabel *m_titleLabel = nullptr;
+    QPushButton *m_closeBtn = nullptr;
     QList<ProblemItem> m_problems;
 };
