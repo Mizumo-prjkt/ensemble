@@ -8,7 +8,22 @@
 #include <QTemporaryDir>
 #include <cassert>
 
+#if defined(_WIN32)
+#include <crtdbg.h>
+#include <stdlib.h>
+#endif
+
 int main(int argc, char *argv[]) {
+#if defined(_WIN32)
+  _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#if defined(_DEBUG)
+  _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+  _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+  _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+  _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
+#endif
+
   QCoreApplication app(argc, argv);
 
   QTemporaryDir tempDir;
@@ -224,7 +239,8 @@ int main(int argc, char *argv[]) {
     Ao3Project recoveredProj;
     ProjectLoadReport recReport = ProjectSerializer::loadWithValidation(autosavePath, recoveredProj);
     assert(recReport.success);
-    assert(recReport.formatType == ProjectFormatType::ModernArchiveZip);
+    assert(recReport.formatType == ProjectFormatType::ModernArchiveZip ||
+           recReport.formatType == ProjectFormatType::ModernArchiveZstd);
     assert(recoveredProj.title() == QStringLiteral("Unsaved In-Progress Masterpiece"));
     assert(recoveredProj.chapters().size() == 1);
     assert(recoveredProj.chapters().first().title() == QStringLiteral("Chapter 1: The Crash Event"));

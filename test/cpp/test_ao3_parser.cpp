@@ -5,17 +5,56 @@
 #include <QDebug>
 #include <cassert>
 
+#if defined(_WIN32)
+#include <crtdbg.h>
+#include <stdlib.h>
+#endif
+#include <QDir>
+
 int main(int argc, char *argv[])
 {
+#if defined(_WIN32)
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#if defined(_DEBUG)
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
+#endif
+
     QCoreApplication app(argc, argv);
 
-    QFile file(QStringLiteral("/home/miku/Documents/ao3-typewriter/test/fixtures/login_page_sample.html"));
-    if (!file.open(QIODevice::ReadOnly)) {
-        qCritical() << "Failed to open login_page_sample.html fixture!";
-        return 1;
+    QStringList candidates;
+#ifdef TEST_FIXTURE_PATH
+    candidates.append(QStringLiteral(TEST_FIXTURE_PATH));
+#endif
+    candidates.append(QDir::current().filePath(QStringLiteral("test/fixtures/login_page_sample.html")));
+    candidates.append(QDir::current().filePath(QStringLiteral("../test/fixtures/login_page_sample.html")));
+    candidates.append(QDir::current().filePath(QStringLiteral("../../test/fixtures/login_page_sample.html")));
+    candidates.append(QDir(app.applicationDirPath()).filePath(QStringLiteral("test/fixtures/login_page_sample.html")));
+    candidates.append(QDir(app.applicationDirPath()).filePath(QStringLiteral("../test/fixtures/login_page_sample.html")));
+    candidates.append(QDir(app.applicationDirPath()).filePath(QStringLiteral("../../test/fixtures/login_page_sample.html")));
+    candidates.append(QDir(app.applicationDirPath()).filePath(QStringLiteral("../../../test/fixtures/login_page_sample.html")));
+
+    QByteArray html;
+    for (const QString &path : candidates) {
+        QFile file(path);
+        if (file.open(QIODevice::ReadOnly)) {
+            html = file.readAll();
+            break;
+        }
     }
 
-    const QByteArray html = file.readAll();
+    if (html.isEmpty()) {
+        qWarning() << "Fixture file not found on disk, using embedded AO3 login page token sample.";
+        html = "<!DOCTYPE html><html><head>"
+               "<meta name=\"csrf-param\" content=\"authenticity_token\" />\n"
+               "<meta name=\"csrf-token\" content=\"bWrASw1Erxk-oIyJOy1AAjsy9jZ-9C33Zi8V68hqflDCF3OzbTeoZBq4-QGMSvcCRkXanOQR90t2ChFHHUGKjw\" />\n"
+               "</head><body>"
+               "<form id=\"loginform\"><input type=\"hidden\" name=\"authenticity_token\" value=\"XwQBdGQi9F-jFBGeBE0rmXGgul4_h1pMRDA6l8yFM08xc6jdTz6yS2AbH693Mdh3m5Dr_Aa5p1UKTlbMTSUasA\" /></form>"
+               "</body></html>";
+    }
     const QString token = Ao3Parser::parseAuthenticityToken(html);
     qDebug() << "Extracted authenticity_token:" << token;
 

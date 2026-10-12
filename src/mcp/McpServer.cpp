@@ -441,7 +441,11 @@ McpTestResult McpServer::testLoopback(int timeoutMs)
         }
     });
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     connect(&testSocket, &QWebSocket::errorOccurred, &loop, [&](QAbstractSocket::SocketError) {
+#else
+    connect(&testSocket, qOverload<QAbstractSocket::SocketError>(&QWebSocket::error), &loop, [&](QAbstractSocket::SocketError) {
+#endif
         errorStr = testSocket.errorString();
         loop.quit();
     });

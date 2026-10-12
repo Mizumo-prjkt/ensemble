@@ -65,6 +65,8 @@ find_package(Qt6 QUIET COMPONENTS WebEngineQuick)
 find_package(ZLIB QUIET)
 if(NOT TARGET ZLIB::ZLIB)
     include(FetchContent)
+    set(SKIP_BUILD_EXAMPLES ON CACHE BOOL "Skip build of zlib examples" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "Disable testing in zlib" FORCE)
     FetchContent_Declare(
         zlib
         GIT_REPOSITORY https://github.com/madler/zlib.git
@@ -274,6 +276,7 @@ endif()
 add_executable(test_ao3_parser test/cpp/test_ao3_parser.cpp src/net/Ao3Parser.cpp)
 target_include_directories(test_ao3_parser PRIVATE src)
 target_compile_definitions(test_ao3_parser PRIVATE
+    TEST_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures/login_page_sample.html"
     $<$<CONFIG:Debug>:
         ENSEMBLE_BUILD_TYPE="Debug"
         QT_DEBUG

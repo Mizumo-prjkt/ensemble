@@ -378,7 +378,7 @@ class EnsembleBuilder:
     def test(self) -> int:
         bdir = self.config.resolved_build_dir()
         self.log("[TEST] Running unit tests suite via ctest...")
-        cmd = ["ctest", "--test-dir", str(bdir), "--output-on-failure"]
+        cmd = ["ctest", "--test-dir", str(bdir), "--output-on-failure", "-R", "^test_", "--timeout", "60"]
         if platform.system() == "Windows":
             cmd.extend(["-C", self.config.build_type])
         test_env = {}

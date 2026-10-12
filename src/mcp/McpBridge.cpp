@@ -135,7 +135,11 @@ int McpBridge::runBridge()
         checkGracefulExit();
     });
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     QObject::connect(&socket, &QWebSocket::errorOccurred, [&](QAbstractSocket::SocketError) {
+#else
+    QObject::connect(&socket, qOverload<QAbstractSocket::SocketError>(&QWebSocket::error), [&](QAbstractSocket::SocketError) {
+#endif
         std::cerr << "[Ensemble MCP Bridge] WebSocket error: "
                   << socket.errorString().toStdString() << std::endl;
         QCoreApplication::quit();
@@ -219,7 +223,11 @@ int McpBridge::runStatusCheck()
         }
     });
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     QObject::connect(&probe, &QWebSocket::errorOccurred, [&](QAbstractSocket::SocketError) {
+#else
+    QObject::connect(&probe, qOverload<QAbstractSocket::SocketError>(&QWebSocket::error), [&](QAbstractSocket::SocketError) {
+#endif
         probeError = probe.errorString();
         loop.quit();
     });
