@@ -382,6 +382,21 @@ void LoreManager::setNamedGraph(const QString &name, const LoreGraph &g)
     m_lastUpdated = QDateTime::currentDateTimeUtc();
 }
 
+bool LoreManager::removeNamedGraph(const QString &name)
+{
+    if (name.isEmpty() || name == QStringLiteral("data")) {
+        m_defaultGraph.clear();
+        m_defaultGraph.setTitle(QStringLiteral("Story Lore Graph"));
+        m_lastUpdated = QDateTime::currentDateTimeUtc();
+        return true;
+    }
+    if (m_namedGraphs.remove(name) > 0) {
+        m_lastUpdated = QDateTime::currentDateTimeUtc();
+        return true;
+    }
+    return false;
+}
+
 QStringList LoreManager::graphNames() const
 {
     QStringList names;

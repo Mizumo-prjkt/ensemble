@@ -38,6 +38,15 @@ void AgenticData::ensureDefaultAgentifiers()
     m_agentifiers[QStringLiteral("agents")] = QJsonObject();
 }
 
+static QString makeModelKey(const AgentModelHistoryEntry &entry)
+{
+    if (!entry.model.isEmpty() && entry.model != QStringLiteral("unknown-model") &&
+        entry.model != QStringLiteral("assistant") && entry.model.toLower() != entry.agentName.toLower()) {
+        return QStringLiteral("%1:%2").arg(entry.agentName.toLower(), entry.model.toLower());
+    }
+    return entry.agentName.toLower();
+}
+
 void AgenticData::ensureDefaultHistory()
 {
     if (m_historyEntries.isEmpty()) {
@@ -50,7 +59,7 @@ void AgenticData::ensureDefaultHistory()
         entry.action = QStringLiteral("init");
         entry.summary = QStringLiteral("Agentic data repository initialized for project.");
         m_historyEntries.append(entry);
-        m_lastChangesByModel[entry.agentName.toLower()] = entry;
+        m_lastChangesByModel[makeModelKey(entry)] = entry;
     }
 }
 
@@ -279,7 +288,7 @@ void AgenticData::appendHistoryEntry(const QString &agentName, const QString &mo
     entry.details = details;
 
     m_historyEntries.append(entry);
-    m_lastChangesByModel[entry.agentName.toLower()] = entry;
+    m_lastChangesByModel[makeModelKey(entry)] = entry;
     m_modifiedDate = entry.timestamp;
 }
 
@@ -374,7 +383,7 @@ void AgenticData::setRawModelHistoryXml(const QString &xml)
                     }
                 }
                 m_historyEntries.append(entry);
-                m_lastChangesByModel[entry.agentName.toLower()] = entry;
+                m_lastChangesByModel[makeModelKey(entry)] = entry;
             }
         }
     }

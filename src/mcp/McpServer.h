@@ -22,6 +22,7 @@ struct McpTestResult {
 struct McpAgentSession {
     QString agentId;
     QString name;        // e.g. "antigravity", "claude"
+    QString model;       // e.g. "claude-3-7-sonnet", "gemini-2.5-pro"
     QString version;     // e.g. "2.0.0"
     QString role;        // e.g. "co-author", "reviewer"
     QString workingNote; // e.g. "Drafting Chapter 2"
@@ -56,7 +57,8 @@ public:
                             const QString &name = QString(),
                             const QString &version = QString(),
                             const QString &role = QString(),
-                            const QString &workingNote = QString());
+                            const QString &workingNote = QString(),
+                            const QString &model = QString());
     void touchAgentActivity(QWebSocket *client);
 
     // Agent Activities & Thoughts Log

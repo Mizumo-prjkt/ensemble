@@ -122,9 +122,30 @@ SanitizeResult Ao3HtmlSanitizer::sanitizeDetailed(const QString &html)
         result.wasModified = true;
         cleaned.remove(QRegularExpression(QStringLiteral(R"(<!--[\s\S]*?-->)")));
     }
+
+    // Strip dangerous block elements and their inner contents entirely (script, style, iframe, object, embed, noscript)
+    static const QRegularExpression dangerousBlocksRe(
+        QStringLiteral(R"(<(script|style|iframe|object|embed|noscript)\b[^>]*>[\s\S]*?<\/\1\b[^>]*>|<(script|style|iframe|object|embed|noscript)\b[^>]*\/?>)"),
+        QRegularExpression::CaseInsensitiveOption);
+
+    QRegularExpressionMatchIterator dangIt = dangerousBlocksRe.globalMatch(cleaned);
+    bool foundDang = false;
+    while (dangIt.hasNext()) {
+        const QRegularExpressionMatch dm = dangIt.next();
+        const QString tagName = (!dm.captured(1).isEmpty() ? dm.captured(1) : dm.captured(2)).toLower();
+        strippedTagsSet.insert(tagName);
+        foundDang = true;
+    }
+    if (foundDang) {
+        result.wasModified = true;
+        cleaned.remove(dangerousBlocksRe);
+    }
+
     if (cleaned.trimmed().isEmpty()) {
         result.cleanHtml = QStringLiteral("<p></p>");
         result.wasModified = (html != result.cleanHtml);
+        result.strippedTags = QStringList(strippedTagsSet.begin(), strippedTagsSet.end());
+        result.strippedTags.sort();
         return result;
     }
 

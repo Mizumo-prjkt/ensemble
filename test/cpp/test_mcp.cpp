@@ -4,6 +4,7 @@
 #include "ui/MainWindow.h"
 #include "ui/AgentThoughtsDialog.h"
 #include "model/Ao3Project.h"
+#include "export/Ao3HtmlSanitizer.h"
 
 #include <QApplication>
 #include <QDir>
@@ -1094,6 +1095,272 @@ int main(int argc, char *argv[])
         assert(embeds.first().toObject().value("url").toString() == "https://images.example.com/illustration_scene.png");
         assert(embeds.first().toObject().value("alt").toString() == "Hero confronting dragon");
         std::cout << "✓ MCP 'list_image_embeds' returned active project image embeds." << std::endl;
+    }
+
+    // 37. Test update_lore_graph rejects malformed DSL and preserves existing graph
+    {
+        // First get current lore graph to know baseline state
+        QJsonObject getReq;
+        getReq["jsonrpc"] = "2.0";
+        getReq["id"] = 56;
+        getReq["method"] = "tools/call";
+        getReq["params"] = QJsonObject{{"name", "get_lore_graph"}, {"arguments", QJsonObject{{"name", "data"}}}};
+        QJsonObject getResp = sendAndReceive(getReq);
+        assert(getResp.value("id").toInt() == 56);
+        QJsonObject getResult = getResp.value("result").toObject();
+        assert(!getResult.value("isError").toBool());
+        QJsonObject prevData = QJsonDocument::fromJson(getResult.value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        const QString prevTitle = prevData.value("title").toString();
+        const int prevNodeCount = prevData.value("nodeCount").toInt();
+
+        // Send deliberately malformed DSL
+        QJsonObject badReq;
+        badReq["jsonrpc"] = "2.0";
+        badReq["id"] = 57;
+        badReq["method"] = "tools/call";
+        QJsonObject badParams;
+        badParams["name"] = "update_lore_graph";
+        QJsonObject badArgs;
+        badArgs["name"] = "data";
+        badArgs["dsl"] = "graph \"Broken\" [direction=SIDEWAYS]\nTHIS_IS_NOT_VALID_DSL_SYNTAX\n";
+        badParams["arguments"] = badArgs;
+        badReq["params"] = badParams;
+
+        QJsonObject badResp = sendAndReceive(badReq);
+        assert(badResp.value("id").toInt() == 57);
+        QJsonObject badResult = badResp.value("result").toObject();
+        assert(badResult.value("isError").toBool() == true);
+
+        // Verify the existing graph was preserved and NOT wiped out
+        QJsonObject checkReq;
+        checkReq["jsonrpc"] = "2.0";
+        checkReq["id"] = 58;
+        checkReq["method"] = "tools/call";
+        checkReq["params"] = QJsonObject{{"name", "get_lore_graph"}, {"arguments", QJsonObject{{"name", "data"}}}};
+        QJsonObject checkResp = sendAndReceive(checkReq);
+        assert(checkResp.value("id").toInt() == 58);
+        QJsonObject checkData = QJsonDocument::fromJson(checkResp.value("result").toObject().value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(checkData.value("title").toString() == prevTitle);
+        assert(checkData.value("nodeCount").toInt() == prevNodeCount);
+        std::cout << "✓ MCP 'update_lore_graph' rejects malformed DSL and preserves previous graph without data loss." << std::endl;
+    }
+
+    // 38. Test update_lore_graph with valid DSL containing notes and connectors
+    {
+        QJsonObject req;
+        req["jsonrpc"] = "2.0";
+        req["id"] = 59;
+        req["method"] = "tools/call";
+        QJsonObject params;
+        params["name"] = "update_lore_graph";
+        QJsonObject args;
+        args["name"] = "data";
+        args["dsl"] =
+            "graph \"Valid Map\" [direction=LR]\n"
+            "node hero [label=\"Hero\", type=\"character\", pos(100, 100), size(120, 60), color=\"#3b82f6\", shape=box, notes=\"Protagonist note\"]\n"
+            "node rival [label=\"Rival\", type=\"character\", pos(400, 100), size(120, 60), color=\"#ef4444\", shape=box, notes=\"Antagonist note\"]\n"
+            "hero -> rival [id=\"conn_hero_rival\", style=dashed, color=\"#94a3b8\", label=\"rivalry\"]\n";
+        params["arguments"] = args;
+        req["params"] = params;
+
+        QJsonObject resp = sendAndReceive(req);
+        assert(resp.value("id").toInt() == 59);
+        QJsonObject result = resp.value("result").toObject();
+        assert(!result.value("isError").toBool());
+
+        // Verify with get_lore_graph
+        QJsonObject getReq;
+        getReq["jsonrpc"] = "2.0";
+        getReq["id"] = 60;
+        getReq["method"] = "tools/call";
+        getReq["params"] = QJsonObject{{"name", "get_lore_graph"}, {"arguments", QJsonObject{{"name", "data"}}}};
+        QJsonObject getResp = sendAndReceive(getReq);
+        QJsonObject data = QJsonDocument::fromJson(getResp.value("result").toObject().value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(data.value("nodeCount").toInt() == 2);
+        assert(data.value("connectorCount").toInt() == 1);
+        assert(data.value("rawDsl").toString().contains("notes=\"Protagonist note\""));
+        assert(data.value("rawDsl").toString().contains("id=\"conn_hero_rival\""));
+        std::cout << "✓ MCP 'update_lore_graph' verified with valid DSL, notes=, and stable connector IDs." << std::endl;
+    }
+
+    // 39. Test manage_lore_data: nonexistent entity error, field aliases (description->summary, etc.), and deletions
+    {
+        // 1. remove_entity on nonexistent ID fails
+        QJsonObject remBadReq;
+        remBadReq["jsonrpc"] = "2.0";
+        remBadReq["id"] = 61;
+        remBadReq["method"] = "tools/call";
+        QJsonObject remBadParams;
+        remBadParams["name"] = "manage_lore_data";
+        remBadParams["arguments"] = QJsonObject{{"action", "remove_entity"}, {"id", "absolutely_nonexistent_entity_id"}};
+        remBadReq["params"] = remBadParams;
+        QJsonObject remBadResp = sendAndReceive(remBadReq);
+        assert(remBadResp.value("id").toInt() == 61);
+        assert(remBadResp.value("result").toObject().value("isError").toBool() == true);
+
+        // 2. add_history with 'description' fallback into 'summary'
+        QJsonObject histReq;
+        histReq["jsonrpc"] = "2.0";
+        histReq["id"] = 62;
+        histReq["method"] = "tools/call";
+        QJsonObject histParams;
+        histParams["name"] = "manage_lore_data";
+        histParams["arguments"] = QJsonObject{
+            {"action", "add_history"},
+            {"id", "coronation_event"},
+            {"title", "Coronation Day"},
+            {"description", "The prince was crowned king amidst festivities."},
+            {"impact", "Shifted political power"}
+        };
+        histReq["params"] = histParams;
+        QJsonObject histResp = sendAndReceive(histReq);
+        assert(histResp.value("id").toInt() == 62);
+        assert(!histResp.value("result").toObject().value("isError").toBool());
+
+        // Verify history was saved with summary
+        QJsonObject getLoreReq;
+        getLoreReq["jsonrpc"] = "2.0";
+        getLoreReq["id"] = 63;
+        getLoreReq["method"] = "tools/call";
+        getLoreReq["params"] = QJsonObject{{"name", "get_lore_data"}, {"arguments", QJsonObject{{"section", "history"}}}};
+        QJsonObject getLoreResp = sendAndReceive(getLoreReq);
+        QJsonObject loreData = QJsonDocument::fromJson(getLoreResp.value("result").toObject().value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        QJsonArray hArr = loreData.value("historyEvents").toArray();
+        bool foundHist = false;
+        for (const auto &v : hArr) {
+            QJsonObject hObj = v.toObject();
+            if (hObj.value("id").toString() == "coronation_event") {
+                assert(hObj.value("summary").toString() == "The prince was crowned king amidst festivities.");
+                foundHist = true;
+                break;
+            }
+        }
+        assert(foundHist);
+
+        // 3. remove_history
+        QJsonObject remHistReq;
+        remHistReq["jsonrpc"] = "2.0";
+        remHistReq["id"] = 64;
+        remHistReq["method"] = "tools/call";
+        remHistReq["params"] = QJsonObject{{"name", "manage_lore_data"}, {"arguments", QJsonObject{{"action", "remove_history"}, {"id", "coronation_event"}}}};
+        QJsonObject remHistResp = sendAndReceive(remHistReq);
+        assert(remHistResp.value("id").toInt() == 64);
+        assert(!remHistResp.value("result").toObject().value("isError").toBool());
+
+        // 4. add_reference with description fallback into notes, then remove_reference
+        QJsonObject refReq;
+        refReq["jsonrpc"] = "2.0";
+        refReq["id"] = 65;
+        refReq["method"] = "tools/call";
+        refReq["params"] = QJsonObject{
+            {"name", "manage_lore_data"},
+            {"arguments", QJsonObject{
+                {"action", "add_reference"},
+                {"id", "canon_ref_1"},
+                {"title", "Canon Timeline Reference"},
+                {"source", "Author Blog"},
+                {"citation", "Post #12"},
+                {"description", "Timeline clarification by the original author."}
+            }}
+        };
+        QJsonObject refResp = sendAndReceive(refReq);
+        assert(refResp.value("id").toInt() == 65);
+        assert(!refResp.value("result").toObject().value("isError").toBool());
+
+        QJsonObject remRefReq;
+        remRefReq["jsonrpc"] = "2.0";
+        remRefReq["id"] = 66;
+        remRefReq["method"] = "tools/call";
+        remRefReq["params"] = QJsonObject{{"name", "manage_lore_data"}, {"arguments", QJsonObject{{"action", "remove_reference"}, {"id", "canon_ref_1"}}}};
+        QJsonObject remRefResp = sendAndReceive(remRefReq);
+        assert(remRefResp.value("id").toInt() == 66);
+        assert(!remRefResp.value("result").toObject().value("isError").toBool());
+
+        std::cout << "✓ MCP 'manage_lore_data' error on nonexistent ID, description alias mapping, and remove actions verified." << std::endl;
+    }
+
+    // 40. Test register_agent_presence with model and audit logging verification in get_agent_history
+    {
+        QJsonObject regReq;
+        regReq["jsonrpc"] = "2.0";
+        regReq["id"] = 67;
+        regReq["method"] = "tools/call";
+        regReq["params"] = QJsonObject{
+            {"name", "register_agent_presence"},
+            {"arguments", QJsonObject{
+                {"agentName", "Claude"},
+                {"model", "claude-3-5-sonnet"},
+                {"role", "co-author"},
+                {"workingNote", "Conducting verification audits"}
+            }}
+        };
+        QJsonObject regResp = sendAndReceive(regReq);
+        assert(regResp.value("id").toInt() == 67);
+        QJsonObject regResult = regResp.value("result").toObject();
+        assert(!regResult.value("isError").toBool());
+
+        // Verify get_agent_presence returns model
+        QJsonObject presReq;
+        presReq["jsonrpc"] = "2.0";
+        presReq["id"] = 68;
+        presReq["method"] = "tools/call";
+        presReq["params"] = QJsonObject{{"name", "get_agent_presence"}, {"arguments", QJsonObject{}}};
+        QJsonObject presResp = sendAndReceive(presReq);
+        QJsonObject presData = QJsonDocument::fromJson(presResp.value("result").toObject().value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(presData.value("callingAgentModel").toString() == "claude-3-5-sonnet");
+
+        // Verify get_agent_history contains recorded lore operations, failed calls, and image embeds
+        QJsonObject histReq;
+        histReq["jsonrpc"] = "2.0";
+        histReq["id"] = 69;
+        histReq["method"] = "tools/call";
+        histReq["params"] = QJsonObject{{"name", "get_agent_history"}, {"arguments", QJsonObject{{"limit", 100}}}};
+        QJsonObject histResp = sendAndReceive(histReq);
+        assert(histResp.value("id").toInt() == 69);
+        QJsonObject histData = QJsonDocument::fromJson(histResp.value("result").toObject().value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        QJsonArray entries = histData.value("entries").toArray();
+        assert(!entries.isEmpty());
+
+        bool foundLoreNode = false;
+        bool foundFailedCall = false;
+        bool foundImageEmbed = false;
+        for (const auto &v : entries) {
+            QJsonObject entry = v.toObject();
+            const QString act = entry.value("action").toString();
+            if (act == "add_lore_node" || act == "move_lore_node" || act == "connect_lore_nodes") {
+                foundLoreNode = true;
+            }
+            if (act.contains("(failed)")) {
+                foundFailedCall = true;
+            }
+            if (act == "insert_image_embed") {
+                foundImageEmbed = true;
+            }
+        }
+        assert(foundLoreNode);
+        assert(foundFailedCall);
+        assert(foundImageEmbed);
+        std::cout << "✓ MCP 'get_agent_history' verified with lore operations, failed tool calls, and model registration." << std::endl;
+    }
+
+    // 41. Test Ao3HtmlSanitizer completely strips <script> and <style> tags and their inner text
+    {
+        const QString dirtyHtml = QStringLiteral(
+            "<p>Normal paragraph</p>\n"
+            "<script type=\"text/javascript\">alert('xss'); x();</script>\n"
+            "<style>body { background: red; }</style>\n"
+            "<p>Safe text continues</p>"
+        );
+        const QString cleanHtml = Ao3HtmlSanitizer::sanitize(dirtyHtml);
+        assert(!cleanHtml.contains("<script"));
+        assert(!cleanHtml.contains("</script>"));
+        assert(!cleanHtml.contains("alert('xss')"));
+        assert(!cleanHtml.contains("x()"));
+        assert(!cleanHtml.contains("<style"));
+        assert(!cleanHtml.contains("background: red"));
+        assert(cleanHtml.contains("<p>Normal paragraph</p>"));
+        assert(cleanHtml.contains("<p>Safe text continues</p>"));
+        std::cout << "✓ Ao3HtmlSanitizer completely strips dangerous blocks (<script>, <style>) including all inner text." << std::endl;
     }
 
     client.close();

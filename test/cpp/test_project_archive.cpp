@@ -609,6 +609,42 @@ int main(int argc, char *argv[]) {
     qDebug() << "✓ ProjectSerializer successfully roundtripped complete lore repository & graph.";
   }
 
+  // 12. Test loading legacy/older .ao3proj archive created before modern features
+  {
+    const QString legacyArchiveProjPath = tempDir.filePath(QStringLiteral("legacy_bare_archive.ao3proj"));
+    QMap<QString, QByteArray> bareEntries;
+    bareEntries.insert(QStringLiteral("metadata.xml"), QByteArray(
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+      "<project>\n"
+      "  <title>Old Archive Story</title>\n"
+      "  <author>Retro Author</author>\n"
+      "  <chapter id=\"1\" order=\"0\" file=\"chapters/ch1.html\">Beginning</chapter>\n"
+      "</project>\n"
+    ));
+    bareEntries.insert(QStringLiteral("chapters/ch1.html"), QByteArray("<p>Chapter content from old archive.</p>"));
+    // Notice: NO history.cmt, NO agentic-datas/, NO lore/
+    QString compErr;
+    assert(ZstdArchive::compressArchive(legacyArchiveProjPath, bareEntries, &compErr));
+    assert(QFile::exists(legacyArchiveProjPath));
+
+    Ao3Project legacyProj;
+    ProjectLoadReport rep = ProjectSerializer::loadWithValidation(legacyArchiveProjPath, legacyProj);
+    assert(rep.success);
+    assert(legacyProj.title() == QStringLiteral("Old Archive Story"));
+    assert(legacyProj.author() == QStringLiteral("Retro Author"));
+    assert(legacyProj.chapters().size() == 1);
+    assert(legacyProj.chapters().at(0).title() == QStringLiteral("Beginning"));
+    assert(legacyProj.chapters().at(0).html() == QStringLiteral("<p>Chapter content from old archive.</p>"));
+    // Baseline commit created automatically
+    assert(!legacyProj.historyLog().trimmed().isEmpty());
+    assert(legacyProj.historyLog().contains(QStringLiteral("Initial project import / baseline commit")));
+    // Lore defaults initialized
+    assert(!legacyProj.lore().defaultGraph().title().isEmpty());
+    // Agentic data defaults initialized
+    assert(!legacyProj.agenticData().historyEntries().isEmpty());
+    qDebug() << "✓ Successfully loaded older bare .ao3proj archive lacking modern lore/agentic data with automatic baseline defaults.";
+  }
+
   qDebug() << "✓ All 3-Stage validation, magic byte verification, structural integrity, "
               "legacy compatibility, .ao3projasve recovery, agentic-datas, and Lore Graph tests passed successfully!";
   return 0;

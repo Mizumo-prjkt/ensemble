@@ -299,9 +299,9 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
             return report;
         }
 
-        if (xml.name() != QStringLiteral("ao3project")) {
+        if (xml.name() != QStringLiteral("ao3project") && xml.name() != QStringLiteral("project")) {
             report.failedStage = ValidationStage::StructureCheck;
-            report.summaryError = QStringLiteral("Invalid manifest root element: <%1> (expected <ao3project>).").arg(xml.name().toString());
+            report.summaryError = QStringLiteral("Invalid manifest root element: <%1> (expected <ao3project> or <project>).").arg(xml.name().toString());
             report.detailedExplanation = QStringLiteral(
                 "============================================================\n"
                 " ENSEMBLE PROJECT VERIFICATION AUDIT\n"
@@ -347,6 +347,8 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
 
         if (entries.contains(QStringLiteral("history.cmt"))) {
             project.setHistoryLog(QString::fromUtf8(entries.value(QStringLiteral("history.cmt"))));
+        } else {
+            project.setHistoryLog(QString());
         }
         if (entries.contains(QStringLiteral("stylesheet/workskin.css"))) {
             project.setWorkSkinCss(QString::fromUtf8(entries.value(QStringLiteral("stylesheet/workskin.css"))));
@@ -453,6 +455,20 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
                 }
             }
         }
+
+        if (project.historyLog().trimmed().isEmpty()) {
+            project.appendHistoryCommit(
+                project.author().isEmpty() ? QStringLiteral("Anonymous") : project.author(),
+                QStringLiteral("Initial project import / baseline commit")
+            );
+        }
+        if (project.lastModifiedBy().isEmpty()) {
+            project.setLastModifiedBy(project.author().isEmpty() ? QStringLiteral("Author") : project.author());
+        }
+        if (!project.lastModifiedAt().isValid()) {
+            project.setLastModifiedAt(project.modifiedDate().isValid() ? project.modifiedDate() : QDateTime::currentDateTimeUtc());
+        }
+        project.agenticData().ensureDefaultHistory();
 
         project.setActiveChapterIndex(0);
         project.setFilePath(path);

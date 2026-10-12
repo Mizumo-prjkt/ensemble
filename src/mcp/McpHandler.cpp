@@ -79,15 +79,35 @@ void McpHandler::processRequest(QWebSocket *client, const QJsonObject &request)
     m_server->sendTextMessage(client, QString::fromUtf8(QJsonDocument(response).toJson(QJsonDocument::Compact)));
 }
 
+namespace {
+QString resolveCallerModel(const McpAgentSession &caller, const QJsonObject &args = QJsonObject())
+{
+    if (args.contains(QStringLiteral("model")) && !args.value(QStringLiteral("model")).toString().trimmed().isEmpty()) {
+        return args.value(QStringLiteral("model")).toString().trimmed();
+    }
+    if (!caller.model.isEmpty() && caller.model != QStringLiteral("0.1.0")) {
+        return caller.model;
+    }
+    if (!caller.name.isEmpty() && caller.name != QStringLiteral("unspecified_agent")) {
+        return caller.name;
+    }
+    return QStringLiteral("assistant");
+}
+} // namespace
+
 QJsonObject McpHandler::handleInitialize(QWebSocket *client, const QJsonValue &id, const QJsonObject &params)
 {
     const QString clientProto = params.value(QStringLiteral("protocolVersion")).toString();
     const QJsonObject clientInfoObj = params.value(QStringLiteral("clientInfo")).toObject();
     const QString clientName = clientInfoObj.value(QStringLiteral("name")).toString();
     const QString clientVersion = clientInfoObj.value(QStringLiteral("version")).toString();
+    const QString clientModel = clientInfoObj.contains(QStringLiteral("model"))
+                                    ? clientInfoObj.value(QStringLiteral("model")).toString().trimmed()
+                                    : (clientName.isEmpty() ? QStringLiteral("assistant") : clientName);
 
     qCInfo(logMcp) << "[MCP-DIAGNOSTIC] Checkpoint 4 (Protocol Handshake): Client initialize requested by"
                    << (clientName.isEmpty() ? QStringLiteral("AI agent") : clientName)
+                   << "model:" << clientModel
                    << "client protocolVersion:" << (clientProto.isEmpty() ? QStringLiteral("(unspecified)") : clientProto)
                    << "- Responding with server protocolVersion 2024-11-05";
 
@@ -96,7 +116,8 @@ QJsonObject McpHandler::handleInitialize(QWebSocket *client, const QJsonValue &i
                                      clientName.isEmpty() ? QStringLiteral("ai_agent") : clientName,
                                      clientVersion,
                                      QStringLiteral("co-author"),
-                                     QStringLiteral("Connected session"));
+                                     QStringLiteral("Connected session"),
+                                     clientModel);
     }
 
     QJsonObject capabilities;
@@ -471,6 +492,10 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         nameProp[QStringLiteral("type")] = QStringLiteral("string");
         nameProp[QStringLiteral("description")] = QStringLiteral("The name of your AI agent or model (e.g. 'antigravity', 'claude', 'gemini').");
         props[QStringLiteral("agentName")] = nameProp;
+        QJsonObject modelProp;
+        modelProp[QStringLiteral("type")] = QStringLiteral("string");
+        modelProp[QStringLiteral("description")] = QStringLiteral("Specific AI model identifier (e.g. 'claude-3-7-sonnet', 'gemini-2.5-pro').");
+        props[QStringLiteral("model")] = modelProp;
         QJsonObject roleProp;
         roleProp[QStringLiteral("type")] = QStringLiteral("string");
         roleProp[QStringLiteral("description")] = QStringLiteral("Your role in the session (e.g. 'co-author', 'reviewer', 'editor', 'proofreader', 'architect'). Defaults to 'co-author'.");
@@ -480,7 +505,7 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         noteProp[QStringLiteral("description")] = QStringLiteral("A brief note describing what you are currently focusing on or working on.");
         props[QStringLiteral("workingNote")] = noteProp;
         schema[QStringLiteral("properties")] = props;
-        schema[QStringLiteral("additionalProperties")] = false;
+        schema[QStringLiteral("additionalProperties")] = true;
         t[QStringLiteral("inputSchema")] = schema;
         tools.append(t);
     }
@@ -863,12 +888,13 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
                                                      QStringLiteral("add_history"), QStringLiteral("remove_history"),
                                                      QStringLiteral("add_conflict"), QStringLiteral("resolve_conflict"),
                                                      QStringLiteral("add_plan"), QStringLiteral("update_plan"), QStringLiteral("remove_plan"),
-                                                     QStringLiteral("add_reference")};
+                                                     QStringLiteral("add_reference"), QStringLiteral("remove_reference"),
+                                                     QStringLiteral("remove_graph")};
         actProp[QStringLiteral("description")] = QStringLiteral("The action to perform on the story lore database.");
         props[QStringLiteral("action")] = actProp;
         QJsonObject idProp;
         idProp[QStringLiteral("type")] = QStringLiteral("string");
-        idProp[QStringLiteral("description")] = QStringLiteral("Identifier for entity, event, conflict, plan, or reference.");
+        idProp[QStringLiteral("description")] = QStringLiteral("Identifier for entity, event, conflict, plan, reference, or graph.");
         props[QStringLiteral("id")] = idProp;
         QJsonObject nameProp;
         nameProp[QStringLiteral("type")] = QStringLiteral("string");
@@ -879,6 +905,34 @@ QJsonObject McpHandler::handleToolsList(const QJsonValue &id)
         QJsonObject descProp;
         descProp[QStringLiteral("type")] = QStringLiteral("string");
         props[QStringLiteral("description")] = descProp;
+        QJsonObject sumProp;
+        sumProp[QStringLiteral("type")] = QStringLiteral("string");
+        sumProp[QStringLiteral("description")] = QStringLiteral("Summary of historical event or lore entry.");
+        props[QStringLiteral("summary")] = sumProp;
+        QJsonObject impProp;
+        impProp[QStringLiteral("type")] = QStringLiteral("string");
+        impProp[QStringLiteral("description")] = QStringLiteral("Impact or narrative significance of historical event.");
+        props[QStringLiteral("impact")] = impProp;
+        QJsonObject srcProp;
+        srcProp[QStringLiteral("type")] = QStringLiteral("string");
+        srcProp[QStringLiteral("description")] = QStringLiteral("Source title or canon origin for reference.");
+        props[QStringLiteral("source")] = srcProp;
+        QJsonObject citeProp;
+        citeProp[QStringLiteral("type")] = QStringLiteral("string");
+        citeProp[QStringLiteral("description")] = QStringLiteral("Citation, episode, chapter, or URL for reference.");
+        props[QStringLiteral("citation")] = citeProp;
+        QJsonObject appProp;
+        appProp[QStringLiteral("type")] = QStringLiteral("string");
+        appProp[QStringLiteral("description")] = QStringLiteral("Applicability of reference to current work.");
+        props[QStringLiteral("applicability")] = appProp;
+        QJsonObject notesProp;
+        notesProp[QStringLiteral("type")] = QStringLiteral("string");
+        notesProp[QStringLiteral("description")] = QStringLiteral("Notes or additional details.");
+        props[QStringLiteral("notes")] = notesProp;
+        QJsonObject threadProp;
+        threadProp[QStringLiteral("type")] = QStringLiteral("string");
+        threadProp[QStringLiteral("description")] = QStringLiteral("Lore thread or plot arc for plan.");
+        props[QStringLiteral("loreThread")] = threadProp;
         QJsonObject tagsProp;
         tagsProp[QStringLiteral("type")] = QStringLiteral("array");
         tagsProp[QStringLiteral("items")] = QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}};
@@ -1148,6 +1202,31 @@ QJsonObject McpHandler::handleToolsCall(QWebSocket *client, const QJsonValue &id
     qCInfo(logMcp) << "[MCP-DIAGNOSTIC] Tool Call Finished:" << toolName
                    << "in" << elapsed << "ms"
                    << (isErr ? QStringLiteral("(Result: ERROR)") : QStringLiteral("(Result: SUCCESS)"));
+
+    // Log failed tool executions to persistent agentic audit log
+    if (isErr && m_mainWindow && m_mainWindow->hasActiveProject()) {
+        const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
+        const QString modifier = caller.name.isEmpty() ? QStringLiteral("AI Agent") : caller.name;
+        const QString callerModel = resolveCallerModel(caller, args);
+        QString errText;
+        QJsonArray contentArr = toolResult.value(QStringLiteral("content")).toArray();
+        if (!contentArr.isEmpty()) {
+            errText = contentArr.first().toObject().value(QStringLiteral("text")).toString();
+        }
+        if (errText.isEmpty()) {
+            errText = toolResult.value(QStringLiteral("error")).toString();
+        }
+        if (errText.isEmpty()) {
+            errText = QStringLiteral("Unknown tool execution error.");
+        }
+        m_mainWindow->project().agenticData().appendHistoryEntry(
+            modifier, callerModel, caller.role,
+            QStringLiteral("%1 (failed)").arg(toolName),
+            QStringLiteral("Tool execution failed: %1").arg(errText),
+            -1, 0,
+            QString::fromUtf8(QJsonDocument(args).toJson(QJsonDocument::Compact))
+        );
+    }
 
     // Log live activity and model thoughts for UI inspector
     if (m_server) {
@@ -1542,7 +1621,7 @@ QJsonObject McpHandler::toolUpdateChapterHtml(QWebSocket *client, const QJsonObj
 
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString callerName = caller.name.isEmpty() ? QStringLiteral("ai-assistant") : caller.name;
-    const QString callerModel = caller.version.isEmpty() ? QStringLiteral("assistant") : caller.version;
+    const QString callerModel = resolveCallerModel(caller, args);
     const QString callerRole = caller.role.isEmpty() ? QStringLiteral("co-author") : caller.role;
 
     m_mainWindow->project().markDirtyBy(callerName);
@@ -1608,7 +1687,7 @@ QJsonObject McpHandler::toolAddChapter(QWebSocket *client, const QJsonObject &ar
 
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString callerName = caller.name.isEmpty() ? QStringLiteral("ai-assistant") : caller.name;
-    const QString callerModel = caller.version.isEmpty() ? QStringLiteral("assistant") : caller.version;
+    const QString callerModel = resolveCallerModel(caller, args);
     const QString callerRole = caller.role.isEmpty() ? QStringLiteral("co-author") : caller.role;
 
     m_mainWindow->project().markDirtyBy(callerName);
@@ -1657,7 +1736,7 @@ QJsonObject McpHandler::toolDeleteChapter(QWebSocket *client, const QJsonObject 
 
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString callerName = caller.name.isEmpty() ? QStringLiteral("ai-assistant") : caller.name;
-    const QString callerModel = caller.version.isEmpty() ? QStringLiteral("assistant") : caller.version;
+    const QString callerModel = resolveCallerModel(caller, args);
     const QString callerRole = caller.role.isEmpty() ? QStringLiteral("co-author") : caller.role;
 
     m_mainWindow->project().markDirtyBy(callerName);
@@ -1712,7 +1791,7 @@ QJsonObject McpHandler::toolReorderChapters(QWebSocket *client, const QJsonObjec
 
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString callerName = caller.name.isEmpty() ? QStringLiteral("ai-assistant") : caller.name;
-    const QString callerModel = caller.version.isEmpty() ? QStringLiteral("assistant") : caller.version;
+    const QString callerModel = resolveCallerModel(caller, args);
     const QString callerRole = caller.role.isEmpty() ? QStringLiteral("co-author") : caller.role;
 
     m_mainWindow->project().markDirtyBy(callerName);
@@ -1775,7 +1854,7 @@ QJsonObject McpHandler::toolSetWorkSkinCss(QWebSocket *client, const QJsonObject
 
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString callerName = caller.name.isEmpty() ? QStringLiteral("ai-assistant") : caller.name;
-    const QString callerModel = caller.version.isEmpty() ? QStringLiteral("assistant") : caller.version;
+    const QString callerModel = resolveCallerModel(caller, args);
     const QString callerRole = caller.role.isEmpty() ? QStringLiteral("co-author") : caller.role;
 
     m_mainWindow->project().markDirtyBy(callerName);
@@ -2185,6 +2264,8 @@ QJsonObject McpHandler::toolGetAgentPresence(QWebSocket *client, const QJsonObje
         QJsonObject a;
         a[QStringLiteral("agentId")] = s.agentId;
         a[QStringLiteral("name")] = s.name;
+        if (!s.model.isEmpty())
+            a[QStringLiteral("model")] = s.model;
         if (!s.version.isEmpty())
             a[QStringLiteral("clientVersion")] = s.version;
         a[QStringLiteral("role")] = s.role;
@@ -2200,7 +2281,8 @@ QJsonObject McpHandler::toolGetAgentPresence(QWebSocket *client, const QJsonObje
         }
 
         agentArray.append(a);
-        namesWithRoles.append(QStringLiteral("%1 (%2)").arg(s.name, s.role));
+        namesWithRoles.append(!s.model.isEmpty() ? QStringLiteral("%1 [%2] (%3)").arg(s.name, s.model, s.role)
+                                                : QStringLiteral("%1 (%2)").arg(s.name, s.role));
     }
 
     QJsonObject data;
@@ -2208,6 +2290,9 @@ QJsonObject McpHandler::toolGetAgentPresence(QWebSocket *client, const QJsonObje
     if (client && !callerSession.agentId.isEmpty()) {
         data[QStringLiteral("callingAgentId")] = callerSession.agentId;
         data[QStringLiteral("callingAgentName")] = callerSession.name;
+        if (!callerSession.model.isEmpty()) {
+            data[QStringLiteral("callingAgentModel")] = callerSession.model;
+        }
     }
     data[QStringLiteral("agents")] = agentArray;
     data[QStringLiteral("lastChangesByModel")] = agentic.lastChangesByModelJson();
@@ -2233,11 +2318,12 @@ QJsonObject McpHandler::toolRegisterAgentPresence(QWebSocket *client, const QJso
     }
 
     const QString name = args.value(QStringLiteral("agentName")).toString().trimmed();
+    const QString model = args.value(QStringLiteral("model")).toString().trimmed();
     const QString role = args.value(QStringLiteral("role")).toString().trimmed();
     const QString note = args.value(QStringLiteral("workingNote")).toString().trimmed();
 
     if (client) {
-        m_server->updateAgentSession(client, name, QString(), role, note);
+        m_server->updateAgentSession(client, name, QString(), role, note, model);
     }
 
     const auto callerSession = client ? m_server->agentSessionForClient(client) : McpAgentSession();
@@ -2249,6 +2335,9 @@ QJsonObject McpHandler::toolRegisterAgentPresence(QWebSocket *client, const QJso
         QJsonObject o;
         o[QStringLiteral("agentId")] = s.agentId;
         o[QStringLiteral("name")] = s.name;
+        if (!s.model.isEmpty()) {
+            o[QStringLiteral("model")] = s.model;
+        }
         o[QStringLiteral("role")] = s.role;
         o[QStringLiteral("workingNote")] = s.workingNote;
         o[QStringLiteral("lastSeen")] = s.lastSeen.toString(Qt::ISODate);
@@ -2260,6 +2349,9 @@ QJsonObject McpHandler::toolRegisterAgentPresence(QWebSocket *client, const QJso
     if (client && !callerSession.agentId.isEmpty()) {
         data[QStringLiteral("agentId")] = callerSession.agentId;
         data[QStringLiteral("name")] = callerSession.name;
+        if (!callerSession.model.isEmpty()) {
+            data[QStringLiteral("model")] = callerSession.model;
+        }
         data[QStringLiteral("role")] = callerSession.role;
         data[QStringLiteral("workingNote")] = callerSession.workingNote;
     }
@@ -2391,7 +2483,7 @@ QJsonObject McpHandler::toolWriteAgenticFile(QWebSocket *client, const QJsonObje
 
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString callerName = caller.name.isEmpty() ? QStringLiteral("ai-assistant") : caller.name;
-    const QString callerModel = caller.version.isEmpty() ? QStringLiteral("assistant") : caller.version;
+    const QString callerModel = resolveCallerModel(caller, args);
     const QString callerRole = caller.role.isEmpty() ? QStringLiteral("co-author") : caller.role;
 
     QString scope = args.value(QStringLiteral("scope")).toString().trimmed().toLower();
@@ -2486,13 +2578,7 @@ QJsonObject McpHandler::toolAppendAgentHistory(QWebSocket *client, const QJsonOb
         agentName = QStringLiteral("agent");
     }
 
-    QString model = args.value(QStringLiteral("model")).toString().trimmed();
-    if (model.isEmpty() && !caller.version.isEmpty()) {
-        model = caller.version;
-    }
-    if (model.isEmpty()) {
-        model = QStringLiteral("ai-assistant");
-    }
+    QString model = resolveCallerModel(caller, args);
 
     QString role = args.value(QStringLiteral("role")).toString().trimmed();
     if (role.isEmpty() && !caller.role.isEmpty()) {
@@ -2586,9 +2672,10 @@ QJsonObject McpHandler::toolPostAgentThought(QWebSocket *client, const QJsonObje
 
     // Also persist significant thoughts/critiques into project agent history if an active project exists
     if (m_mainWindow && m_mainWindow->hasActiveProject()) {
+        const QString callerModel = resolveCallerModel(caller, args);
         m_mainWindow->project().agenticData().appendHistoryEntry(
             agent,
-            caller.version.isEmpty() ? QStringLiteral("assistant") : caller.version,
+            callerModel,
             caller.role.isEmpty() ? QStringLiteral("co-author") : caller.role,
             category,
             thought
@@ -2668,9 +2755,10 @@ QJsonObject McpHandler::toolUpdateLoreGraph(QWebSocket *client, const QJsonObjec
 
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString modifier = caller.name.isEmpty() ? QStringLiteral("AI Agent") : caller.name;
+    const QString callerModel = resolveCallerModel(caller, args);
     m_mainWindow->project().markDirtyBy(modifier);
     m_mainWindow->project().agenticData().appendHistoryEntry(
-        modifier, caller.version, caller.role, QStringLiteral("update_lore_graph"),
+        modifier, callerModel, caller.role, QStringLiteral("update_lore_graph"),
         QStringLiteral("Updated lore graph '%1' with %2 nodes and %3 connectors.")
             .arg(graphName).arg(targetGraph.nodes().size()).arg(targetGraph.connectors().size())
     );
@@ -2728,7 +2816,13 @@ QJsonObject McpHandler::toolAddLoreNode(QWebSocket *client, const QJsonObject &a
 
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString modifier = caller.name.isEmpty() ? QStringLiteral("AI Agent") : caller.name;
+    const QString callerModel = resolveCallerModel(caller, args);
     m_mainWindow->project().markDirtyBy(modifier);
+    m_mainWindow->project().agenticData().appendHistoryEntry(
+        modifier, callerModel, caller.role, QStringLiteral("add_lore_node"),
+        QStringLiteral("Added or updated lore node '%1' ('%2') in graph '%3'.")
+            .arg(node.id, node.label, graphName)
+    );
     m_mainWindow->updateLoreGraphUi();
 
     QJsonObject result;
@@ -2774,7 +2868,13 @@ QJsonObject McpHandler::toolConnectLoreNodes(QWebSocket *client, const QJsonObje
 
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString modifier = caller.name.isEmpty() ? QStringLiteral("AI Agent") : caller.name;
+    const QString callerModel = resolveCallerModel(caller, args);
     m_mainWindow->project().markDirtyBy(modifier);
+    m_mainWindow->project().agenticData().appendHistoryEntry(
+        modifier, callerModel, caller.role, QStringLiteral("connect_lore_nodes"),
+        QStringLiteral("Connected lore nodes '%1' %2 '%3' in graph '%4'.")
+            .arg(fromId, arrow, toId, graphName)
+    );
     m_mainWindow->updateLoreGraphUi();
 
     QJsonObject result;
@@ -2818,7 +2918,13 @@ QJsonObject McpHandler::toolMoveLoreNode(QWebSocket *client, const QJsonObject &
 
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString modifier = caller.name.isEmpty() ? QStringLiteral("AI Agent") : caller.name;
+    const QString callerModel = resolveCallerModel(caller, args);
     m_mainWindow->project().markDirtyBy(modifier);
+    m_mainWindow->project().agenticData().appendHistoryEntry(
+        modifier, callerModel, caller.role, QStringLiteral("move_lore_node"),
+        QStringLiteral("Moved lore node '%1' to (%2, %3) in graph '%4'.")
+            .arg(nodeId).arg(x).arg(y).arg(graphName)
+    );
     m_mainWindow->updateLoreGraphUi();
 
     QJsonObject result;
@@ -3004,16 +3110,34 @@ QJsonObject McpHandler::toolManageLoreData(QWebSocket *client, const QJsonObject
         lore.addOrUpdateEntity(ent);
     } else if (action == QStringLiteral("remove_entity")) {
         const QString id = args.value(QStringLiteral("id")).toString().trimmed();
-        lore.removeEntity(id);
+        if (id.isEmpty()) return makeToolResult(QStringLiteral("Missing 'id' parameter for remove_entity."), true);
+        if (!lore.removeEntity(id)) {
+            return makeToolResult(QStringLiteral("Entity '%1' not found in lore database.").arg(id), true);
+        }
     } else if (action == QStringLiteral("add_history")) {
         LoreHistoryEvent ev;
         ev.id = args.value(QStringLiteral("id")).toString(QUuid::createUuid().toString(QUuid::WithoutBraces));
         ev.eraOrDate = args.value(QStringLiteral("eraOrDate")).toString();
         ev.title = args.value(QStringLiteral("title")).toString();
         ev.storyChapter = args.value(QStringLiteral("storyChapter")).toInt(-1);
-        ev.summary = args.value(QStringLiteral("summary")).toString();
+        if (args.contains(QStringLiteral("summary"))) {
+            ev.summary = args.value(QStringLiteral("summary")).toString();
+        } else if (args.contains(QStringLiteral("description"))) {
+            ev.summary = args.value(QStringLiteral("description")).toString();
+        }
         ev.impact = args.value(QStringLiteral("impact")).toString();
+        if (args.contains(QStringLiteral("involvedEntities"))) {
+            for (const auto &v : args.value(QStringLiteral("involvedEntities")).toArray()) {
+                ev.involvedEntities.append(v.toString());
+            }
+        }
         lore.addOrUpdateHistoryEvent(ev);
+    } else if (action == QStringLiteral("remove_history")) {
+        const QString id = args.value(QStringLiteral("id")).toString().trimmed();
+        if (id.isEmpty()) return makeToolResult(QStringLiteral("Missing 'id' parameter for remove_history."), true);
+        if (!lore.removeHistoryEvent(id)) {
+            return makeToolResult(QStringLiteral("History event '%1' not found in lore database.").arg(id), true);
+        }
     } else if (action == QStringLiteral("add_conflict")) {
         LoreConflict conf;
         conf.id = args.value(QStringLiteral("id")).toString(QUuid::createUuid().toString(QUuid::WithoutBraces));
@@ -3043,13 +3167,26 @@ QJsonObject McpHandler::toolManageLoreData(QWebSocket *client, const QJsonObject
         plan.targetChapter = args.value(QStringLiteral("targetChapter")).toInt(0);
         plan.status = args.value(QStringLiteral("status")).toString(QStringLiteral("planned"));
         plan.description = args.value(QStringLiteral("description")).toString();
-        plan.loreThread = args.value(QStringLiteral("loreThread")).toString();
+        if (args.contains(QStringLiteral("loreThread"))) {
+            plan.loreThread = args.value(QStringLiteral("loreThread")).toString();
+        } else if (args.contains(QStringLiteral("thread"))) {
+            plan.loreThread = args.value(QStringLiteral("thread")).toString();
+        } else if (args.contains(QStringLiteral("category"))) {
+            plan.loreThread = args.value(QStringLiteral("category")).toString();
+        }
+        if (args.contains(QStringLiteral("notes"))) {
+            plan.notes = args.value(QStringLiteral("notes")).toString();
+        }
         if (args.contains(QStringLiteral("neededFollowUps"))) {
             for (const auto &v : args.value(QStringLiteral("neededFollowUps")).toArray()) plan.neededFollowUps.append(v.toString());
         }
         lore.addOrUpdatePlan(plan);
     } else if (action == QStringLiteral("remove_plan")) {
-        lore.removePlan(args.value(QStringLiteral("id")).toString());
+        const QString id = args.value(QStringLiteral("id")).toString().trimmed();
+        if (id.isEmpty()) return makeToolResult(QStringLiteral("Missing 'id' parameter for remove_plan."), true);
+        if (!lore.removePlan(id)) {
+            return makeToolResult(QStringLiteral("Plan '%1' not found in lore database.").arg(id), true);
+        }
     } else if (action == QStringLiteral("add_reference")) {
         LoreReference ref;
         ref.id = args.value(QStringLiteral("id")).toString(QUuid::createUuid().toString(QUuid::WithoutBraces));
@@ -3057,15 +3194,32 @@ QJsonObject McpHandler::toolManageLoreData(QWebSocket *client, const QJsonObject
         ref.source = args.value(QStringLiteral("source")).toString();
         ref.citation = args.value(QStringLiteral("citation")).toString();
         ref.applicability = args.value(QStringLiteral("applicability")).toString();
-        ref.notes = args.value(QStringLiteral("notes")).toString();
+        if (args.contains(QStringLiteral("notes"))) {
+            ref.notes = args.value(QStringLiteral("notes")).toString();
+        } else if (args.contains(QStringLiteral("description"))) {
+            ref.notes = args.value(QStringLiteral("description")).toString();
+        }
         lore.addOrUpdateReference(ref);
+    } else if (action == QStringLiteral("remove_reference")) {
+        const QString id = args.value(QStringLiteral("id")).toString().trimmed();
+        if (id.isEmpty()) return makeToolResult(QStringLiteral("Missing 'id' parameter for remove_reference."), true);
+        if (!lore.removeReference(id)) {
+            return makeToolResult(QStringLiteral("Reference '%1' not found in lore database.").arg(id), true);
+        }
+    } else if (action == QStringLiteral("remove_graph")) {
+        const QString graphName = args.value(QStringLiteral("name")).toString(args.value(QStringLiteral("id")).toString()).trimmed();
+        if (graphName.isEmpty()) return makeToolResult(QStringLiteral("Missing 'name' or 'id' parameter for remove_graph."), true);
+        if (!lore.removeNamedGraph(graphName)) {
+            return makeToolResult(QStringLiteral("Lore graph '%1' not found in lore database.").arg(graphName), true);
+        }
     } else {
         return makeToolResult(QStringLiteral("Unknown lore management action '%1'.").arg(action), true);
     }
 
+    const QString callerModel = resolveCallerModel(caller, args);
     m_mainWindow->project().markDirtyBy(modifier);
     m_mainWindow->project().agenticData().appendHistoryEntry(
-        modifier, caller.version, caller.role, QStringLiteral("manage_lore_data"),
+        modifier, callerModel, caller.role, QStringLiteral("manage_lore_data"),
         QStringLiteral("Performed lore action: %1").arg(action)
     );
     m_mainWindow->updateLoreGraphUi();
@@ -3076,6 +3230,9 @@ QJsonObject McpHandler::toolManageLoreData(QWebSocket *client, const QJsonObject
     res[QStringLiteral("entityCount")] = lore.entities().size();
     res[QStringLiteral("conflictCount")] = lore.conflicts().size();
     res[QStringLiteral("planCount")] = lore.plans().size();
+    res[QStringLiteral("referenceCount")] = lore.references().size();
+    res[QStringLiteral("historyCount")] = lore.historyEvents().size();
+    res[QStringLiteral("graphCount")] = lore.graphNames().size();
     return makeToolJsonResult(res);
 }
 
@@ -3125,9 +3282,10 @@ QJsonObject McpHandler::toolUpdateProjectMetadata(QWebSocket *client, const QJso
 
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString modifier = caller.name.isEmpty() ? QStringLiteral("AI Agent") : caller.name;
+    const QString callerModel = resolveCallerModel(caller, args);
     proj.markDirtyBy(modifier);
     proj.agenticData().appendHistoryEntry(
-        modifier, caller.version, caller.role, QStringLiteral("update_project_metadata"),
+        modifier, callerModel, caller.role, QStringLiteral("update_project_metadata"),
         QStringLiteral("Updated project metadata (rating, tags, fandoms, characters).")
     );
 
@@ -3291,9 +3449,16 @@ QJsonObject McpHandler::toolInsertImageEmbed(QWebSocket *client, const QJsonObje
 
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString modifier = caller.name.isEmpty() ? QStringLiteral("AI Agent") : caller.name;
+    const QString callerModel = resolveCallerModel(caller, args);
     proj.markDirtyBy(modifier);
     proj.appendHistoryCommit(modifier, QStringLiteral("Embedded image URL in Chapter %1 ('%2')")
                                            .arg(chIdx + 1).arg(currentChap.title()));
+    proj.agenticData().appendHistoryEntry(
+        modifier, callerModel, caller.role, QStringLiteral("insert_image_embed"),
+        QStringLiteral("Embedded image in Chapter %1 ('%2'): %3")
+            .arg(chIdx + 1).arg(currentChap.title(), url),
+        chIdx, 0, blockTag
+    );
 
     QJsonObject res;
     res[QStringLiteral("success")] = true;

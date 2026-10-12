@@ -126,6 +126,7 @@ public:
     LoreGraph *graph(const QString &name = QStringLiteral("data"));
     const LoreGraph *graph(const QString &name = QStringLiteral("data")) const;
     void setNamedGraph(const QString &name, const LoreGraph &graph);
+    bool removeNamedGraph(const QString &name);
     QStringList graphNames() const;
 
     // Metadata XML (lore/metadata.xml)

@@ -183,7 +183,8 @@ void McpServer::updateAgentSession(QWebSocket *client,
                                    const QString &name,
                                    const QString &version,
                                    const QString &role,
-                                   const QString &workingNote)
+                                   const QString &workingNote,
+                                   const QString &model)
 {
     if (!m_agentSessions.contains(client)) {
         return;
@@ -197,11 +198,15 @@ void McpServer::updateAgentSession(QWebSocket *client,
         session.role = role.trimmed();
     if (!workingNote.isEmpty())
         session.workingNote = workingNote;
+    if (!model.trimmed().isEmpty())
+        session.model = model.trimmed();
     session.lastSeen = QDateTime::currentDateTimeUtc();
 
     QStringList names;
     for (const auto &s : m_agentSessions.values()) {
-        names.append(QStringLiteral("%1 (%2)").arg(s.name, s.role));
+        const QString displayName = !s.model.isEmpty() ? QStringLiteral("%1 [%2] (%3)").arg(s.name, s.model, s.role)
+                                                       : QStringLiteral("%1 (%2)").arg(s.name, s.role);
+        names.append(displayName);
     }
     emit agentPresenceChanged(m_agentSessions.size(), names);
     emit statusChanged();

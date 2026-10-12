@@ -84,14 +84,14 @@ public:
     // Archive serialization & deserialization for .ao3proj archive
     void serializeToArchive(QMap<QString, QByteArray> &archiveEntries) const;
     bool deserializeFromArchive(const QMap<QString, QByteArray> &archiveEntries, QString *error = nullptr);
+    void ensureDefaultHistory();
+    void ensureDefaultAgentifiers();
 
     // Path sanitization helper
     static QString sanitizePath(const QString &path);
     static QString sanitizeAgentName(const QString &agent);
 
 private:
-    void ensureDefaultAgentifiers();
-    void ensureDefaultHistory();
 
     QMap<QString, QByteArray> m_sharedFiles;
     QMap<QString, QMap<QString, QByteArray>> m_agentFiles;

@@ -208,7 +208,21 @@ void LoreGraph::connectNodes(const QString &fromId, const QString &toId,
     }
 
     LoreGraphConnector conn;
-    conn.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString baseId = QStringLiteral("conn_%1_%2").arg(fromId, toId);
+    QString candId = baseId;
+    int suffix = 2;
+    bool idExists = true;
+    while (idExists) {
+        idExists = false;
+        for (const auto &existing : m_connectors) {
+            if (existing.id == candId) {
+                idExists = true;
+                candId = QStringLiteral("%1_%2").arg(baseId).arg(suffix++);
+                break;
+            }
+        }
+    }
+    conn.id = candId;
     conn.fromNodeId = fromId;
     conn.toNodeId = toId;
     conn.arrowType = arrow.isEmpty() ? QStringLiteral("->") : arrow;
@@ -349,8 +363,8 @@ QString LoreGraph::toDsl() const
     if (!m_connectors.isEmpty()) {
         dsl += QStringLiteral("# Connectors (Relationships & Narrative Flows)\n");
         for (const auto &c : m_connectors) {
-            QString line = QStringLiteral("%1 %2 %3 [style=%4, color=\"%5\"")
-                               .arg(c.fromNodeId, c.arrowType, c.toNodeId, c.style, c.color);
+            QString line = QStringLiteral("%1 %2 %3 [id=\"%4\", style=%5, color=\"%6\"")
+                               .arg(c.fromNodeId, c.arrowType, c.toNodeId, c.id, c.style, c.color);
             if (!c.label.isEmpty()) {
                 line += QStringLiteral(", label=\"%1\"").arg(c.label);
             }
@@ -378,49 +392,94 @@ QString LoreGraph::toDsl() const
 
 bool LoreGraph::fromDsl(const QString &dsl, QString *error)
 {
-    clear();
+    QString parsedTitle = QStringLiteral("Untitled Graph");
+    QString parsedDirection = QStringLiteral("LR");
+    QList<LoreGraphNode> parsedNodes;
+    QList<LoreGraphBox> parsedBoxes;
+    QList<LoreGraphConnector> parsedConnectors;
+    QList<LoreGraphFollowup> parsedFollowups;
 
     const QStringList lines = dsl.split(QLatin1Char('\n'));
     bool inBox = false;
     LoreGraphBox currentBox;
 
+    static const QSet<QString> validDirections = {
+        QStringLiteral("LR"), QStringLiteral("RL"),
+        QStringLiteral("TD"), QStringLiteral("TB"), QStringLiteral("BT")
+    };
+
+    static const QRegularExpression graphRe(
+        QString::fromUtf8(R"raw(^graph\s*(?:"([^"]*)"|'([^']*)'|(\S+))(?:\s*\[(.*)\])?\s*$)raw"),
+        QRegularExpression::CaseInsensitiveOption);
+
+    static const QRegularExpression nodeRe(
+        QString::fromUtf8(R"(^node\s+([a-zA-Z0-9_\-\.]+)(?:\s*\[(.*)\])?\s*$)"),
+        QRegularExpression::CaseInsensitiveOption);
+
+    static const QRegularExpression boxStartRe(
+        QString::fromUtf8(R"(^box\s+([a-zA-Z0-9_\-\.]+)(?:\s*\[(.*)\])?\s*\{\s*$)"),
+        QRegularExpression::CaseInsensitiveOption);
+
+    static const QRegularExpression followupRe(
+        QString::fromUtf8(R"(^followup\s+([a-zA-Z0-9_\-\.]+)(?:\s*\[(.*)\])?\s*$)"),
+        QRegularExpression::CaseInsensitiveOption);
+
+    static const QRegularExpression connRe(
+        QString::fromUtf8(R"(^([a-zA-Z0-9_\-\.]+)\s*(->|<->|--|-x)\s*([a-zA-Z0-9_\-\.]+)(?:\s*\[(.*)\])?\s*$)"));
+
     for (int lineNum = 0; lineNum < lines.size(); ++lineNum) {
-        QString line = lines.at(lineNum).trimmed();
+        const QString line = lines.at(lineNum).trimmed();
         if (line.isEmpty() || line.startsWith(QLatin1Char('#')) || line.startsWith(QStringLiteral("//"))) {
             continue;
         }
 
         // Inside a box definition
         if (inBox) {
-            if (line.startsWith(QLatin1Char('}'))) {
-                m_boxes.append(currentBox);
+            if (line == QStringLiteral("}") || line.startsWith(QLatin1Char('}'))) {
+                parsedBoxes.append(currentBox);
                 inBox = false;
                 continue;
             } else {
                 QString member = line;
                 member.remove(QLatin1Char(';'));
                 member = member.trimmed();
-                if (!member.isEmpty()) {
-                    currentBox.memberNodeIds.append(member);
+                static const QRegularExpression validIdRe(QStringLiteral("^[a-zA-Z0-9_\\-\\.]+$"));
+                if (!validIdRe.match(member).hasMatch()) {
+                    if (error) {
+                        *error = QStringLiteral("Line %1: Invalid box member node ID '%2'.").arg(lineNum + 1).arg(member);
+                    }
+                    return false;
                 }
+                currentBox.memberNodeIds.append(member);
                 continue;
             }
         }
 
         // 1. graph "..." [direction=LR]
         if (line.startsWith(QStringLiteral("graph"), Qt::CaseInsensitive)) {
-            QRegularExpression re(QString::fromUtf8(R"raw(graph\s*(?:"([^"]*)"|'([^']*)'|(\S+))(?:\s*\[(.*)\])?)raw"), QRegularExpression::CaseInsensitiveOption);
-            auto m = re.match(line);
-            if (m.hasMatch()) {
-                if (!m.captured(1).isEmpty()) m_title = m.captured(1);
-                else if (!m.captured(2).isEmpty()) m_title = m.captured(2);
-                else if (!m.captured(3).isEmpty()) m_title = m.captured(3);
+            auto m = graphRe.match(line);
+            if (!m.hasMatch()) {
+                if (error) {
+                    *error = QStringLiteral("Line %1: Malformed graph declaration '%2'.").arg(lineNum + 1).arg(line);
+                }
+                return false;
+            }
+            if (!m.captured(1).isEmpty()) parsedTitle = m.captured(1);
+            else if (!m.captured(2).isEmpty()) parsedTitle = m.captured(2);
+            else if (!m.captured(3).isEmpty()) parsedTitle = m.captured(3);
 
-                if (!m.captured(4).isEmpty()) {
-                    auto attrs = parseAttributes(m.captured(4));
-                    if (attrs.contains(QStringLiteral("direction"))) {
-                        m_direction = attrs.value(QStringLiteral("direction")).toUpper();
+            if (!m.captured(4).isEmpty()) {
+                auto attrs = parseAttributes(m.captured(4));
+                if (attrs.contains(QStringLiteral("direction"))) {
+                    const QString dir = attrs.value(QStringLiteral("direction")).toUpper();
+                    if (!validDirections.contains(dir)) {
+                        if (error) {
+                            *error = QStringLiteral("Line %1: Invalid graph direction '%2'. Allowed values are LR, RL, TD, TB, BT.")
+                                         .arg(lineNum + 1).arg(dir);
+                        }
+                        return false;
                     }
+                    parsedDirection = dir;
                 }
             }
             continue;
@@ -428,97 +487,155 @@ bool LoreGraph::fromDsl(const QString &dsl, QString *error)
 
         // 2. node <id> [ ... ]
         if (line.startsWith(QStringLiteral("node "), Qt::CaseInsensitive)) {
-            QRegularExpression re(QString::fromUtf8(R"(node\s+([a-zA-Z0-9_\-\.]+)(?:\s*\[(.*)\])?)"), QRegularExpression::CaseInsensitiveOption);
-            auto m = re.match(line);
-            if (m.hasMatch()) {
-                LoreGraphNode n;
-                n.id = m.captured(1);
-                n.label = n.id;
-                if (!m.captured(2).isEmpty()) {
-                    auto attrs = parseAttributes(m.captured(2));
-                    if (attrs.contains(QStringLiteral("label"))) n.label = attrs.value(QStringLiteral("label"));
-                    if (attrs.contains(QStringLiteral("type"))) n.type = attrs.value(QStringLiteral("type")).toLower();
-                    if (attrs.contains(QStringLiteral("shape"))) n.shape = attrs.value(QStringLiteral("shape")).toLower();
-                    if (attrs.contains(QStringLiteral("color"))) n.color = attrs.value(QStringLiteral("color"));
-                    if (attrs.contains(QStringLiteral("loreId"))) n.loreId = attrs.value(QStringLiteral("loreId"));
-                    if (attrs.contains(QStringLiteral("notes"))) n.notes = attrs.value(QStringLiteral("notes"));
-                    if (attrs.contains(QStringLiteral("x"))) n.x = attrs.value(QStringLiteral("x")).toDouble();
-                    if (attrs.contains(QStringLiteral("y"))) n.y = attrs.value(QStringLiteral("y")).toDouble();
-                    if (attrs.contains(QStringLiteral("w"))) n.width = attrs.value(QStringLiteral("w")).toDouble();
-                    if (attrs.contains(QStringLiteral("h"))) n.height = attrs.value(QStringLiteral("h")).toDouble();
+            auto m = nodeRe.match(line);
+            if (!m.hasMatch()) {
+                if (error) {
+                    *error = QStringLiteral("Line %1: Malformed node declaration '%2'.").arg(lineNum + 1).arg(line);
                 }
-                addOrUpdateNode(n);
+                return false;
+            }
+            LoreGraphNode n;
+            n.id = m.captured(1);
+            n.label = n.id;
+            if (!m.captured(2).isEmpty()) {
+                auto attrs = parseAttributes(m.captured(2));
+                if (attrs.contains(QStringLiteral("label"))) n.label = attrs.value(QStringLiteral("label"));
+                if (attrs.contains(QStringLiteral("type"))) n.type = attrs.value(QStringLiteral("type")).toLower();
+                if (attrs.contains(QStringLiteral("shape"))) n.shape = attrs.value(QStringLiteral("shape")).toLower();
+                if (attrs.contains(QStringLiteral("color"))) n.color = attrs.value(QStringLiteral("color"));
+                if (attrs.contains(QStringLiteral("loreId"))) n.loreId = attrs.value(QStringLiteral("loreId"));
+                if (attrs.contains(QStringLiteral("notes"))) n.notes = attrs.value(QStringLiteral("notes"));
+                if (attrs.contains(QStringLiteral("x"))) n.x = attrs.value(QStringLiteral("x")).toDouble();
+                if (attrs.contains(QStringLiteral("y"))) n.y = attrs.value(QStringLiteral("y")).toDouble();
+                if (attrs.contains(QStringLiteral("w"))) n.width = attrs.value(QStringLiteral("w")).toDouble();
+                if (attrs.contains(QStringLiteral("h"))) n.height = attrs.value(QStringLiteral("h")).toDouble();
+            }
+            bool foundNode = false;
+            for (int i = 0; i < parsedNodes.size(); ++i) {
+                if (parsedNodes[i].id == n.id) {
+                    parsedNodes[i] = n;
+                    foundNode = true;
+                    break;
+                }
+            }
+            if (!foundNode) {
+                parsedNodes.append(n);
             }
             continue;
         }
 
         // 3. box <id> [ ... ] {
         if (line.startsWith(QStringLiteral("box "), Qt::CaseInsensitive)) {
-            QRegularExpression re(QString::fromUtf8(R"(box\s+([a-zA-Z0-9_\-\.]+)(?:\s*\[(.*)\])?\s*\{?)"), QRegularExpression::CaseInsensitiveOption);
-            auto m = re.match(line);
-            if (m.hasMatch()) {
-                currentBox = LoreGraphBox();
-                currentBox.id = m.captured(1);
-                currentBox.label = currentBox.id;
-                if (!m.captured(2).isEmpty()) {
-                    auto attrs = parseAttributes(m.captured(2));
-                    if (attrs.contains(QStringLiteral("label"))) currentBox.label = attrs.value(QStringLiteral("label"));
-                    if (attrs.contains(QStringLiteral("color"))) currentBox.color = attrs.value(QStringLiteral("color"));
-                    if (attrs.contains(QStringLiteral("x"))) currentBox.x = attrs.value(QStringLiteral("x")).toDouble();
-                    if (attrs.contains(QStringLiteral("y"))) currentBox.y = attrs.value(QStringLiteral("y")).toDouble();
-                    if (attrs.contains(QStringLiteral("w"))) currentBox.width = attrs.value(QStringLiteral("w")).toDouble();
-                    if (attrs.contains(QStringLiteral("h"))) currentBox.height = attrs.value(QStringLiteral("h")).toDouble();
+            auto m = boxStartRe.match(line);
+            if (!m.hasMatch()) {
+                if (error) {
+                    *error = QStringLiteral("Line %1: Malformed box declaration '%2'. Expected 'box <id> [attrs] {'.").arg(lineNum + 1).arg(line);
                 }
-                inBox = true;
+                return false;
             }
+            currentBox = LoreGraphBox();
+            currentBox.id = m.captured(1);
+            currentBox.label = currentBox.id;
+            if (!m.captured(2).isEmpty()) {
+                auto attrs = parseAttributes(m.captured(2));
+                if (attrs.contains(QStringLiteral("label"))) currentBox.label = attrs.value(QStringLiteral("label"));
+                if (attrs.contains(QStringLiteral("color"))) currentBox.color = attrs.value(QStringLiteral("color"));
+                if (attrs.contains(QStringLiteral("x"))) currentBox.x = attrs.value(QStringLiteral("x")).toDouble();
+                if (attrs.contains(QStringLiteral("y"))) currentBox.y = attrs.value(QStringLiteral("y")).toDouble();
+                if (attrs.contains(QStringLiteral("w"))) currentBox.width = attrs.value(QStringLiteral("w")).toDouble();
+                if (attrs.contains(QStringLiteral("h"))) currentBox.height = attrs.value(QStringLiteral("h")).toDouble();
+            }
+            inBox = true;
             continue;
         }
 
         // 4. followup <id> [ ... ]
         if (line.startsWith(QStringLiteral("followup "), Qt::CaseInsensitive)) {
-            QRegularExpression re(QString::fromUtf8(R"(followup\s+([a-zA-Z0-9_\-\.]+)(?:\s*\[(.*)\])?)"), QRegularExpression::CaseInsensitiveOption);
-            auto m = re.match(line);
-            if (m.hasMatch()) {
-                LoreGraphFollowup f;
-                f.nodeId = m.captured(1);
-                if (!m.captured(2).isEmpty()) {
-                    auto attrs = parseAttributes(m.captured(2));
-                    if (attrs.contains(QStringLiteral("targetChapter"))) f.targetChapter = attrs.value(QStringLiteral("targetChapter")).toInt();
-                    if (attrs.contains(QStringLiteral("status"))) f.status = attrs.value(QStringLiteral("status"));
-                    if (attrs.contains(QStringLiteral("note"))) f.note = attrs.value(QStringLiteral("note"));
+            auto m = followupRe.match(line);
+            if (!m.hasMatch()) {
+                if (error) {
+                    *error = QStringLiteral("Line %1: Malformed followup declaration '%2'.").arg(lineNum + 1).arg(line);
                 }
-                addOrUpdateFollowup(f);
+                return false;
             }
+            LoreGraphFollowup f;
+            f.nodeId = m.captured(1);
+            if (!m.captured(2).isEmpty()) {
+                auto attrs = parseAttributes(m.captured(2));
+                if (attrs.contains(QStringLiteral("targetChapter"))) f.targetChapter = attrs.value(QStringLiteral("targetChapter")).toInt();
+                if (attrs.contains(QStringLiteral("status"))) f.status = attrs.value(QStringLiteral("status"));
+                if (attrs.contains(QStringLiteral("note"))) f.note = attrs.value(QStringLiteral("note"));
+            }
+            parsedFollowups.append(f);
             continue;
         }
 
         // 5. Connectors: <source> <arrow> <target> [ ... ]
-        // Arrow can be ->, <->, --, -x
-        QRegularExpression reConn(QString::fromUtf8(R"(([a-zA-Z0-9_\-\.]+)\s*(->|<->|--|-x)\s*([a-zA-Z0-9_\-\.]+)(?:\s*\[(.*)\])?)"));
-        auto connMatch = reConn.match(line);
+        auto connMatch = connRe.match(line);
         if (connMatch.hasMatch()) {
             LoreGraphConnector c;
-            c.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
             c.fromNodeId = connMatch.captured(1);
             c.arrowType = connMatch.captured(2);
             c.toNodeId = connMatch.captured(3);
 
             if (!connMatch.captured(4).isEmpty()) {
                 auto attrs = parseAttributes(connMatch.captured(4));
+                if (attrs.contains(QStringLiteral("id"))) c.id = attrs.value(QStringLiteral("id"));
                 if (attrs.contains(QStringLiteral("label"))) c.label = attrs.value(QStringLiteral("label"));
                 if (attrs.contains(QStringLiteral("relation"))) c.relation = attrs.value(QStringLiteral("relation"));
                 if (attrs.contains(QStringLiteral("style"))) c.style = attrs.value(QStringLiteral("style"));
                 if (attrs.contains(QStringLiteral("color"))) c.color = attrs.value(QStringLiteral("color"));
             }
-            m_connectors.append(c);
+            if (c.id.isEmpty()) {
+                const QString baseId = QStringLiteral("conn_%1_%2").arg(c.fromNodeId, c.toNodeId);
+                QString candId = baseId;
+                int suffix = 2;
+                bool idExists = true;
+                while (idExists) {
+                    idExists = false;
+                    for (const auto &existing : parsedConnectors) {
+                        if (existing.id == candId) {
+                            idExists = true;
+                            candId = QStringLiteral("%1_%2").arg(baseId).arg(suffix++);
+                            break;
+                        }
+                    }
+                }
+                c.id = candId;
+            }
+            parsedConnectors.append(c);
             continue;
         }
+
+        // If we reach here, the non-empty, non-comment line did not match any valid directive!
+        if (error) {
+            *error = QStringLiteral("Line %1: Syntax error: Unrecognized statement '%2'.").arg(lineNum + 1).arg(line);
+        }
+        return false;
     }
 
     if (inBox) {
-        // If file ended without closing brace, save the box
-        m_boxes.append(currentBox);
+        if (error) {
+            *error = QStringLiteral("Syntax error: Unclosed box block '%1' (missing '}').").arg(currentBox.id);
+        }
+        return false;
     }
+
+    if (parsedNodes.isEmpty() && parsedBoxes.isEmpty() && parsedConnectors.isEmpty() && parsedTitle == QStringLiteral("Untitled Graph")) {
+        if (error) {
+            *error = QStringLiteral("DSL contains no valid graph declarations or nodes.");
+        }
+        return false;
+    }
+
+    // Success! Mutate *this now
+    clear();
+    m_title = parsedTitle;
+    m_direction = parsedDirection;
+    m_nodes = parsedNodes;
+    m_boxes = parsedBoxes;
+    m_connectors = parsedConnectors;
+    m_followups = parsedFollowups;
 
     return true;
 }
@@ -532,9 +649,9 @@ QString LoreGraph::dslGrammarSpecification()
         "   - Body: UTF-8 plain text DSL describing graph elements.\n\n"
         "2. Directives:\n"
         "   • Graph Declaration:\n"
-        "     graph \"<Title>\" [direction=LR|TD]\n\n"
+        "     graph \"<Title>\" [direction=LR|RL|TD|TB|BT]\n\n"
         "   • Nodes (Story Blocks):\n"
-        "     node <id> [label=\"<Name>\", type=\"<type>\", pos(x, y), size(w, h), color=\"#hex\", shape=<shape>, loreId=\"<id>\"]\n"
+        "     node <id> [label=\"<Name>\", type=\"<type>\", pos(x, y), size(w, h), color=\"#hex\", shape=<shape>, loreId=\"<id>\", notes=\"<Author Notes>\"]\n"
         "     - Supported types: character, location, event, item, faction, concept, plot_point\n"
         "     - Supported shapes: box, rounded, diamond, ellipse, cylinder, hexagon\n"
         "     - pos(x, y): Canvas coordinates allowing manual or programmatic block arrangement.\n\n"
@@ -544,7 +661,7 @@ QString LoreGraph::dslGrammarSpecification()
         "         <memberNodeId2>\n"
         "     }\n\n"
         "   • Connectors (Relationships & Narrative Flows):\n"
-        "     <sourceNode> <arrow> <targetNode> [label=\"<Text>\", relation=\"<type>\", style=solid|dashed|dotted|thick, color=\"#hex\"]\n"
+        "     <sourceNode> <arrow> <targetNode> [id=\"<connId>\", label=\"<Text>\", relation=\"<type>\", style=solid|dashed|dotted|thick, color=\"#hex\"]\n"
         "     - Arrows:\n"
         "       ->   : Directed cause, flow, or action\n"
         "       <->  : Bidirectional alliance or mutual bond\n"
