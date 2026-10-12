@@ -4,9 +4,10 @@
 
 These are the following versions that are maintained for security and stability.
 
-| Versions | Status | EOL  |
-|----------|--------|------|
-| 1.1.x    | Active | 2027 |
+| Versions | Status | EOL          |
+|----------|--------|--------------|
+| 1.2.x    | Active | March 2027   |
+| 1.1.x    | Active | January 2027 |
 
 
 ## Reporting a vulnerability
