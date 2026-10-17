@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QJsonArray>
 #include <QString>
 #include <QStringList>
 
@@ -20,6 +21,9 @@ class McpAgentInstaller
 public:
     static McpInstallReport installAll(const QString &executablePath = QString(), const QString &workspaceDir = QString());
     static QString generateManualMarkdown(const QString &executablePath);
+
+    // Returns authoritative list of all 34 MCP tool definitions with schemas
+    static QJsonArray getAllToolDefinitions();
 
     // Checks agent configuration files (Antigravity, Claude Desktop, Claude Code).
     // If an existing 'ensemble' entry has an invalid, stale, or different binary path, overwrites it with the correct path.

@@ -30,15 +30,26 @@ public:
     // Stops listening and unlinks local socket / pid file.
     void stopListening();
 
+    // Directory for runtime sockets and pid files (prefers $XDG_RUNTIME_DIR on Unix)
+    static QString runtimeDir();
+
     // Unique socket name for current user
     static QString socketName();
+
+    // Unique socket server path or name (prefers $XDG_RUNTIME_DIR on Unix)
+    static QString socketPath();
 
     // PID tracking file path
     static QString pidFilePath();
 
+    // Current system boot ID (unique per boot session to invalidate stale pre-reboot PID files)
+    static QString currentBootId();
+
     // Process manager checks and termination
     static bool isProcessRunning(qint64 pid);
     static bool terminateProcess(qint64 pid);
+    static QString getProcessExecutable(qint64 pid);
+    static bool isEnsembleProcess(qint64 pid);
 
     void setTargetWindow(QWidget *window) { m_targetWindow = window; }
     QWidget *targetWindow() const { return m_targetWindow; }

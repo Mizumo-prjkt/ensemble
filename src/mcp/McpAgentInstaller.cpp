@@ -1,5 +1,6 @@
 #include "McpAgentInstaller.h"
 #include "McpServer.h"
+#include "McpToolDefinitions.h"
 #include "debug/debug.hpp"
 #include "utils/AppPaths.h"
 
@@ -207,6 +208,15 @@ McpInstallReport McpAgentInstaller::installAll(const QString &executablePath, co
         report.installedFiles.append(appConfigManual);
     }
 
+    // Also place a copy in ~/.claude if directory exists
+    const QString claudeDir = QDir(QDir::homePath()).filePath(QStringLiteral(".claude"));
+    if (QDir(claudeDir).exists()) {
+        const QString claudeManual = QDir(claudeDir).filePath(QStringLiteral("ENSEMBLE_MCP_MANUAL.md"));
+        if (writeTextFile(claudeManual, manualContent)) {
+            report.installedFiles.append(claudeManual);
+        }
+    }
+
     // 2. Install into Google Antigravity MCP directory & configs
     QString agyGlobalConfig;
     QString agyToolDir;
@@ -273,331 +283,187 @@ bool McpAgentInstaller::installAntigravityMcp(
 {
     const QString home = QDir::homePath();
     const QString baseAgyMcpDir = QDir(home).filePath(QStringLiteral(".gemini/antigravity/mcp"));
-
     const QString ensembleMcpDir = QDir(baseAgyMcpDir).filePath(QStringLiteral("ensemble"));
     QDir().mkpath(ensembleMcpDir);
     outToolDir = ensembleMcpDir;
 
-    // 1. instructions.md
-    const QString instructionsPath = QDir(ensembleMcpDir).filePath(QStringLiteral("instructions.md"));
-    const QString instructionsText = QStringLiteral(
-        "# Ensemble AO3 Writing Suite MCP Server\n\n"
-        "Use this server whenever you need to interact with the running Ensemble writing application.\n\n"
-        "## Best Practices:\n"
-        "1. Check the active project state first with `get_project_summary` before performing updates.\n"
-        "2. To inspect chapter text, use `list_chapters` followed by `get_chapter`.\n"
-        "3. When rewriting or drafting story prose, write cleanly formatted HTML or use standard paragraphs `<p>...</p>`.\n"
-        "   Call `update_chapter_html` to push changes directly into Ensemble's live editor and preview.\n"
-        "4. When authoring or tuning custom work skins, inspect current CSS using `get_workskin_css` and apply modifications with `set_workskin_css`.\n"
-        "5. If an edit produces formatting issues, call `get_problems` to review AO3 tag whitelist validation errors.\n"
-        "6. If you encounter connection drops, run `test_firewall_connection` to diagnose local socket reachability.\n"
-    );
-    if (writeTextFile(instructionsPath, instructionsText)) {
-        installedFiles.append(instructionsPath);
+    QStringList targetMcpDirs;
+    targetMcpDirs.append(ensembleMcpDir);
+
+    const QString ideMcpDir = QDir(home).filePath(QStringLiteral(".gemini/antigravity-ide/mcp/ensemble"));
+    if (QDir(QDir(home).filePath(QStringLiteral(".gemini/antigravity-ide"))).exists()) {
+        QDir().mkpath(ideMcpDir);
+        targetMcpDirs.append(ideMcpDir);
     }
 
-    // 2. Individual tool schema files
-    auto createToolSchema = [&](const QString &toolName, const QString &desc, const QJsonObject &properties, const QJsonArray &required = QJsonArray()) {
+    const QString cliMcpDir = QDir(home).filePath(QStringLiteral(".gemini/antigravity-cli/mcp/ensemble"));
+    if (QDir(QDir(home).filePath(QStringLiteral(".gemini/antigravity-cli"))).exists()) {
+        QDir().mkpath(cliMcpDir);
+        targetMcpDirs.append(cliMcpDir);
+    }
+
+    // 1. Write comprehensive instructions.md and ENSEMBLE_MCP_MANUAL.md in all MCP tool directories
+    const QString manualMarkdown = generateManualMarkdown(executablePath);
+    const QString instructionsText = QStringLiteral(
+        "# Ensemble AO3 Writing Suite MCP Server Instructions\n\n"
+        "You are interacting with **Ensemble**, an active AO3 desktop writing suite, work skin composer, and narrative lore mapping environment.\n\n"
+        "## Key Capabilities & Workflow Recommendations\n\n"
+        "### 1. Project State & Inspection\n"
+        "- Before modifying or reading content, check project state using `get_project_summary`.\n"
+        "- Inspect chapter list and word counts using `list_chapters`.\n"
+        "- Retrieve chapter text or HTML with `get_chapter(chapterIndex, format=\"all\"|\"html\"|\"text\")`.\n"
+        "- Inspect lint diagnostics and whitelist violations at any time using `get_problems`.\n\n"
+        "### 2. Live Story Drafting & HTML Sanitization\n"
+        "- Write story prose using `update_chapter_html(chapterIndex, html)`.\n"
+        "  - Standard paragraphs should be formatted in `<p>...</p>`.\n"
+        "  - All HTML is automatically sanitized against AO3's official allowed tags and attributes whitelist (`<p>`, `<em>`, `<strong>`, `<a>`, `<span>`, `<blockquote>`, `<ul>`, `<ol>`, `<li>`, `<h1>`-`<h6>`, `<img>`, etc.).\n"
+        "  - Script tags, inline styles, or unsafe URL schemes (`javascript:`) are automatically stripped.\n"
+        "  - Returns `wordCountDelta`, `strippedTags`, and sanitized HTML.\n"
+        "- Append new chapters with `add_chapter(title)`.\n"
+        "- Reorder chapters with `reorder_chapters(fromIndex, toIndex)`.\n"
+        "- Delete chapters with `delete_chapter(chapterIndex)`.\n"
+        "- To embed images in a chapter, use `insert_image_embed` (supports `url`, `alt`, `title`, `width`, `height`, `alignment=\"center\"|\"inline\"|\"left\"|\"right\"`, and `wrapInLink`).\n"
+        "- List external images with `list_image_embeds`.\n\n"
+        "### 3. Work Skin CSS Authoring\n"
+        "- Inspect current stylesheet with `get_workskin_css`.\n"
+        "- Update stylesheet with `set_workskin_css(css, allowMalformed=false)`.\n"
+        "  - Validates CSS rules and classes. If syntax errors exist, they are rejected with line diagnostics unless `allowMalformed: true` is passed.\n"
+        "  - Updates the live Chromium preview pane instantaneously.\n\n"
+        "### 4. Story Lore & Worldbuilding Graphs (`.grph`)\n"
+        "- Retrieve lore graph syntax with `get_lore_graph(name, includeGrammar=true)`.\n"
+        "- Update narrative graphs using `update_lore_graph(dsl, name=\"data\")`.\n"
+        "  - Must begin with `\\x89GRPH\\x01\\r\\n` (auto-prepended if missing).\n"
+        "  - Graph syntax:\n"
+        "    ```text\n"
+        "    graph \"Title\" [direction=LR]\n"
+        "    node id [label=\"Name\", type=\"character|event|location|faction|concept|lore\", pos(x, y), shape=\"rounded|box|circle|diamond\", color=\"#hex\", notes=\"...\"]\n"
+        "    sourceId -> targetId [label=\"rel\", relation=\"causes\", style=\"solid|dashed\", color=\"#hex\"]\n"
+        "    sourceId -x targetId [label=\"conflict\", relation=\"conflict\", style=\"dashed\", color=\"#hex\"]\n"
+        "    box group [label=\"Box Title\", pos(x, y), size(w, h), color=\"#hex\"] { id1 id2 }\n"
+        "    followup id [targetChapter=1, status=\"pending\", note=\"...\"]\n"
+        "    ```\n"
+        "  - Semantic validation is enforced: connectors must reference existing nodes, types/shapes/colors must be valid.\n"
+        "- Use `add_lore_node`, `connect_lore_nodes`, and `move_lore_node` for granular updates without re-transmitting the entire graph.\n\n"
+        "### 5. Narrative Lore Data Management\n"
+        "- Read structured lore records using `get_lore_data(section=\"entities\"|\"history\"|\"conflicts\"|\"resolved\"|\"plans\"|\"references\"|\"all\")`.\n"
+        "- Modify lore records using `manage_lore_data(action, ...)`:\n"
+        "  - `add_entity` / `update_entity`: requires `id`, `name`, `type`, `description`, optional `attributes`.\n"
+        "  - `add_history` / `update_history`: requires `id`, `summary`, `impact`, optional `timestamp`. (Do not use `description` for history events; use `summary` and `impact`).\n"
+        "  - `add_conflict` / `update_conflict`: requires `id`, `title`, `description`.\n"
+        "  - `resolve_conflict`: requires `id`, `ruling`.\n"
+        "  - `add_plan` / `update_plan`: requires `id`, `title`, `loreThread`, `targetChapter`, `status`.\n"
+        "  - `add_reference` / `update_reference`: requires `id`, `source`, `citation`, `notes`.\n"
+        "  - `remove_entity`, `remove_history`, `remove_conflict`, `remove_resolved`, `remove_plan`, `remove_reference`: requires `id`.\n"
+        "  - `remove_graph`: requires `name` (deleting the default graph resets it to a clean empty graph).\n\n"
+        "### 6. Persistence & Version History\n"
+        "- Save changes to disk with `save_project(commitMessage, author, filePath, saveCopy=false)`.\n"
+        "  - Note: If `filePath` is provided without `saveCopy=true`, the active project switches to that file. Pass `saveCopy: true` to export an archive copy without switching active project.\n"
+        "- Revert unsaved edits with `reload_project`.\n"
+        "- Inspect git-like commit history with `get_project_history(limit)`.\n"
+        "- Commit manual checkpoints with `add_history_commit(message, author)`.\n\n"
+        "### 7. Multi-Agent Co-Working & Audit Trail\n"
+        "- Discover connected agents with `get_agent_presence`.\n"
+        "- Announce your presence and role with `register_agent_presence(agentName, role, workingNote)`.\n"
+        "- Broadcast thinking or pacing suggestions live to the user's Agent Thoughts Monitor with `post_agent_thought(thought, category, target)`.\n"
+        "- Inspect the agent audit log with `get_agent_history(limit, agentName, action)`.\n"
+        "  - Records all chapter edits, lore updates, commits, file operations, and word count deltas with model identity and timestamps.\n"
+        "- Store multi-agent shared notes or private agent memory using `read_agentic_file` and `write_agentic_file` (shared cap 5 MB, private cap 20 MB).\n\n"
+        "### 8. Diagnostics\n"
+        "- If connection drops or socket is unreachable, call `test_firewall_connection` to diagnose local loopback latency.\n"
+    );
+
+    for (const QString &mcpDir : targetMcpDirs) {
+        const QString instrPath = QDir(mcpDir).filePath(QStringLiteral("instructions.md"));
+        if (writeTextFile(instrPath, instructionsText)) {
+            installedFiles.append(instrPath);
+        }
+        const QString manualPath = QDir(mcpDir).filePath(QStringLiteral("ENSEMBLE_MCP_MANUAL.md"));
+        if (writeTextFile(manualPath, manualMarkdown)) {
+            installedFiles.append(manualPath);
+        }
+    }
+
+    // 2. Individual tool schema files for all 34 tools
+    const QJsonArray tools = getAllToolDefinitions();
+    for (const QJsonValue &toolVal : tools) {
+        const QJsonObject toolObj = toolVal.toObject();
+        const QString toolName = toolObj.value(QStringLiteral("name")).toString();
+        const QString desc = toolObj.value(QStringLiteral("description")).toString();
+        const QJsonObject inputSchema = toolObj.value(QStringLiteral("inputSchema")).toObject();
+
         QJsonObject schema;
         schema[QStringLiteral("name")] = toolName;
         schema[QStringLiteral("description")] = desc;
-        QJsonObject params;
-        params[QStringLiteral("type")] = QStringLiteral("object");
-        params[QStringLiteral("properties")] = properties;
-        params[QStringLiteral("additionalProperties")] = false;
-        if (!required.isEmpty()) {
-            params[QStringLiteral("required")] = required;
-        }
-        schema[QStringLiteral("parameters")] = params;
+        schema[QStringLiteral("parameters")] = inputSchema;
 
-        const QString schemaPath = QDir(ensembleMcpDir).filePath(QStringLiteral("%1.json").arg(toolName));
-        if (writeJsonFile(schemaPath, schema)) {
-            installedFiles.append(schemaPath);
+        for (const QString &mcpDir : targetMcpDirs) {
+            const QString schemaPath = QDir(mcpDir).filePath(QStringLiteral("%1.json").arg(toolName));
+            if (writeJsonFile(schemaPath, schema)) {
+                installedFiles.append(schemaPath);
+            }
         }
+    }
+
+    // 3. Install Antigravity Plugin & Skill
+    const QString pluginDir = QDir(home).filePath(QStringLiteral(".gemini/config/plugins/ensemble"));
+    QDir().mkpath(pluginDir);
+
+    QJsonObject pluginObj;
+    pluginObj[QStringLiteral("name")] = QStringLiteral("ensemble");
+    pluginObj[QStringLiteral("displayName")] = QStringLiteral("Ensemble");
+    pluginObj[QStringLiteral("version")] = QStringLiteral("1.2.0");
+    pluginObj[QStringLiteral("description")] = QStringLiteral("Desktop writing suite, AO3 work skin composer, narrative lore graph manager, and multi-model agentic collaborative writing environment.");
+    pluginObj[QStringLiteral("suggestedPrompts")] = QJsonArray{
+        QStringLiteral("Check the active Ensemble story project summary and word count"),
+        QStringLiteral("List chapters and read the latest chapter draft in Ensemble"),
+        QStringLiteral("Update chapter HTML with automated AO3 tag whitelist sanitization"),
+        QStringLiteral("Inspect and tune the custom AO3 workskin CSS in Ensemble"),
+        QStringLiteral("Query and update story lore graphs and narrative entities in Ensemble")
+    };
+    QJsonObject authorObj;
+    authorObj[QStringLiteral("name")] = QStringLiteral("Ensemble Team");
+    pluginObj[QStringLiteral("author")] = authorObj;
+    pluginObj[QStringLiteral("keywords")] = QJsonArray{
+        QStringLiteral("ensemble"),
+        QStringLiteral("ao3"),
+        QStringLiteral("fanfiction"),
+        QStringLiteral("writing"),
+        QStringLiteral("archiveofourown"),
+        QStringLiteral("lore"),
+        QStringLiteral("workskin"),
+        QStringLiteral("css"),
+        QStringLiteral("mcp")
     };
 
-    // get_project_summary
-    createToolSchema(
-        QStringLiteral("get_project_summary"),
-        QStringLiteral("Retrieves active project metadata: title, author, chapter count, total word count, and unsaved changes status."),
-        QJsonObject()
-    );
-
-    // list_chapters
-    createToolSchema(
-        QStringLiteral("list_chapters"),
-        QStringLiteral("Lists all chapters in the active project with index, title, order, and word count."),
-        QJsonObject()
-    );
-
-    // get_chapter
-    {
-        QJsonObject props;
-        QJsonObject idx;
-        idx[QStringLiteral("type")] = QStringLiteral("integer");
-        idx[QStringLiteral("description")] = QStringLiteral("0-based index of the chapter to retrieve.");
-        props[QStringLiteral("chapterIndex")] = idx;
-        QJsonObject format;
-        format[QStringLiteral("type")] = QStringLiteral("string");
-        format[QStringLiteral("enum")] = QJsonArray{QStringLiteral("all"), QStringLiteral("html"), QStringLiteral("text")};
-        format[QStringLiteral("description")] = QStringLiteral("Optional format: 'all' (default), 'html', or 'text'.");
-        props[QStringLiteral("format")] = format;
-        createToolSchema(
-            QStringLiteral("get_chapter"),
-            QStringLiteral("Gets HTML and/or plain text content of a specific chapter."),
-            props,
-            QJsonArray{QStringLiteral("chapterIndex")}
-        );
+    const QString pluginJsonPath = QDir(pluginDir).filePath(QStringLiteral("plugin.json"));
+    if (writeJsonFile(pluginJsonPath, pluginObj)) {
+        installedFiles.append(pluginJsonPath);
     }
 
-    // update_chapter_html
-    {
-        QJsonObject props;
-        QJsonObject idx;
-        idx[QStringLiteral("type")] = QStringLiteral("integer");
-        idx[QStringLiteral("description")] = QStringLiteral("0-based index of the chapter to update.");
-        props[QStringLiteral("chapterIndex")] = idx;
-        QJsonObject html;
-        html[QStringLiteral("type")] = QStringLiteral("string");
-        html[QStringLiteral("description")] = QStringLiteral("The new HTML content for the chapter.");
-        props[QStringLiteral("html")] = html;
-        createToolSchema(
-            QStringLiteral("update_chapter_html"),
-            QStringLiteral("Updates HTML content of a chapter. Content is sanitized against AO3 tag whitelist and the live editor/preview updates immediately."),
-            props,
-            QJsonArray{QStringLiteral("chapterIndex"), QStringLiteral("html")}
-        );
+    const QString skillContent = QStringLiteral(
+        "---\n"
+        "name: ensemble-mcp\n"
+        "description: Comprehensive reference and guide for Ensemble's Model Context Protocol (MCP) server. Use when querying project state, editing chapters, updating work skins, validating AO3 HTML/CSS, managing lore graphs and entities, logging agent audits, or interacting with the live Ensemble AO3 writing suite.\n"
+        "---\n\n"
+    ) + manualMarkdown;
+
+    QStringList skillPaths;
+    skillPaths.append(QDir(pluginDir).filePath(QStringLiteral("skills/ensemble-mcp/SKILL.md")));
+    skillPaths.append(QDir(home).filePath(QStringLiteral(".gemini/config/skills/ensemble-mcp/SKILL.md")));
+    if (QDir(QDir(home).filePath(QStringLiteral(".gemini/skills"))).exists()) {
+        skillPaths.append(QDir(home).filePath(QStringLiteral(".gemini/skills/ensemble-mcp/SKILL.md")));
+    }
+    if (QDir(QDir(home).filePath(QStringLiteral(".gemini/antigravity"))).exists()) {
+        skillPaths.append(QDir(home).filePath(QStringLiteral(".gemini/antigravity/skills/ensemble-mcp/SKILL.md")));
+    }
+    if (QDir(QDir(home).filePath(QStringLiteral(".gemini/antigravity-cli"))).exists()) {
+        skillPaths.append(QDir(home).filePath(QStringLiteral(".gemini/antigravity-cli/skills/ensemble-mcp/SKILL.md")));
     }
 
-    // add_chapter
-    {
-        QJsonObject props;
-        QJsonObject title;
-        title[QStringLiteral("type")] = QStringLiteral("string");
-        title[QStringLiteral("description")] = QStringLiteral("Optional title for the new chapter.");
-        props[QStringLiteral("title")] = title;
-        createToolSchema(
-            QStringLiteral("add_chapter"),
-            QStringLiteral("Creates and appends a new chapter to the active project."),
-            props
-        );
-    }
-
-    // delete_chapter
-    {
-        QJsonObject props;
-        QJsonObject idx;
-        idx[QStringLiteral("type")] = QStringLiteral("integer");
-        idx[QStringLiteral("description")] = QStringLiteral("0-based index of the chapter to delete.");
-        props[QStringLiteral("chapterIndex")] = idx;
-        createToolSchema(
-            QStringLiteral("delete_chapter"),
-            QStringLiteral("Deletes a chapter from the project by index."),
-            props,
-            QJsonArray{QStringLiteral("chapterIndex")}
-        );
-    }
-
-    // reorder_chapters
-    {
-        QJsonObject props;
-        QJsonObject from;
-        from[QStringLiteral("type")] = QStringLiteral("integer");
-        from[QStringLiteral("description")] = QStringLiteral("Starting 0-based index.");
-        props[QStringLiteral("fromIndex")] = from;
-        QJsonObject to;
-        to[QStringLiteral("type")] = QStringLiteral("integer");
-        to[QStringLiteral("description")] = QStringLiteral("Destination 0-based index.");
-        props[QStringLiteral("toIndex")] = to;
-        createToolSchema(
-            QStringLiteral("reorder_chapters"),
-            QStringLiteral("Moves a chapter from one index position to another."),
-            props,
-            QJsonArray{QStringLiteral("fromIndex"), QStringLiteral("toIndex")}
-        );
-    }
-
-    // get_workskin_css
-    createToolSchema(
-        QStringLiteral("get_workskin_css"),
-        QStringLiteral("Retrieves the custom AO3 Work Skin CSS of the active project."),
-        QJsonObject()
-    );
-
-    // set_workskin_css
-    {
-        QJsonObject props;
-        QJsonObject css;
-        css[QStringLiteral("type")] = QStringLiteral("string");
-        css[QStringLiteral("description")] = QStringLiteral("The new CSS rules to apply.");
-        props[QStringLiteral("css")] = css;
-        createToolSchema(
-            QStringLiteral("set_workskin_css"),
-            QStringLiteral("Updates the custom AO3 Work Skin CSS for the project and triggers an immediate live Chromium preview re-render."),
-            props,
-            QJsonArray{QStringLiteral("css")}
-        );
-    }
-
-    // get_problems
-    createToolSchema(
-        QStringLiteral("get_problems"),
-        QStringLiteral("Returns current diagnostic lint errors and warnings (AO3 tag whitelist violations, CSS validation issues)."),
-        QJsonObject()
-    );
-
-    // save_project
-    createToolSchema(
-        QStringLiteral("save_project"),
-        QStringLiteral("Saves the active project to its current .ao3proj file on disk."),
-        QJsonObject()
-    );
-
-    // reload_project
-    createToolSchema(
-        QStringLiteral("reload_project"),
-        QStringLiteral("Reloads active project from disk, discarding unsaved changes and resetting isDirty to false."),
-        QJsonObject()
-    );
-
-    // get_preview_screenshot
-    {
-        QJsonObject props;
-        QJsonObject idx;
-        idx[QStringLiteral("type")] = QStringLiteral("integer");
-        idx[QStringLiteral("description")] = QStringLiteral("Optional 0-based index of the chapter to preview.");
-        props[QStringLiteral("chapterIndex")] = idx;
-        createToolSchema(
-            QStringLiteral("get_preview_screenshot"),
-            QStringLiteral("Renders a chapter in Chromium with Work Skin CSS and returns a base64-encoded PNG screenshot as an MCP image content block."),
-            props
-        );
-    }
-
-    // test_firewall_connection
-    createToolSchema(
-        QStringLiteral("test_firewall_connection"),
-        QStringLiteral("Executes a loopback connectivity test to verify WebSocket reachability and troubleshoot firewall blocks."),
-        QJsonObject()
-    );
-
-    // get_agent_presence
-    createToolSchema(
-        QStringLiteral("get_agent_presence"),
-        QStringLiteral("Inspects all active AI agents currently connected to Ensemble (e.g. Gemini Antigravity, Claude Desktop/Code) for multi-agent presence awareness, co-working, and peer synchronization."),
-        QJsonObject()
-    );
-
-    // register_agent_presence
-    {
-        QJsonObject props;
-        QJsonObject name;
-        name[QStringLiteral("type")] = QStringLiteral("string");
-        name[QStringLiteral("description")] = QStringLiteral("The name of your AI agent or model (e.g. 'antigravity', 'claude', 'gemini').");
-        props[QStringLiteral("agentName")] = name;
-        QJsonObject role;
-        role[QStringLiteral("type")] = QStringLiteral("string");
-        role[QStringLiteral("description")] = QStringLiteral("Your role in the session (e.g. 'co-author', 'reviewer', 'editor', 'proofreader', 'architect'). Defaults to 'co-author'.");
-        props[QStringLiteral("role")] = role;
-        QJsonObject note;
-        note[QStringLiteral("type")] = QStringLiteral("string");
-        note[QStringLiteral("description")] = QStringLiteral("A brief note describing what you are currently focusing on or working on.");
-        props[QStringLiteral("workingNote")] = note;
-        createToolSchema(
-            QStringLiteral("register_agent_presence"),
-            QStringLiteral("Announces or updates your AI agent presence, identity, role, and current working note so other connected AI models can coordinate and co-work."),
-            props
-        );
-    }
-
-    // get_agentic_summary
-    createToolSchema(
-        QStringLiteral("get_agentic_summary"),
-        QStringLiteral("Retrieves storage quotas (5 MB shared, 20 MB localized), current byte usage, index metadata, list of shared files, and registered localized agent directories in .ao3proj agentic-datas."),
-        QJsonObject()
-    );
-
-    // read_agentic_file
-    {
-        QJsonObject props;
-        QJsonObject path;
-        path[QStringLiteral("type")] = QStringLiteral("string");
-        path[QStringLiteral("description")] = QStringLiteral("Relative path of the file to read (e.g. 'notes.md', 'plot_outline.json').");
-        props[QStringLiteral("path")] = path;
-        QJsonObject scope;
-        scope[QStringLiteral("type")] = QStringLiteral("string");
-        scope[QStringLiteral("description")] = QStringLiteral("Storage scope: 'shared' (default) or agent name (e.g. 'claude', 'antigravity', 'cursor').");
-        props[QStringLiteral("scope")] = scope;
-        QJsonObject enc;
-        enc[QStringLiteral("type")] = QStringLiteral("string");
-        enc[QStringLiteral("enum")] = QJsonArray{QStringLiteral("utf-8"), QStringLiteral("base64")};
-        enc[QStringLiteral("description")] = QStringLiteral("Optional encoding: 'utf-8' (default) or 'base64'.");
-        props[QStringLiteral("encoding")] = enc;
-        createToolSchema(
-            QStringLiteral("read_agentic_file"),
-            QStringLiteral("Reads a file from the .ao3proj agentic-datas repository (from the coroutine 'shared/' directory or an agent's private '<agent>/' memory directory)."),
-            props,
-            QJsonArray{QStringLiteral("path")}
-        );
-    }
-
-    // write_agentic_file
-    {
-        QJsonObject props;
-        QJsonObject path;
-        path[QStringLiteral("type")] = QStringLiteral("string");
-        path[QStringLiteral("description")] = QStringLiteral("Relative file path (e.g. 'outline.md', 'character_arc.json').");
-        props[QStringLiteral("path")] = path;
-        QJsonObject content;
-        content[QStringLiteral("type")] = QStringLiteral("string");
-        content[QStringLiteral("description")] = QStringLiteral("The content of the file to write.");
-        props[QStringLiteral("content")] = content;
-        QJsonObject scope;
-        scope[QStringLiteral("type")] = QStringLiteral("string");
-        scope[QStringLiteral("description")] = QStringLiteral("Target storage scope: 'shared' (default) or private agent name (e.g. 'claude', 'antigravity', 'cursor').");
-        props[QStringLiteral("scope")] = scope;
-        QJsonObject enc;
-        enc[QStringLiteral("type")] = QStringLiteral("string");
-        enc[QStringLiteral("enum")] = QJsonArray{QStringLiteral("utf-8"), QStringLiteral("base64")};
-        enc[QStringLiteral("description")] = QStringLiteral("Optional content encoding: 'utf-8' (default) or 'base64'.");
-        props[QStringLiteral("encoding")] = enc;
-        createToolSchema(
-            QStringLiteral("write_agentic_file"),
-            QStringLiteral("Writes or updates a file in .ao3proj agentic-datas ('shared/' for coroutine multi-agent collaboration or '<agent>/' for private memory). Strictly enforces the 5 MB shared cap and 20 MB localized cap."),
-            props,
-            QJsonArray{QStringLiteral("path"), QStringLiteral("content")}
-        );
-    }
-
-    // append_agent_history
-    {
-        QJsonObject props;
-        QJsonObject sum;
-        sum[QStringLiteral("type")] = QStringLiteral("string");
-        sum[QStringLiteral("description")] = QStringLiteral("Detailed summary of the action or contribution performed by the model.");
-        props[QStringLiteral("summary")] = sum;
-        QJsonObject agent;
-        agent[QStringLiteral("type")] = QStringLiteral("string");
-        agent[QStringLiteral("description")] = QStringLiteral("Optional agent name (e.g. 'antigravity', 'claude').");
-        props[QStringLiteral("agentName")] = agent;
-        QJsonObject model;
-        model[QStringLiteral("type")] = QStringLiteral("string");
-        model[QStringLiteral("description")] = QStringLiteral("Optional model family/version (e.g. 'gemini-2.5-pro', 'claude-3-7-sonnet').");
-        props[QStringLiteral("model")] = model;
-        QJsonObject role;
-        role[QStringLiteral("type")] = QStringLiteral("string");
-        role[QStringLiteral("description")] = QStringLiteral("Optional role (e.g. 'co-author', 'reviewer', 'editor').");
-        props[QStringLiteral("role")] = role;
-        QJsonObject act;
-        act[QStringLiteral("type")] = QStringLiteral("string");
-        act[QStringLiteral("description")] = QStringLiteral("Optional action type (e.g. 'sync', 'review', 'co-write', 'refactor').");
-        props[QStringLiteral("action")] = act;
-        createToolSchema(
-            QStringLiteral("append_agent_history"),
-            QStringLiteral("Appends a structured history entry to agent_model_history.xml in .ao3proj recording an AI model interaction, analysis, suggestion, or co-writing milestone."),
-            props,
-            QJsonArray{QStringLiteral("summary")}
-        );
+    for (const QString &sp : skillPaths) {
+        if (writeTextFile(sp, skillContent)) {
+            installedFiles.append(sp);
+        }
     }
 
     // 3. Register / update in ~/.gemini/config/mcp_config.json (Global Antigravity config)
@@ -698,6 +564,11 @@ bool McpAgentInstaller::installClaudeCodeConfig(
     return false;
 }
 
+QJsonArray McpAgentInstaller::getAllToolDefinitions()
+{
+    return getMcpAllToolDefinitions();
+}
+
 QString McpAgentInstaller::generateManualMarkdown(const QString &executablePath)
 {
     const QString discoveryPath = QDir::toNativeSeparators(McpServer::discoveryFilePath());
@@ -712,7 +583,7 @@ QString McpAgentInstaller::generateManualMarkdown(const QString &executablePath)
         "## 1. Overview\n\n"
         "Ensemble is a desktop writing suite and AO3 Work Skin composer. By exposing an embedded Model Context Protocol (MCP) server, "
         "AI agents can inspect the current project, read and write chapters in real-time with automated AO3 HTML sanitization, "
-        "tweak custom CSS work skins, and run linting diagnostics.\n\n"
+        "tweak custom CSS work skins, manage narrative lore graphs, and run linting diagnostics.\n\n"
         "---\n\n"
         "## 2. Connection Methods\n\n"
         "### A. Direct WebSocket Connection\n"
@@ -751,31 +622,84 @@ QString McpAgentInstaller::generateManualMarkdown(const QString &executablePath)
         "| `get_project_summary` | *(none)* | Returns project title, author, chapter count, word counts, and unsaved changes state. |\n"
         "| `list_chapters` | *(none)* | Lists all chapters with their index, UUID, title, order, and word count. |\n"
         "| `get_chapter` | `chapterIndex` (int), `format` (str, opt) | Retrieves HTML and/or plain text content of a chapter ('all', 'html', or 'text'). |\n"
-        "| `update_chapter_html` | `chapterIndex` (int), `html` (str) | Updates chapter body. Automatically sanitized; returns sanitized HTML, word count, and stripped tags/attributes. |\n"
+        "| `update_chapter_html` | `chapterIndex` (int), `html` (str) | Updates chapter body. Automatically sanitized against AO3 tag whitelist; returns sanitized HTML, word count, and stripped tags/attributes. |\n"
         "| `add_chapter` | `title` (str, opt) | Appends a new chapter to the active project. |\n"
         "| `delete_chapter` | `chapterIndex` (int) | Deletes a chapter by index and returns full updated chapter order. |\n"
         "| `reorder_chapters` | `fromIndex` (int), `toIndex` (int) | Reorders chapters and returns full updated chapter order. |\n"
         "| `get_workskin_css` | *(none)* | Retrieves the custom AO3 Work Skin stylesheet. |\n"
-        "| `set_workskin_css` | `css` (str) | Updates the Work Skin CSS and triggers an instant Chromium live re-render. |\n"
+        "| `set_workskin_css` | `css` (str), `allowMalformed` (bool, opt) | Updates the Work Skin CSS with syntax validation and triggers an instant Chromium live re-render. |\n"
         "| `get_problems` | *(none)* | Returns current HTML & CSS lint diagnostics with affectedChapters list and lastUpdated timestamp. |\n"
-        "| `save_project` | *(none)* | Saves active project to `.ao3proj` on disk. |\n"
+        "| `load_project` | `filePath` (str), `saveCurrent` (bool, opt) | Loads an `.ao3proj` story archive from disk into Ensemble, updating chapters, stylesheet, tags, lore graph, and git history. |\n"
+        "| `save_project` | `filePath` (str, opt), `commitMessage` (str, opt), `author` (str, opt), `saveCopy` (bool, opt) | Saves active project to `.ao3proj` on disk. Supports recording a git-like commit into `history.cmt`. If `saveCopy: true`, exports a copy without switching active project. |\n"
+        "| `get_project_history` | `limit` (int, opt) | Retrieves the git-like version history from `history.cmt`, parsed into structured commit objects (hash, author, date, message) and raw log text. |\n"
+        "| `add_history_commit` | `message` (str), `author` (str, opt) | Records a new git-like commit entry into `history.cmt` with a 12-char commit hash, author, ISO timestamp, and message. |\n"
         "| `reload_project` | *(none)* | Discards unsaved changes and reloads active project from disk. |\n"
         "| `get_preview_screenshot` | `chapterIndex` (int, opt) | Captures rendered Chromium PreviewPane as a base64 PNG MCP image block for visual inspection. |\n"
         "| `get_agent_presence` | *(none)* | Inspects all active AI agents currently connected to Ensemble (Antigravity, Claude, etc.) for multi-agent presence and co-working. |\n"
         "| `register_agent_presence` | `agentName` (str, opt), `role` (str, opt), `workingNote` (str, opt) | Announces or updates your agent identity, role (co-author, reviewer, etc.), and current work note for multi-model co-working. |\n"
         "| `get_agentic_summary` | *(none)* | Retrieves storage quotas (5 MB shared, 20 MB localized), current byte usage, index metadata, list of shared files, and registered localized agent directories in .ao3proj agentic-datas. |\n"
-        "| `read_agentic_file` | `path` (str), `scope` (str, opt), `encoding` (str, opt) | Reads a file from .ao3proj agentic-datas ('shared/' or an agent's private '<agent>/' memory directory). |\n"
-        "| `write_agentic_file` | `path` (str), `content` (str), `scope` (str, opt), `encoding` (str, opt) | Writes or updates a file in .ao3proj agentic-datas ('shared/' for multi-model collaboration or '<agent>/' for private memory). Strictly enforces the 5 MB shared cap and 20 MB localized cap. |\n"
-        "| `append_agent_history` | `summary` (str), `agentName` (str, opt), `model` (str, opt), `role` (str, opt), `action` (str, opt) | Appends a structured interaction entry to agent_model_history.xml in .ao3proj. |\n"
+        "| `read_agentic_file` | `path` (str), `scope` (str, opt), `encoding` (str, opt) | Reads a file from .ao3proj agentic-datas ('shared/' by default, or an agent's private '<agent>/' memory directory). |\n"
+        "| `write_agentic_file` | `path` (str), `content` (str), `scope` (str, opt), `encoding` (str, opt) | Writes or updates a file in .ao3proj agentic-datas ('shared/' by default for multi-model collaboration or '<agent>/' for private memory). Strictly enforces the 5 MB shared cap and 20 MB localized cap. |\n"
+        "| `append_agent_history` | `summary` (str), `agentName` (str, opt), `model` (str, opt), `role` (str, opt), `action` (str, opt), `chapterIndex` (int, opt), `wordCountDelta` (int, opt), `details` (str, opt) | Appends a structured interaction entry to agent_model_history.xml in .ao3proj. |\n"
+        "| `get_agent_history` | `limit` (int, opt), `agentName` (str, opt), `action` (str, opt) | Retrieves audit trail and recent changes by each model from agent_model_history.xml, including timestamps, actions, deltas, and summaries. |\n"
+        "| `post_agent_thought` | `thought` (str), `category` (str, opt), `target` (str, opt) | Broadcasts an AI model's internal reasoning, critique, pacing feedback, or plan to be displayed live in Ensemble's Agent Thoughts Monitor UI. |\n"
+        "| `get_lore_graph` | `name` (str, opt), `includeGrammar` (bool, opt) | Retrieves the story lore and narrative graph in custom `.grph` DSL syntax, JSON structure, and complete grammar specification. |\n"
+        "| `update_lore_graph` | `dsl` (str), `name` (str, opt), `autoLayout` (bool, opt) | Replaces or updates the `.grph` narrative graph DSL with full syntax and semantic validation. Strictly adheres to unique 8-byte magic header `\\x89GRPH\\x01\\r\\n` and updates live desktop canvas. |\n"
+        "| `add_lore_node` | `id` (str), `label` (str), `type` (str, opt), `x` (num, opt), `y` (num, opt), `shape` (str, opt), `color` (str, opt), `notes` (str, opt) | Adds or updates an individual node block in the story's lore graph with position, shape, color, and optional notes. |\n"
+        "| `connect_lore_nodes` | `fromNodeId` (str), `toNodeId` (str), `arrow` (str, opt), `label` (str, opt), `style` (str, opt), `color` (str, opt) | Creates or updates a relationship connector between two lore nodes (`->`, `<->`, `--`, `-x` conflict). |\n"
+        "| `move_lore_node` | `nodeId` (str), `x` (num), `y` (num), `graphName` (str, opt) | Updates the 2D canvas coordinates `pos(x, y)` of a movable block in the lore graph. |\n"
+        "| `get_lore_data` | `section` (str, opt), `query` (str, opt) | Retrieves narrative lore data from the `.ao3proj` lore/ directory files (`lore_data.json`, `history.json`, `conflicts.json`, `resolved.json`, `plans.json`, `references.json`, `metadata.xml`). |\n"
+        "| `manage_lore_data` | `action` (str), *payload* | Performs CRUD actions on story lore entities, timeline history, plot conflicts & resolutions, and narrative follow-up plans. |\n"
+        "| `update_project_metadata` | `rating` (str), `archiveWarnings` (arr), `categories` (arr), `fandoms` (arr), `relationships` (arr), `characters` (arr), `tags` (arr) | Updates standard AO3 work metadata tags stored in `metadata.xml`. |\n"
+        "| `list_image_embeds` | `chapterIndex` (int, opt) | Lists all external image embeds across chapters in the project (or for a specific chapter). |\n"
+        "| `insert_image_embed` | `chapterIndex` (int), `url` (str), `alt` (str, opt), `title` (str, opt), `width` (int, opt), `height` (int, opt), `alignment` (str, opt), `wrapInLink` (bool, opt), `position` (str, opt) | Inserts an AO3-compliant external image URL attachment into a chapter with clean `<img>` tags and optional link/alignment wrapping. |\n"
         "| `test_firewall_connection` | *(none)* | Probes the local WebSocket loopback socket and reports latency or firewall blocks. |\n\n"
         "---\n\n"
-        "## 4. Multi-Agent Co-Working & Presence Awareness\n\n"
+        "## 4. Lore Graph & Narrative Worldbuilding (`.grph`)\n\n"
+        "Ensemble provides an independent narrative graphing engine and DSL format (`.grph`) designed specifically for storyboards, relationship tracking, lore mapping, and narrative follow-ups.\n\n"
+        "### Unique File Signature (Magic Bytes)\n"
+        "`.grph` files begin with an 8-byte binary signature:\n"
+        "`\\x89GRPH\\x01\\r\\n` (`0x89, 0x47, 0x52, 0x50, 0x48, 0x01, 0x0D, 0x0A`).\n\n"
+        "### Language Grammar & Syntax\n"
+        "```text\n"
+        "graph \"Story Lore & Narrative Arc\" [direction=LR]\n\n"
+        "# Nodes (Story Blocks with 2D positions)\n"
+        "node protagonist [label=\"Hero\", type=\"character\", pos(100, 150), shape=\"rounded\", color=\"#3b82f6\", notes=\"Main character\"]\n"
+        "node inciting_incident [label=\"Call to Adventure\", type=\"event\", pos(400, 150), shape=\"diamond\", color=\"#f59e0b\"]\n\n"
+        "# Connectors (Relationships & Narrative Flows)\n"
+        "protagonist -> inciting_incident [label=\"triggers\", relation=\"causes\", style=\"solid\", color=\"#94a3b8\"]\n"
+        "hero -x antagonist [label=\"sworn enemies\", relation=\"conflict\", style=\"dashed\", color=\"#ef4444\"]\n\n"
+        "# Boxes (Grouping Containers)\n"
+        "box academy [label=\"Royal Knight Academy\", pos(80, 100), size(600, 300), color=\"#8b5cf6\"] {\n"
+        "    protagonist\n"
+        "    inciting_incident\n"
+        "}\n\n"
+        "# Follow-up Hooks for Story Chapters\n"
+        "followup inciting_incident [targetChapter=2, status=\"pending\", note=\"Establish character stakes and motivation.\"]\n"
+        "```\n\n"
+        "---\n\n"
+        "## 5. Lore Directory Structure in `.ao3proj`\n\n"
+        "Inside every `.ao3proj` archive, the `lore/` directory manages narrative continuity:\n"
+        "```text\n"
+        "lore/\n"
+        "├── lore_data.json       (Entities: Characters, Locations, Factions, Artifacts, Concepts)\n"
+        "├── history.json         (Backstory events & timeline chronology: summary, impact, timestamp)\n"
+        "├── conflicts.json       (Detected canon inconsistencies & plot discrepancies)\n"
+        "├── resolved.json        (Resolved conflicts and definitive author canon rulings)\n"
+        "├── plans.json           (Story follow-up threads: loreThread, targetChapter, status)\n"
+        "├── references.json      (Canon sources, world codex citations: source, citation, notes)\n"
+        "├── metadata.xml         (Lore manifest and chapter integration descriptors)\n"
+        "└── graphs/\n"
+        "    └── data.grph        (Primary narrative lore graph with \\x89GRPH\\x01\\r\\n magic bytes)\n"
+        "```\n\n"
+        "---\n\n"
+        "## 6. Multi-Agent Co-Working & Presence Awareness\n\n"
         "Ensemble supports multiple concurrently connected AI agents (for example, **Gemini Antigravity** and **Claude** running simultaneously). Agents can:\n"
         "1. Discover each other using `get_agent_presence` (or the `ensemble://agents` resource).\n"
         "2. Announce their role and current focus using `register_agent_presence` (e.g. `role: 'co-author'`, `workingNote: 'Drafting chapter 2 dialogue'`).\n"
         "3. Check what other models are working on to divide tasks effectively and prevent conflicting edits.\n\n"
         "---\n\n"
-        "## 5. Agentic Data & Coroutine Shared Storage (`agentic-datas`)\n\n"
+        "## 7. Agentic Data & Coroutine Shared Storage (`agentic-datas`)\n\n"
         "Every `.ao3proj` project container contains a dedicated `agentic-datas` attribute:\n"
         "```text\n"
         ".ao3proj\n"
@@ -794,15 +718,23 @@ QString McpAgentInstaller::generateManualMarkdown(const QString &executablePath)
         "- **Localized Agent Data (`agentic-datas/<agent>/`)**: Hard cap of **20 MB** (20,971,520 bytes).\n"
         "Attempts to write files exceeding these caps are automatically rejected with a descriptive error.\n\n"
         "---\n\n"
-        "## 6. Available Resources\n\n"
+        "## 8. Model Audit Trail & Contribution History\n\n"
+        "All model interactions, edits, and milestones are audited in `agent_model_history.xml`:\n"
+        "- Tracked fields: `timestamp`, `agent`, `model`, `role`, `action`, `chapterIndex`, `wordCountDelta`, `strippedTags`, `summary`.\n"
+        "- Query audit log via `get_agent_history(limit, agentName, action)`.\n"
+        "- Manually record interactions via `append_agent_history(summary, ...)`.\n\n"
+        "---\n\n"
+        "## 9. Available Resources\n\n"
         "- `ensemble://project` — Current project metadata (JSON)\n"
         "- `ensemble://workskin/css` — Current Work Skin stylesheet (CSS)\n"
         "- `ensemble://problems` — Active problem diagnostics and lint errors (JSON)\n"
         "- `ensemble://agents` — Real-time list of all connected AI agents and presence state (JSON)\n"
         "- `ensemble://agentic/index` — Storage index, quotas (5MB shared / 20MB localized), and file listings (JSON)\n"
-        "- `ensemble://agentic/history` — Agent interaction and contribution log (XML)\n\n"
+        "- `ensemble://agentic/history` — Agent interaction and contribution log (XML)\n"
+        "- `ensemble://lore/graph` — Active narrative DSL script and mapping from lore/graphs/data.grph (Text)\n"
+        "- `ensemble://lore/data` — Story entities, history, conflicts, plans, and references (JSON)\n\n"
         "---\n\n"
-        "## 7. Troubleshooting & Diagnostics\n\n"
+        "## 10. Troubleshooting & Diagnostics\n\n"
         "- **Diagnose Connection via CLI**:\n"
         "  - **Windows (PowerShell / Command Prompt)**: `ensemble.exe --mcp-status`\n"
         "  - **Linux / macOS (Terminal)**: `ensemble --mcp-status`\n\n"

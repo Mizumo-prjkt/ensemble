@@ -263,15 +263,52 @@ int main(int argc, char *argv[])
     // 7. Test SingleInstanceManager socket naming, PID tracking, and process lifecycle
     {
         assert(!SingleInstanceManager::socketName().isEmpty());
+        assert(!SingleInstanceManager::socketPath().isEmpty());
+        assert(!SingleInstanceManager::runtimeDir().isEmpty());
         assert(!SingleInstanceManager::pidFilePath().isEmpty());
         assert(SingleInstanceManager::isProcessRunning(QCoreApplication::applicationPid()) == true);
         assert(SingleInstanceManager::isProcessRunning(99999999) == false);
+
+        // Verify process name verification: self is recognized as valid process
+        assert(SingleInstanceManager::isEnsembleProcess(QCoreApplication::applicationPid()) == true);
+        assert(SingleInstanceManager::isEnsembleProcess(99999999) == false);
+
+#if defined(Q_OS_LINUX)
+        // Linux init / systemd (PID 1) is running, but must NOT be recognized as an Ensemble process!
+        assert(SingleInstanceManager::isEnsembleProcess(1) == false);
+        assert(SingleInstanceManager::isProcessRunning(1) == false);
+
+        // Boot ID verification
+        const QString bootId = SingleInstanceManager::currentBootId();
+        assert(!bootId.isEmpty());
+#endif
+
+        // Test stale boot ID PID file cleanup
+        {
+            const QString pidPath = SingleInstanceManager::pidFilePath();
+            QJsonObject staleMeta;
+            staleMeta[QStringLiteral("pid")] = 12345;
+            staleMeta[QStringLiteral("bootId")] = QStringLiteral("stale-boot-id-simulated-99999");
+            staleMeta[QStringLiteral("appPath")] = QStringLiteral("/fake/path/ensemble");
+
+            QFile f(pidPath);
+            if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                f.write(QJsonDocument(staleMeta).toJson(QJsonDocument::Compact));
+                f.close();
+            }
+            assert(QFile::exists(pidPath));
+
+            // checkAndHandle should detect stale boot ID, clean it up, and proceed as primary
+            SingleInstanceAction staleAction = SingleInstanceManager::checkAndHandle(true);
+            assert(staleAction == SingleInstanceAction::ProceedAsPrimary);
+            assert(!QFile::exists(pidPath));
+        }
 
         // Test headless checkAndHandle
         SingleInstanceAction action = SingleInstanceManager::checkAndHandle(true);
         assert(action == SingleInstanceAction::ProceedAsPrimary || action == SingleInstanceAction::ExitApplication);
 
-        std::cout << "✓ SingleInstanceManager socket, PID tracking, and process lifecycle verified." << std::endl;
+        std::cout << "✓ SingleInstanceManager socket, boot ID validation, PID tracking, and process lifecycle verified." << std::endl;
     }
 
     // 8. Test McpServer lifecycle, port acquisition, loopback self-test, and McpAgentInstaller
