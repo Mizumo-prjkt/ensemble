@@ -52,9 +52,10 @@ claude mcp add ensemble "/home/miku/Documents/ao3-typewriter/build/ensemble" --m
 | `set_workskin_css` | `css` (str) | Updates the Work Skin CSS and triggers an instant Chromium live re-render. |
 | `get_problems` | *(none)* | Returns current HTML & CSS lint diagnostics with affectedChapters list and lastUpdated timestamp. |
 | `load_project` | `filePath` (str), `saveCurrent` (bool, opt) | Loads an `.ao3proj` story archive from disk into Ensemble, updating chapters, stylesheet, tags, lore graph, and git history. |
-| `save_project` | `filePath` (str, opt), `commitMessage` (str, opt), `author` (str, opt) | Saves active project to `.ao3proj` on disk. Supports recording a git-like commit into `history.cmt`. |
-| `get_project_history` | `limit` (int, opt) | Retrieves the git-like version history from `history.cmt`, parsed into structured commit objects (hash, author, date, message) and raw log text. |
-| `add_history_commit` | `message` (str), `author` (str, opt) | Records a new git-like commit entry into `history.cmt` with a 12-char commit hash, author, ISO timestamp, and message. |
+| `save_project` | `filePath` (str, opt), `commitMessage` (str, opt), `author` (str, opt), `saveCopy` (bool, opt) | Saves active project to `.ao3proj` on disk. Supports recording a snapshot into `history.cmt` and `history/<hash>.diff`. If `saveCopy: true`, exports without switching active project. |
+| `get_project_history` | `limit` (int, opt) | Retrieves project snapshot history from `history.cmt`, parsed into structured snapshot objects (`hash`, `previousCommitHash`, `author`, `date`, `localDate`, `message`, `diffAvailable`) and raw log text. |
+| `add_history_commit` | `message` (str), `author` / `agentId` (str) | Records a new snapshot entry into `history.cmt` and `history/<hash>.diff`. **REQUIRED**: Agents must provide their agent ID/tag (e.g. `claude-desktop`, `antigravity`, or `<agentName>@<host>`). Returns `hash` and `previousCommitHash`. |
+| `get_snapshot_diff` | `hash` (str) | Retrieves line-by-line unified diff from `history/<hash>.diff`. If created before snapshots were introduced or deleted, safely returns explanatory message. |
 | `reload_project` | *(none)* | Discards unsaved changes and reloads active project from disk. |
 | `get_preview_screenshot` | `chapterIndex` (int, opt) | Captures rendered Chromium PreviewPane as a base64 PNG MCP image block for visual inspection. |
 | `get_agent_presence` | *(none)* | Inspects all active AI agents currently connected to Ensemble (Antigravity, Claude, etc.) for multi-agent presence and co-working. |

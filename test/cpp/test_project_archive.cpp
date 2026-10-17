@@ -645,6 +645,56 @@ int main(int argc, char *argv[]) {
     qDebug() << "✓ Successfully loaded older bare .ao3proj archive lacking modern lore/agentic data with automatic baseline defaults.";
   }
 
+  // 17. Test Snapshots: history/ directory in .ao3proj, diff generation, and author tagging
+  {
+    Ao3Project proj;
+    proj.resetToNew();
+    proj.setTitle(QStringLiteral("Snapshot Test Story"));
+    proj.setAuthor(QStringLiteral("TestAuthor"));
+    assert(!proj.snapshotDiffs().isEmpty());
+
+    // Modify chapter 1 and add chapter 2
+    proj.chapters()[0].setHtml(QStringLiteral("<p>Modified chapter line 1</p>\n<p>Added line 2</p>"));
+    proj.addChapter(QStringLiteral("Chapter 2"));
+    proj.chapters()[1].setHtml(QStringLiteral("<p>Brand new chapter 2 content</p>"));
+
+    // Create snapshot
+    const QString newHash = proj.appendHistoryCommit(QString(), QStringLiteral("Add chapter 2 and modify chapter 1"));
+    assert(!newHash.isEmpty());
+    assert(proj.snapshotDiffs().contains(newHash));
+    const QString diff = proj.snapshotDiff(newHash);
+    assert(diff.contains(QStringLiteral("--- a/chapters/")));
+    assert(diff.contains(QStringLiteral("+++ b/chapters/")));
+    assert(diff.contains(QStringLiteral("+<p>Added line 2</p>")));
+    assert(diff.contains(QStringLiteral("# Snapshot:")));
+    assert(diff.contains(QStringLiteral("@"))); // Author tag contains host tag
+
+    // Save project archive and verify history/<hash>.diff is saved
+    const QString snapProjPath = tempDir.filePath(QStringLiteral("snap_test.ao3proj"));
+    QString saveErr;
+    assert(ProjectSerializer::save(snapProjPath, proj, &saveErr));
+    assert(QFile::exists(snapProjPath));
+
+    // Inspect archive entries
+    QMap<QString, QByteArray> entries;
+    QString decErr;
+    assert(ZstdArchive::decompressArchive(snapProjPath, entries, &decErr));
+    assert(entries.contains(QStringLiteral("history.cmt")));
+    assert(entries.contains(QStringLiteral("history/%1.diff").arg(newHash)));
+
+    // Reload archive into fresh project
+    Ao3Project reloadedProj;
+    ProjectLoadReport rep = ProjectSerializer::loadWithValidation(snapProjPath, reloadedProj);
+    assert(rep.success);
+    assert(reloadedProj.snapshotDiffs().contains(newHash));
+    assert(reloadedProj.snapshotDiff(newHash) == diff);
+
+    // Verify safe fallback on non-existent hash
+    assert(reloadedProj.snapshotDiff(QStringLiteral("nonexistent12")).isEmpty());
+
+    qDebug() << "✓ Verified history/ diff snapshots, author tags, and persistence in .ao3proj archive.";
+  }
+
   qDebug() << "✓ All 3-Stage validation, magic byte verification, structural integrity, "
               "legacy compatibility, .ao3projasve recovery, agentic-datas, and Lore Graph tests passed successfully!";
   return 0;

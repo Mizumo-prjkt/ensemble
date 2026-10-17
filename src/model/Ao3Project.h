@@ -77,7 +77,18 @@ public:
 
     QString historyLog() const { return m_historyLog; }
     void setHistoryLog(const QString &log) { m_historyLog = log; }
-    void appendHistoryCommit(const QString &author, const QString &message);
+    QString appendHistoryCommit(const QString &author, const QString &message);
+    QString createSnapshot(const QString &author, const QString &message) { return appendHistoryCommit(author, message); }
+    QString latestCommitHash() const;
+
+    const QMap<QString, QString> &snapshotDiffs() const { return m_snapshotDiffs; }
+    QMap<QString, QString> &snapshotDiffs() { return m_snapshotDiffs; }
+    QString snapshotDiff(const QString &hash) const { return m_snapshotDiffs.value(hash); }
+    void setSnapshotDiff(const QString &hash, const QString &diffText) { m_snapshotDiffs.insert(hash, diffText); }
+
+    QMap<QString, QString> currentProjectState() const;
+    void setLastSnapshotState(const QMap<QString, QString> &state) { m_lastSnapshotState = state; }
+    const QMap<QString, QString> &lastSnapshotState() const { return m_lastSnapshotState; }
 
     QString workSkinCss() const { return m_workSkinCss; }
     void setWorkSkinCss(const QString &css) { m_workSkinCss = css; }
@@ -141,6 +152,8 @@ private:
     QString m_lastModifiedBy;
     QDateTime m_lastModifiedAt;
     QString m_historyLog;
+    QMap<QString, QString> m_snapshotDiffs;
+    QMap<QString, QString> m_lastSnapshotState;
     QString m_workSkinCss;
     AgenticData m_agenticData;
     LoreManager m_lore;

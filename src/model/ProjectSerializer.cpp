@@ -350,6 +350,19 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
         } else {
             project.setHistoryLog(QString());
         }
+
+        // Deserialize history/*.diff snapshot diff files
+        project.snapshotDiffs().clear();
+        for (auto it = entries.constBegin(); it != entries.constEnd(); ++it) {
+            const QString &key = it.key();
+            if (key.startsWith(QStringLiteral("history/")) && key.endsWith(QStringLiteral(".diff"))) {
+                const QString hash = key.mid(8, key.length() - 8 - 5);
+                if (!hash.isEmpty()) {
+                    project.setSnapshotDiff(hash, QString::fromUtf8(it.value()));
+                }
+            }
+        }
+
         if (entries.contains(QStringLiteral("stylesheet/workskin.css"))) {
             project.setWorkSkinCss(QString::fromUtf8(entries.value(QStringLiteral("stylesheet/workskin.css"))));
         }
@@ -474,6 +487,7 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
         project.setFilePath(path);
         project.setDirty(false);
         project.setLegacyFormat(false);
+        project.setLastSnapshotState(project.currentProjectState());
         report.success = true;
         return report;
     }
@@ -714,8 +728,11 @@ bool ProjectSerializer::save(const QString &path, const Ao3Project &project, QSt
 
     fileEntries.insert(QStringLiteral("metadata.xml"), xmlBytes);
 
-    // 2. Add history.cmt
+    // 2. Add history.cmt and history/*.diff snapshots
     fileEntries.insert(QStringLiteral("history.cmt"), project.historyLog().toUtf8());
+    for (auto it = project.snapshotDiffs().constBegin(); it != project.snapshotDiffs().constEnd(); ++it) {
+        fileEntries.insert(QStringLiteral("history/%1.diff").arg(it.key()), it.value().toUtf8());
+    }
 
     // 3. Add stylesheet/workskin.css
     fileEntries.insert(QStringLiteral("stylesheet/workskin.css"), project.workSkinCss().toUtf8());

@@ -1,6 +1,6 @@
 #include "Ao3HtmlImporter.h"
-
 #include "Ao3HtmlSanitizer.h"
+#include "themes/ThemeManager.h"
 
 #include <QAbstractTextDocumentLayout>
 #include <QRegularExpression>
@@ -156,10 +156,17 @@ void Ao3HtmlImporter::importHtml(QTextEdit *editor, const QString &rawHtml) {
 
         QTextCharFormat newFmt;
         newFmt.setProperty(CssClassProperty, foundClass);
-        newFmt.setBackground(QColor(40, 42, 54));   // #282a36 dark badge bg
-        newFmt.setForeground(QColor(80, 250, 123)); // #50fa7b emerald text
+        const bool isDark = ThemeManager::instance().isDarkMode();
+        if (isDark) {
+          newFmt.setBackground(QColor(30, 41, 59, 200));
+          newFmt.setForeground(QColor(125, 211, 252));
+          newFmt.setUnderlineColor(QColor(56, 189, 248));
+        } else {
+          newFmt.setBackground(QColor(224, 242, 254));
+          newFmt.setForeground(QColor(3, 105, 161));
+          newFmt.setUnderlineColor(QColor(2, 132, 199));
+        }
         newFmt.setUnderlineStyle(QTextCharFormat::DashUnderline);
-        newFmt.setUnderlineColor(QColor(139, 233, 253)); // #8be9fd cyan dash
 
         // Remove the marker from font families
         QStringList cleanFamilies;

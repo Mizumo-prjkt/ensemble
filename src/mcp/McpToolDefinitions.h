@@ -271,11 +271,11 @@ inline QJsonArray getMcpAllToolDefinitions()
         tools.append(t);
     }
 
-    // 13. get_project_history
+    // 13. get_project_history (snapshots)
     {
         QJsonObject t;
         t[QStringLiteral("name")] = QStringLiteral("get_project_history");
-        t[QStringLiteral("description")] = QStringLiteral("Retrieves the git-like version history from history.cmt, parsed into structured commit objects (hash, author, date, message) and raw log text.");
+        t[QStringLiteral("description")] = QStringLiteral("Retrieves version snapshot history from history.cmt, parsed into structured commit/snapshot objects (hash, previousCommitHash, author, date, localDate, message, diffAvailable) and raw log text. Allows inspecting commit IDs and parent/previous commit IDs.");
         QJsonObject schema;
         schema[QStringLiteral("type")] = QStringLiteral("object");
         QJsonObject props;
@@ -289,11 +289,11 @@ inline QJsonArray getMcpAllToolDefinitions()
         tools.append(t);
     }
 
-    // 14. add_history_commit
+    // 14. add_history_commit (snapshots)
     {
         QJsonObject t;
         t[QStringLiteral("name")] = QStringLiteral("add_history_commit");
-        t[QStringLiteral("description")] = QStringLiteral("Records a new git-like commit entry into history.cmt for the project with a unique commit hash, author, ISO timestamp, and message.");
+        t[QStringLiteral("description")] = QStringLiteral("Records a new snapshot/commit entry into history.cmt and history/<hash>.diff. NOTE: Calling agents are REQUIRED to identify themselves by providing their agent tag or ID (e.g. 'claude-desktop', 'antigravity-worker', or '<agentName>@<host>') in 'author' or 'agentId'. Returns new commit hash and previousCommitHash.");
         QJsonObject schema;
         schema[QStringLiteral("type")] = QStringLiteral("object");
         QJsonObject props;
@@ -303,10 +303,33 @@ inline QJsonArray getMcpAllToolDefinitions()
         props[QStringLiteral("message")] = msgProp;
         QJsonObject authProp;
         authProp[QStringLiteral("type")] = QStringLiteral("string");
-        authProp[QStringLiteral("description")] = QStringLiteral("Author name for this commit (defaults to calling agent).");
+        authProp[QStringLiteral("description")] = QStringLiteral("Required agent tag or ID (e.g. 'claude-desktop', 'antigravity', or '<agentName>@<host>'). Identifies the calling agent.");
         props[QStringLiteral("author")] = authProp;
+        QJsonObject agentIdProp;
+        agentIdProp[QStringLiteral("type")] = QStringLiteral("string");
+        agentIdProp[QStringLiteral("description")] = QStringLiteral("Alias for author. The agent's identifier.");
+        props[QStringLiteral("agentId")] = agentIdProp;
         schema[QStringLiteral("properties")] = props;
         schema[QStringLiteral("required")] = QJsonArray{QStringLiteral("message")};
+        schema[QStringLiteral("additionalProperties")] = false;
+        t[QStringLiteral("inputSchema")] = schema;
+        tools.append(t);
+    }
+
+    // 14b. get_snapshot_diff
+    {
+        QJsonObject t;
+        t[QStringLiteral("name")] = QStringLiteral("get_snapshot_diff");
+        t[QStringLiteral("description")] = QStringLiteral("Retrieves the line-by-line unified diff changes recorded for a specific snapshot/commit hash from history/<hash>.diff. If no diff snapshot exists for this commit, returns a safe explanation.");
+        QJsonObject schema;
+        schema[QStringLiteral("type")] = QStringLiteral("object");
+        QJsonObject props;
+        QJsonObject hashProp;
+        hashProp[QStringLiteral("type")] = QStringLiteral("string");
+        hashProp[QStringLiteral("description")] = QStringLiteral("The 12-character snapshot/commit hash to retrieve the line-by-line diff for.");
+        props[QStringLiteral("hash")] = hashProp;
+        schema[QStringLiteral("properties")] = props;
+        schema[QStringLiteral("required")] = QJsonArray{QStringLiteral("hash")};
         schema[QStringLiteral("additionalProperties")] = false;
         t[QStringLiteral("inputSchema")] = schema;
         tools.append(t);

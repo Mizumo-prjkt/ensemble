@@ -8,6 +8,7 @@
 #include "model/ProjectSerializer.h"
 #include "ui/CssEditorPane.h"
 #include "ui/MainWindow.h"
+#include "utils/DiffUtil.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -200,10 +201,12 @@ QJsonObject McpHandler::handleToolsCall(QWebSocket *client, const QJsonValue &id
         toolResult = toolSaveProject(client, args);
     } else if (toolName == QStringLiteral("reload_project") || toolName == QStringLiteral("discard_changes")) {
         toolResult = toolReloadProject(args);
-    } else if (toolName == QStringLiteral("get_project_history") || toolName == QStringLiteral("get_history_commits")) {
+    } else if (toolName == QStringLiteral("get_project_history") || toolName == QStringLiteral("get_history_commits") || toolName == QStringLiteral("get_snapshots")) {
         toolResult = toolGetProjectHistory(args);
-    } else if (toolName == QStringLiteral("add_history_commit") || toolName == QStringLiteral("commit_history")) {
+    } else if (toolName == QStringLiteral("add_history_commit") || toolName == QStringLiteral("commit_history") || toolName == QStringLiteral("add_snapshot") || toolName == QStringLiteral("create_snapshot")) {
         toolResult = toolAddHistoryCommit(client, args);
+    } else if (toolName == QStringLiteral("get_snapshot_diff") || toolName == QStringLiteral("get_commit_diff")) {
+        toolResult = toolGetSnapshotDiff(args);
     } else if (toolName == QStringLiteral("get_preview_screenshot")) {
         toolResult = toolGetPreviewScreenshot(args);
     } else if (toolName == QStringLiteral("get_agent_presence") || toolName == QStringLiteral("get_connected_agents")) {
@@ -1131,9 +1134,21 @@ QJsonObject McpHandler::toolGetProjectHistory(const QJsonObject &args)
 
     const int limit = args.value(QStringLiteral("limit")).toInt(50);
     const QString history = m_mainWindow->project().historyLog();
+    const Ao3Project &proj = m_mainWindow->project();
 
     QJsonArray commitsArray;
     const QStringList blocks = history.split(QStringLiteral("\ncommit "), Qt::SkipEmptyParts);
+
+    // Pre-extract hashes to associate previousCommitHash (parent)
+    QStringList allHashes;
+    for (int i = 0; i < blocks.size(); ++i) {
+        QString block = blocks.at(i);
+        if (i == 0 && block.startsWith(QStringLiteral("commit "))) {
+            block = block.mid(7);
+        }
+        allHashes.append(block.split(QLatin1Char('\n')).value(0).trimmed());
+    }
+
     for (int i = 0; i < blocks.size() && commitsArray.size() < limit; ++i) {
         QString block = blocks.at(i);
         if (i == 0 && block.startsWith(QStringLiteral("commit "))) {
@@ -1142,6 +1157,7 @@ QJsonObject McpHandler::toolGetProjectHistory(const QJsonObject &args)
 
         const QStringList lines = block.split(QLatin1Char('\n'));
         const QString hash = lines.value(0).trimmed();
+        const QString previousHash = (i + 1 < allHashes.size()) ? allHashes.at(i + 1) : QString();
         QString author;
         QString date;
         QString msg;
@@ -1158,16 +1174,30 @@ QJsonObject McpHandler::toolGetProjectHistory(const QJsonObject &args)
             }
         }
 
+        bool hasDiff = !proj.snapshotDiff(hash).isEmpty();
+        if (!hasDiff) {
+            for (auto it = proj.snapshotDiffs().constBegin(); it != proj.snapshotDiffs().constEnd(); ++it) {
+                if (it.key().startsWith(hash) || hash.startsWith(it.key())) {
+                    hasDiff = true;
+                    break;
+                }
+            }
+        }
+
         QJsonObject c;
         c[QStringLiteral("hash")] = hash;
+        c[QStringLiteral("previousCommitHash")] = previousHash;
         c[QStringLiteral("author")] = author;
         c[QStringLiteral("date")] = date;
+        c[QStringLiteral("localDate")] = DiffUtil::formatIsoDateWithLocal(date);
         c[QStringLiteral("message")] = msg;
+        c[QStringLiteral("diffAvailable")] = hasDiff;
         commitsArray.append(c);
     }
 
     QJsonObject res;
     res[QStringLiteral("totalCommits")] = commitsArray.size();
+    res[QStringLiteral("latestCommitHash")] = commitsArray.isEmpty() ? QString() : commitsArray.first().toObject().value(QStringLiteral("hash")).toString();
     res[QStringLiteral("commits")] = commitsArray;
     res[QStringLiteral("rawHistory")] = history;
     return makeToolJsonResult(res);
@@ -1185,35 +1215,68 @@ QJsonObject McpHandler::toolAddHistoryCommit(QWebSocket *client, const QJsonObje
     }
 
     QString author = args.value(QStringLiteral("author")).toString().trimmed();
+    if (author.isEmpty()) {
+        author = args.value(QStringLiteral("agentId")).toString().trimmed();
+    }
     if (author.isEmpty() && client && m_server) {
         const auto sess = m_server->agentSessionForClient(client);
-        if (!sess.name.isEmpty()) {
+        if (!sess.name.isEmpty() && sess.name != QStringLiteral("Anonymous")) {
             author = sess.name;
         }
     }
+
     if (author.isEmpty()) {
-        author = m_mainWindow->project().author().isEmpty() ? QStringLiteral("AI Agent") : m_mainWindow->project().author();
+        return makeToolResult(QStringLiteral("Agent identification required: Every MCP snapshot/commit must specify the agent's ID or tag via the 'author' or 'agentId' parameter (e.g. 'claude-desktop', 'antigravity-worker', or '<agentName>@<host>')."), true);
     }
 
-    m_mainWindow->project().appendHistoryCommit(author, message);
+    const QString previousCommitHash = m_mainWindow->project().latestCommitHash();
+    const QString newHash = m_mainWindow->project().appendHistoryCommit(author, message);
     m_mainWindow->project().markDirtyBy(author);
     m_mainWindow->updateWindowTitle();
 
-    // Extract newest commit from head of history
-    const QString history = m_mainWindow->project().historyLog();
-    QString hash;
-    QRegularExpression reHash(QStringLiteral("commit ([0-9a-fA-F]+)"));
-    const auto m = reHash.match(history);
-    if (m.hasMatch()) {
-        hash = m.captured(1);
+    QJsonObject res;
+    res[QStringLiteral("success")] = true;
+    res[QStringLiteral("hash")] = newHash;
+    res[QStringLiteral("previousCommitHash")] = previousCommitHash;
+    res[QStringLiteral("author")] = author;
+    res[QStringLiteral("message")] = message;
+    res[QStringLiteral("timestamp")] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    res[QStringLiteral("localTimestamp")] = DiffUtil::formatIsoDateWithLocal(res[QStringLiteral("timestamp")].toString());
+    return makeToolJsonResult(res);
+}
+
+QJsonObject McpHandler::toolGetSnapshotDiff(const QJsonObject &args)
+{
+    if (!m_mainWindow || !m_mainWindow->hasActiveProject()) {
+        return makeToolResult(QStringLiteral("No project is currently open in Ensemble."), true);
+    }
+
+    const QString hash = args.value(QStringLiteral("hash")).toString().trimmed();
+    if (hash.isEmpty()) {
+        return makeToolResult(QStringLiteral("Missing required 'hash' parameter."), true);
+    }
+
+    const Ao3Project &proj = m_mainWindow->project();
+    QString diffText = proj.snapshotDiff(hash);
+    if (diffText.isEmpty()) {
+        for (auto it = proj.snapshotDiffs().constBegin(); it != proj.snapshotDiffs().constEnd(); ++it) {
+            if (it.key().startsWith(hash) || hash.startsWith(it.key())) {
+                diffText = it.value();
+                break;
+            }
+        }
+    }
+
+    if (diffText.isEmpty()) {
+        return makeToolResult(
+            QStringLiteral("No diff snapshot available for this commit. It may have been deleted by an external software, or this file was created before snapshots were introduced to this feature."),
+            true);
     }
 
     QJsonObject res;
     res[QStringLiteral("success")] = true;
     res[QStringLiteral("hash")] = hash;
-    res[QStringLiteral("author")] = author;
-    res[QStringLiteral("message")] = message;
-    res[QStringLiteral("timestamp")] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    res[QStringLiteral("diff")] = diffText;
     return makeToolJsonResult(res);
 }
 

@@ -1,6 +1,7 @@
 #include "ProjectPropertiesDialog.h"
 #include "ImageEmbedDialog.h"
 #include "model/Ao3Project.h"
+#include "utils/DiffUtil.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -76,7 +77,7 @@ void ProjectPropertiesDialog::setupUi()
     tabs->addTab(createTagsTab(), QStringLiteral("🏷️ AO3 Tags && Fandoms"));
     tabs->addTab(createImageEmbedsTab(), QStringLiteral("🖼️ Image Embeds"));
     tabs->addTab(createInfoTab(), QStringLiteral("📊 File Details"));
-    tabs->addTab(createHistoryTab(), QStringLiteral("📜 Git-like History (history.cmt)"));
+    tabs->addTab(createHistoryTab(), QStringLiteral("📸 Snapshots (history.cmt)"));
     mainLayout->addWidget(tabs);
 
     auto *btnBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -278,12 +279,12 @@ QWidget *ProjectPropertiesDialog::createHistoryTab()
     layout->setSpacing(8);
 
     auto *topBar = new QHBoxLayout();
-    auto *descLabel = new QLabel(QStringLiteral("Git-like commit timeline stored in <code>history.cmt</code>:"), widget);
+    auto *descLabel = new QLabel(QStringLiteral("Snapshot timeline stored in <code>history.cmt</code> and <code>history/</code>:"), widget);
     topBar->addWidget(descLabel);
 
     topBar->addStretch();
 
-    auto *newCommitBtn = new QPushButton(QStringLiteral("➕ New Commit…"), widget);
+    auto *newCommitBtn = new QPushButton(QStringLiteral("➕ New Snapshot…"), widget);
     connect(newCommitBtn, &QPushButton::clicked, this, &ProjectPropertiesDialog::onNewCommitClicked);
     topBar->addWidget(newCommitBtn);
 
@@ -293,7 +294,7 @@ QWidget *ProjectPropertiesDialog::createHistoryTab()
 
     m_commitTree = new QTreeWidget(splitter);
     m_commitTree->setHeaderLabels({
-        QStringLiteral("Commit Hash"),
+        QStringLiteral("Snapshot Hash"),
         QStringLiteral("Author"),
         QStringLiteral("Date"),
         QStringLiteral("Message")
@@ -310,11 +311,11 @@ QWidget *ProjectPropertiesDialog::createHistoryTab()
     m_commitDetailsEdit = new QTextEdit(splitter);
     m_commitDetailsEdit->setReadOnly(true);
     m_commitDetailsEdit->setFont(QFont(QStringLiteral("monospace"), 9));
-    m_commitDetailsEdit->setPlaceholderText(QStringLiteral("Select a commit above to view full details…"));
+    m_commitDetailsEdit->setPlaceholderText(QStringLiteral("Select a snapshot above to view full details and line-by-line diff…"));
     splitter->addWidget(m_commitDetailsEdit);
 
     splitter->setStretchFactor(0, 3);
-    splitter->setStretchFactor(1, 2);
+    splitter->setStretchFactor(1, 3);
 
     layout->addWidget(splitter, 1);
 
@@ -329,7 +330,7 @@ void ProjectPropertiesDialog::refreshHistoryList()
 
     const QString log = m_project->historyLog();
     if (log.trimmed().isEmpty()) {
-        m_commitDetailsEdit->setText(QStringLiteral("No commits recorded yet."));
+        m_commitDetailsEdit->setText(QStringLiteral("No snapshots recorded yet."));
         return;
     }
 
@@ -362,9 +363,11 @@ void ProjectPropertiesDialog::refreshHistoryList()
         auto *item = new QTreeWidgetItem(m_commitTree);
         item->setText(0, hash.left(12));
         item->setText(1, author);
-        item->setText(2, date);
+        item->setText(2, DiffUtil::formatIsoDateWithLocal(date));
         item->setText(3, msg);
         item->setData(0, Qt::UserRole, block);
+        item->setData(0, Qt::UserRole + 1, hash);
+        item->setData(0, Qt::UserRole + 2, date);
     }
 
     if (m_commitTree->topLevelItemCount() > 0) {
@@ -375,13 +378,79 @@ void ProjectPropertiesDialog::refreshHistoryList()
 void ProjectPropertiesDialog::onCommitSelected()
 {
     auto *item = m_commitTree->currentItem();
-    if (!item) {
+    if (!item || !m_project) {
         m_commitDetailsEdit->clear();
         return;
     }
 
     const QString block = item->data(0, Qt::UserRole).toString();
-    m_commitDetailsEdit->setText(QStringLiteral("commit %1").arg(block));
+    const QString fullHash = item->data(0, Qt::UserRole + 1).toString();
+    const QString shortHash = item->text(0).trimmed();
+    const QString rawDate = item->data(0, Qt::UserRole + 2).toString();
+
+    // Look for matching diff in m_snapshotDiffs
+    QString diffText = m_project->snapshotDiff(fullHash);
+    if (diffText.isEmpty() && !shortHash.isEmpty()) {
+        diffText = m_project->snapshotDiff(shortHash);
+    }
+    if (diffText.isEmpty()) {
+        for (auto it = m_project->snapshotDiffs().constBegin(); it != m_project->snapshotDiffs().constEnd(); ++it) {
+            if (it.key().startsWith(shortHash) || shortHash.startsWith(it.key())) {
+                diffText = it.value();
+                break;
+            }
+        }
+    }
+
+    QString html;
+    html += QStringLiteral("<div style='font-family: monospace; font-size: 11px; line-height: 1.45;'>");
+
+    // Format commit metadata
+    const QStringList lines = block.split(QLatin1Char('\n'));
+    for (const QString &l : lines) {
+        if (l.startsWith(QStringLiteral("Author: "))) {
+            html += QStringLiteral("<b>Author:</b> <span style='color: #38bdf8;'>%1</span><br/>").arg(l.mid(8).toHtmlEscaped());
+        } else if (l.startsWith(QStringLiteral("Date:   "))) {
+            html += QStringLiteral("<b>Date:</b>   <span style='color: #fbbf24;'>%1</span><br/>").arg(DiffUtil::formatIsoDateWithLocal(rawDate.isEmpty() ? l.mid(8).trimmed() : rawDate).toHtmlEscaped());
+        } else if (l.startsWith(QStringLiteral("    "))) {
+            html += QStringLiteral("<div style='margin: 8px 0; padding: 6px 10px; background: rgba(56,189,248,0.1); border-left: 3px solid #38bdf8; font-weight: bold;'>%1</div>").arg(l.trimmed().toHtmlEscaped());
+        } else if (!l.trimmed().isEmpty()) {
+            html += QStringLiteral("<b>snapshot <span style='color: #c084fc;'>%1</span></b><br/>").arg(l.toHtmlEscaped());
+        }
+    }
+
+    html += QStringLiteral("<hr style='border: none; border-top: 1px solid #475569; margin: 10px 0;'/>");
+
+    if (!diffText.isEmpty()) {
+        html += QStringLiteral("<b style='color: #94a3b8;'>📄 Line-by-Line Changes (Diff):</b><br/><br/>");
+        const QStringList diffLines = diffText.split(QLatin1Char('\n'));
+        for (const QString &dl : diffLines) {
+            if (dl.startsWith(QStringLiteral("+")) && !dl.startsWith(QStringLiteral("+++"))) {
+                html += QStringLiteral("<div style='color: #4ade80; background: rgba(74, 222, 128, 0.12); padding: 1px 4px; white-space: pre-wrap;'>%1</div>").arg(dl.toHtmlEscaped());
+            } else if (dl.startsWith(QStringLiteral("-")) && !dl.startsWith(QStringLiteral("---"))) {
+                html += QStringLiteral("<div style='color: #f87171; background: rgba(248, 113, 113, 0.12); padding: 1px 4px; white-space: pre-wrap;'>%1</div>").arg(dl.toHtmlEscaped());
+            } else if (dl.startsWith(QStringLiteral("@@"))) {
+                html += QStringLiteral("<div style='color: #38bdf8; font-weight: bold; margin-top: 6px; padding: 1px 4px; background: rgba(56, 189, 248, 0.08); white-space: pre-wrap;'>%1</div>").arg(dl.toHtmlEscaped());
+            } else if (dl.startsWith(QStringLiteral("---")) || dl.startsWith(QStringLiteral("+++"))) {
+                html += QStringLiteral("<div style='color: #93c5fd; font-weight: bold; white-space: pre-wrap;'>%1</div>").arg(dl.toHtmlEscaped());
+            } else if (dl.startsWith(QStringLiteral("#"))) {
+                // Ignore internal header lines in diff view
+                continue;
+            } else {
+                html += QStringLiteral("<div style='color: #94a3b8; padding: 1px 4px; white-space: pre-wrap;'>%1</div>").arg(dl.toHtmlEscaped());
+            }
+        }
+    } else {
+        html += QStringLiteral(
+            "<div style='margin-top: 8px; padding: 12px; background: rgba(239, 68, 68, 0.08); border: 1px dashed #ef4444; border-radius: 6px; color: #fca5a5;'>"
+            "⚠️ <strong>No diff snapshot available for this commit.</strong><br/>"
+            "The diff file may have been deleted by an external software, or this file was created before snapshots were introduced to this feature."
+            "</div>"
+        );
+    }
+
+    html += QStringLiteral("</div>");
+    m_commitDetailsEdit->setHtml(html);
 }
 
 void ProjectPropertiesDialog::onNewCommitClicked()
@@ -391,16 +460,16 @@ void ProjectPropertiesDialog::onNewCommitClicked()
     bool ok = false;
     const QString msg = QInputDialog::getText(
         this,
-        QStringLiteral("Create Git-like Commit"),
-        QStringLiteral("Commit message:"),
+        QStringLiteral("Create Project Snapshot"),
+        QStringLiteral("Snapshot message / description:"),
         QLineEdit::Normal,
         QString(),
         &ok);
 
     if (ok && !msg.trimmed().isEmpty()) {
-        const QString author = m_authorEdit ? m_authorEdit->text().trimmed() : QStringLiteral("user");
-        m_project->appendHistoryCommit(author, msg.trimmed());
-        m_project->markDirtyBy(author);
+        const QString authorTag = DiffUtil::defaultAuthorTag(m_authorEdit ? m_authorEdit->text().trimmed() : QString());
+        m_project->appendHistoryCommit(authorTag, msg.trimmed());
+        m_project->markDirtyBy(authorTag);
         refreshHistoryList();
     }
 }

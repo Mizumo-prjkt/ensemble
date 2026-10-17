@@ -47,6 +47,7 @@ private:
     QJsonObject toolReloadProject(const QJsonObject &args);
     QJsonObject toolGetProjectHistory(const QJsonObject &args);
     QJsonObject toolAddHistoryCommit(QWebSocket *client, const QJsonObject &args);
+    QJsonObject toolGetSnapshotDiff(const QJsonObject &args);
     QJsonObject toolGetPreviewScreenshot(const QJsonObject &args);
     QJsonObject toolTestFirewallConnection(const QJsonObject &args);
     QJsonObject toolGetAgentPresence(QWebSocket *client, const QJsonObject &args);

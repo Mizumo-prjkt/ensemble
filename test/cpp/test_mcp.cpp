@@ -1055,7 +1055,51 @@ int main(int argc, char *argv[])
         assert(!cData.value("hash").toString().isEmpty());
         assert(cData.value("author").toString() == "Miku Agent");
         assert(cData.value("message").toString() == "feat: added new lore nodes and updated relationship tags");
-        std::cout << "✓ MCP 'add_history_commit' verified with git-like hash and author." << std::endl;
+        assert(cData.contains("previousCommitHash"));
+        assert(cData.contains("localTimestamp"));
+        std::cout << "✓ MCP 'add_history_commit' verified with snapshot hash, previousCommitHash, and author." << std::endl;
+    }
+
+    // 31b. Test get_snapshot_diff and safe failure on missing diff
+    {
+        // First get latest commit hash
+        const QString latestHash = mainWindow.project().latestCommitHash();
+        assert(!latestHash.isEmpty());
+
+        QJsonObject diffReq;
+        diffReq["jsonrpc"] = "2.0";
+        diffReq["id"] = 150;
+        diffReq["method"] = "tools/call";
+        diffReq["params"] = QJsonObject{
+            {"name", "get_snapshot_diff"},
+            {"arguments", QJsonObject{{"hash", latestHash}}}
+        };
+        QJsonObject diffResp = sendAndReceive(diffReq);
+        assert(diffResp.value("id").toInt() == 150);
+        QJsonObject diffRes = diffResp.value("result").toObject();
+        assert(!diffRes.value("isError").toBool());
+        QJsonObject diffData = QJsonDocument::fromJson(diffRes.value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(diffData.value("success").toBool() == true);
+        assert(diffData.value("hash").toString() == latestHash);
+        assert(!diffData.value("diff").toString().isEmpty());
+        std::cout << "✓ MCP 'get_snapshot_diff' successfully returned line-by-line diff." << std::endl;
+
+        // Test safe failure on nonexistent / legacy commit hash
+        QJsonObject failReq;
+        failReq["jsonrpc"] = "2.0";
+        failReq["id"] = 151;
+        failReq["method"] = "tools/call";
+        failReq["params"] = QJsonObject{
+            {"name", "get_snapshot_diff"},
+            {"arguments", QJsonObject{{"hash", "legacy_hash_00"}}}
+        };
+        QJsonObject failResp = sendAndReceive(failReq);
+        assert(failResp.value("id").toInt() == 151);
+        QJsonObject failRes = failResp.value("result").toObject();
+        assert(failRes.value("isError").toBool());
+        const QString failMsg = failRes.value("content").toArray().first().toObject().value("text").toString();
+        assert(failMsg.contains("deleted by an external software") || failMsg.contains("created before snapshots were introduced"));
+        std::cout << "✓ MCP 'get_snapshot_diff' safe failure fallback verified for legacy/missing diffs." << std::endl;
     }
 
     // 32. Test get_project_history
@@ -1077,13 +1121,17 @@ int main(int argc, char *argv[])
         assert(!result.value("isError").toBool());
         QJsonObject hData = QJsonDocument::fromJson(result.value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
         assert(hData.value("totalCommits").toInt() >= 1);
+        assert(!hData.value("latestCommitHash").toString().isEmpty());
         QJsonArray commits = hData.value("commits").toArray();
         assert(commits.size() >= 1);
         QJsonObject firstCommit = commits.first().toObject();
         assert(!firstCommit.value("hash").toString().isEmpty());
+        assert(firstCommit.contains("previousCommitHash"));
+        assert(firstCommit.contains("localDate"));
+        assert(firstCommit.value("diffAvailable").toBool() == true);
         assert(firstCommit.value("message").toString().contains("feat: added new lore nodes"));
         assert(hData.value("rawHistory").toString().contains("commit "));
-        std::cout << "✓ MCP 'get_project_history' parsed commits array and raw history.cmt verified." << std::endl;
+        std::cout << "✓ MCP 'get_project_history' parsed commits array, parent hashes, localDate, and raw history.cmt verified." << std::endl;
     }
 
     // 33. Test save_project with filePath and commitMessage

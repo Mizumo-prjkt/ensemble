@@ -140,6 +140,7 @@ set(SOURCES
     src/utils/AppPaths.cpp
     src/utils/miniz.cpp
     src/utils/SingleInstanceManager.cpp
+    src/utils/DiffUtil.cpp
     src/mcp/McpServer.cpp
     src/mcp/McpHandler.cpp
     src/mcp/McpAgentInstaller.cpp
@@ -147,6 +148,7 @@ set(SOURCES
 )
 
 set(HEADERS
+    src/utils/DiffUtil.h
     src/ui/MainWindow.h
     src/ui/EditorPane.h
     src/ui/HtmlSourcePane.h
@@ -318,6 +320,7 @@ add_executable(test_project_archive
     src/debug/debug.cpp
     src/utils/AppPaths.cpp
     src/utils/miniz.cpp
+    src/utils/DiffUtil.cpp
 )
 target_include_directories(test_project_archive PRIVATE src)
 target_compile_definitions(test_project_archive PRIVATE
@@ -411,6 +414,7 @@ add_executable(test_editor_diagnostics
     src/themes/ThemeManager.h
     src/debug/debug.cpp
     src/utils/AppPaths.cpp
+    src/utils/DiffUtil.cpp
 )
 target_include_directories(test_editor_diagnostics PRIVATE src)
 target_compile_definitions(test_editor_diagnostics PRIVATE

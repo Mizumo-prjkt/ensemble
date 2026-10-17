@@ -40,8 +40,53 @@
 #include <QToolBar>
 #include <QVBoxLayout>
 
+#include "utils/DiffUtil.h"
+
 // Custom property ID for storing CSS class names on text formats
 static constexpr int CssClassProperty = QTextFormat::Property::UserProperty + 1;
+
+static void applyClassFormatToCharFormat(QTextCharFormat &fmt, const QStringList &classes, const QString &customCss, bool isDark)
+{
+    if (classes.isEmpty()) {
+        fmt.setProperty(CssClassProperty, QVariant());
+        fmt.setBackground(Qt::NoBrush);
+        fmt.setForeground(Qt::NoBrush);
+        fmt.setUnderlineStyle(QTextCharFormat::NoUnderline);
+        return;
+    }
+
+    fmt.setProperty(CssClassProperty, classes.join(QLatin1Char(' ')));
+
+    QColor classColor;
+    for (const QString &cls : classes) {
+        QColor col = DiffUtil::extractCssColor(customCss, cls);
+        if (col.isValid()) {
+            classColor = col;
+            break;
+        }
+    }
+
+    if (isDark) {
+        fmt.setBackground(QColor(30, 41, 59, 200)); // Soft slate background
+        if (classColor.isValid()) {
+            fmt.setForeground(classColor);
+            fmt.setUnderlineColor(classColor);
+        } else {
+            fmt.setForeground(QColor(125, 211, 252)); // Light sky text
+            fmt.setUnderlineColor(QColor(56, 189, 248)); // Sky dash
+        }
+    } else {
+        fmt.setBackground(QColor(224, 242, 254)); // Soft light sky tint
+        if (classColor.isValid()) {
+            fmt.setForeground(classColor);
+            fmt.setUnderlineColor(classColor);
+        } else {
+            fmt.setForeground(QColor(3, 105, 161)); // Readable deep blue
+            fmt.setUnderlineColor(QColor(2, 132, 199)); // Blue dash
+        }
+    }
+    fmt.setUnderlineStyle(QTextCharFormat::DashUnderline);
+}
 
 EditorPane::EditorPane(QWidget *parent)
     : QWidget(parent)
@@ -668,8 +713,13 @@ void EditorPane::onApplyCssClass(const QString &className)
     if (!cursor.hasSelection())
         cursor.select(QTextCursor::WordUnderCursor);
 
-    QTextCharFormat fmt;
-    fmt.setProperty(CssClassProperty, className);
+    QTextCharFormat fmt = cursor.charFormat();
+    QString existingStr = fmt.property(CssClassProperty).toString();
+    QStringList classes = existingStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (!classes.contains(className))
+        classes.append(className);
+
+    applyClassFormatToCharFormat(fmt, classes, m_customCss, ThemeManager::instance().isDarkMode());
     cursor.mergeCharFormat(fmt);
     m_editor->setTextCursor(cursor);
 }
@@ -732,18 +782,7 @@ void EditorPane::showEditorContextMenu(const QPoint &pos)
                 }
 
                 QTextCharFormat newFmt;
-                if (classes.isEmpty()) {
-                    newFmt.setProperty(CssClassProperty, QVariant());
-                    newFmt.setBackground(Qt::NoBrush);
-                    newFmt.setForeground(Qt::NoBrush);
-                    newFmt.setUnderlineStyle(QTextCharFormat::NoUnderline);
-                } else {
-                    newFmt.setProperty(CssClassProperty, classes.join(QLatin1Char(' ')));
-                    newFmt.setBackground(QColor(40, 42, 54));   // #282a36 dark badge bg
-                    newFmt.setForeground(QColor(80, 250, 123)); // #50fa7b emerald text
-                    newFmt.setUnderlineStyle(QTextCharFormat::DashUnderline);
-                    newFmt.setUnderlineColor(QColor(139, 233, 253)); // #8be9fd cyan dash
-                }
+                applyClassFormatToCharFormat(newFmt, classes, m_customCss, ThemeManager::instance().isDarkMode());
 
                 cursor.mergeCharFormat(newFmt);
                 m_editor->setTextCursor(cursor);
@@ -919,11 +958,12 @@ void EditorPane::handleEditorTooltip(QHelpEvent *helpEvent)
         elements.append(QStringLiteral("<p>"));
     }
 
+    QStringList appliedClasses;
     // 2. CSS class attribute
     QVariant cssProp = charFmt.property(CssClassProperty);
     QString classStr = cssProp.isValid() ? cssProp.toString().trimmed() : QString();
     if (!classStr.isEmpty()) {
-        QStringList appliedClasses = classStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        appliedClasses = classStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
         for (const QString &cls : appliedClasses) {
             elements.append(QStringLiteral("<span class=\"%1\">").arg(cls));
             if (!m_availableCssClasses.contains(cls)) {
@@ -981,11 +1021,11 @@ void EditorPane::handleEditorTooltip(QHelpEvent *helpEvent)
     QString tooltipHtml;
     if (showErrorDetails && !issues.isEmpty()) {
         tooltipHtml += QStringLiteral(
-            "<div style='font-family: sans-serif; font-size: 11px; max-width: 380px;'>"
+            "<div style='font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif; font-size: 11px; max-width: 380px;'>"
             "<b style='color: #ef4444;'>❌ Issue%1:</b><br/>"
         ).arg(issues.size() > 1 ? QStringLiteral("s") : QString());
         for (const QString &issue : issues) {
-            tooltipHtml += QStringLiteral("<div style='margin-left: 6px; margin-top: 2px;'>• %1</div>")
+            tooltipHtml += QStringLiteral("<div style='margin-left: 6px; margin-top: 2px; color: #fca5a5;'>• %1</div>")
                                .arg(issue.toHtmlEscaped());
         }
         tooltipHtml += QStringLiteral("</div>");
@@ -993,18 +1033,53 @@ void EditorPane::handleEditorTooltip(QHelpEvent *helpEvent)
 
     if (showElementInfo && !elements.isEmpty()) {
         if (!tooltipHtml.isEmpty()) {
-            tooltipHtml += QStringLiteral("<hr style='border: none; border-top: 1px solid #4b5563; margin: 6px 0;'/>");
+            tooltipHtml += QStringLiteral("<hr style='border: none; border-top: 1px solid #475569; margin: 8px 0;'/>");
         }
         tooltipHtml += QStringLiteral(
-            "<div style='font-family: sans-serif; font-size: 11px;'>"
+            "<div style='font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif; font-size: 11px;'>"
             "<b style='color: #38bdf8;'>Embedded Elements:</b><br/>"
-            "<code style='font-family: monospace; font-size: 11px; color: #a7f3d0;'>%1</code>"
+            "<div style='font-family: monospace; font-size: 11px; color: #f1f5f9; background: rgba(255,255,255,0.08); padding: 4px 8px; border-radius: 4px; margin-top: 4px; border: 1px solid #334155;'>"
+            "%1"
+            "</div>"
             "</div>"
         ).arg(elements.join(QStringLiteral(" → ")).toHtmlEscaped());
+
+        if (!appliedClasses.isEmpty()) {
+            QString styleRulesHtml;
+            for (const QString &cls : appliedClasses) {
+                const QString decls = DiffUtil::extractCssClassDeclarations(m_customCss, cls);
+                if (!decls.isEmpty()) {
+                    styleRulesHtml += QStringLiteral(
+                        "<div style='margin-top: 4px; font-family: monospace; font-size: 11px; background: rgba(56, 189, 248, 0.12); border-left: 3px solid #38bdf8; padding: 3px 6px; border-radius: 2px;'>"
+                        "<b style='color: #67e8f9;'>.%1</b> { <span style='color: #86efac;'>%2</span> }"
+                        "</div>"
+                    ).arg(cls.toHtmlEscaped(), decls.toHtmlEscaped());
+                } else {
+                    styleRulesHtml += QStringLiteral(
+                        "<div style='margin-top: 4px; font-family: monospace; font-size: 11px; background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; padding: 3px 6px; border-radius: 2px; color: #fca5a5;'>"
+                        "<b>.%1</b>: <i>No CSS rules declared in Work Skin</i>"
+                        "</div>"
+                    ).arg(cls.toHtmlEscaped());
+                }
+            }
+            if (!styleRulesHtml.isEmpty()) {
+                tooltipHtml += QStringLiteral(
+                    "<div style='margin-top: 8px; font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif; font-size: 11px;'>"
+                    "<b style='color: #cbd5e1;'>Applied Work Skin Style:</b>"
+                    "%1"
+                    "</div>"
+                ).arg(styleRulesHtml);
+            }
+        }
     }
 
     if (!tooltipHtml.isEmpty()) {
-        QToolTip::showText(helpEvent->globalPos(), tooltipHtml, m_editor->viewport());
+        const QString themedContainer = QStringLiteral(
+            "<div style='background-color: #1e1e2e; color: #f8fafc; border: 1px solid #475569; border-radius: 6px; padding: 8px 12px; max-width: 440px;'>"
+            "%1"
+            "</div>"
+        ).arg(tooltipHtml);
+        QToolTip::showText(helpEvent->globalPos(), themedContainer, m_editor->viewport());
     } else {
         QToolTip::hideText();
     }
