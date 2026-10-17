@@ -3,27 +3,144 @@
 # Ensemble
 
 <p align="left">
-  <strong>Next-Generation AO3 Writing Suite & Work Skin Composer</strong>
+  <strong>Next-Generation AO3 Writing Suite, Work Skin Composer & Narrative Studio</strong>
 </p>
 
 <p align="left">
-  A high-performance Qt 6 & Chromium C++ desktop application for Archive of Our Own (AO3) authors. Features a distraction-free WYSIWYG composer, live AO3 HTML source synchronization, authentic Chromium Work Skin rendering, direct AO3 work/series import, agentic lore graphs, and native ZSTD project archiving with optional AES-256-GCM encryption.
+  A high-performance Qt 6 & Chromium C++ desktop application for Archive of Our Own (AO3) authors. Features a distraction-free WYSIWYG composer, live AO3 HTML source synchronization, authentic Chromium Work Skin rendering, direct AO3 work/series import, visual lore mapping, sandboxed <code>.er</code> plugins, local/cloud AI co-authoring via MCP, and native ZSTD project archiving with optional AES-256-GCM encryption.
 </p>
 
 ---
 
 ## ✨ Key Features
 
-- 🎭 **Authentic Chromium Work Skin Preview**: Full Qt6 `QWebEngineView` rendering supporting 100% of AO3 Work Skin features (`border-radius`, `box-shadow`, custom cards like `.chapter-card` and `.liyue-box`, multi-theme Work Skins, and custom typography).
+- 🎭 **Authentic Chromium Work Skin Preview**: Full Qt 6 `QWebEngineView` rendering supporting 100% of AO3 Work Skin features (`border-radius`, `box-shadow`, custom cards like `.chapter-card` and `.liyue-box`, multi-theme skins, and custom typography).
 - ⚡ **Zero-Jump Live Preview**: Real-time DOM mutation engine updates your live preview as you type while preserving your scroll position with 100% precision.
-- 📥 **Direct AO3 Import**: Authenticate with your AO3 account (via Session Cookie or login credentials) to import entire multi-chapter works, series, pseuds, co-authored works, and custom Work Skins seamlessly.
-- 🎨 **Work Skin Composer & Visual Inspector**: Edit custom CSS with syntax highlighting, auto-detect classes, apply styles via context menu, and sync Work Skins with AO3 via the built-in Skin Diff Tool.
-- 🕸️ **Agentic Lore Graph & Management**: Interactive node graph mapping characters, factions, relationships, and lore timelines, with real-time AI context generation. (**In Beta**)
-- 🌓 **Dynamic Theme Engine**: Tailor your writing space with customizable Dark, Light, High Contrast, and Custom UI color palettes.
+- 📥 **Direct AO3 Import & Crawler Extraction**: Authenticate with your AO3 account (via Session Cookie or login) to import multi-chapter works, series, co-authored stories, and custom Work Skins. The built-in crawler automatically extracts ratings, archive warnings, relationship tags, character rosters, and summaries.
+- 🎨 **Work Skin Composer & Visual Inspector**: Edit custom CSS with syntax highlighting, auto-detect classes, apply styles via context menus, and sync Work Skins with AO3 via the built-in Skin Diff Tool.
+- 🧩 **Sandboxed Scripting Plugins (`.er`) [Beta]**: Extend Ensemble using a custom Python-like DSL and tree-walking AST interpreter written from scratch in C++. Runs in an isolated worker thread with memory caps (8 MB), execution watchdogs, declarative UI compositing, granular permissions, strict HTTPS enforcement, anti-diversion quarantine, and persistent audit logging.
+- 🗺️ **Visual Lore Graph & Narrative Mapping (`.grph`)**: Dedicated 2D canvas for mapping out characters, factions, artifacts, and plot conflicts using Ensemble's independent `.grph` DSL language with a strict binary header (`\x89GRPH\x01\r\n`).
+- ⚙️ **Project Properties & AO3 Metadata Hub**: Manage ratings, archive warnings, relationship categories, cast lists, fandoms, freeform tags, preface notes, and postscript end notes in one unified hub serialized into `metadata.xml`.
+- 🖼️ **URL-Based Image Embed Attachments**: Easily embed external images with live aspect-ratio previews, custom alignment, and 1-click HTML snippet generation, with automatic detection during AO3 story import.
+- 📜 **Git-Like Revision History (`history.cmt`)**: Internal commit ledger tracking 12-char SHA-1 commit hashes, author attributions, ISO timestamps, and commit messages inside your project file.
+- 🤖 **Model Context Protocol (MCP) & Local LLM Support**: Embedded loopback WebSocket server (`ws://127.0.0.1:26303`) and Stdio bridge for AI pair-programmers (Google Antigravity, Claude, Cursor) plus beta support for local, privacy-first models (Ollama, llama.cpp, LM Studio, Jan).
+- 🌓 **Dynamic Theme Engine & Design Systems**: Choose between Light, Dark, Darker (OLED pure black #000000), and official AO3 Reversi themes, paired with Android Material You (dynamic wallpaper hue extraction), KDE Breeze, or Standard Qt Fusion widget styling with mutual exclusivity guards.
 - 🗺️ **Proportional Minimap Sidebar**: High-visibility scrollbar minimap offering an instant visual overview of your document structure with color-coded syntax highlights.
 - 🔀 **Split Workspace**: Simultaneous WYSIWYG rich text editor, live AO3 HTML source view, and Work Skin CSS editor with debounced auto-sync.
-- 📑 **Chapter Management**: Effortlessly add, rename, delete, and reorder chapters.
-- 🚀 **Single-Instance Application**: Direct integration with system file managers to open `.ao3proj` files seamlessly without creating accidental duplicate processes.
+- 📑 **Chapter Management & Filter Search**: Add, rename, delete, reorder chapters, and filter long chapter lists instantly with a built-in search bar.
+- 🚀 **Single-Instance Application**: Direct integration with system file managers to open `.ao3proj` files seamlessly without creating duplicate processes.
+
+---
+
+## 🧩 [Beta] Sandboxed Scripting Plugins (`.er`)
+
+Ensemble includes a custom, memory-bounded, Python-like scripting engine designed specifically for third-party plugins (<b><code>.er</code></b>, Ensemble Runner scripts) without freezing the UI or risking host stability:
+
+- **No Native Shared Libraries:** Does not load dynamic libraries (`.dll`, `.so`) or embed standard Python/Lua runtimes. Pure C++ lexer, recursive descent parser, and AST interpreter.
+- **Worker Thread Isolation:** All plugin hooks execute inside isolated `QThread` workers. Zero GUI pointers (`QWidget*`) cross threads.
+- **Strict Resource Quotas (`ResourceGuard`):** 8 MB memory cap per plugin, 150,000 AST execution steps / 250ms watchdog per hook, and a 64-frame call stack depth cap.
+- **Declarative UI Compositing:** Plugins compose native dialog windows on the GUI thread via `ui.create_window()`, `add_label()`, `add_text()`, `add_input()`, and `add_button()`.
+- **Strict HTTPS & Anti-Diversion Quarantine:**
+  - All network traffic mediated by Ensemble strictly requires `https://`. Insecure `http://` or downgrade attempts trigger immediate security quarantine.
+  - Automatic HTTP redirects are forbidden (`QNetworkRequest::ManualRedirectPolicy`). Any attempt to redivert traffic to another website terminates execution and **permanently quarantines the plugin** with an alert to report the incident to developers.
+- **Granular Permissions & Audit Logging:** Manage permissions (Editor Read, Editor Write, Storage, UI, Network) with per-domain whitelisting and view live audit trails in `plugin_activity.log`.
+- **Uninstallation Support:** 1-click clean deletion of `.er` scripts, manifest records, and private storage.
+
+---
+
+## 🗺️ Visual Lore Graph & Narrative Studio (`.grph`)
+
+Ensemble provides an independent narrative canvas engine for worldbuilders and fanfiction authors:
+- **Independent `.grph` Language:** Human-readable domain-specific language beginning with binary magic signature `\x89GRPH\x01\r\n`.
+- **Relationship Connectors:** Directed influence (`a -> b`), mutual connections (`a <-> b`), neutral links (`a -- b`), and plot conflict markers (`a -x b`).
+- **Comprehensive Project Lore Directory:**
+  ```text
+  lore/
+  ├── graphs/data.grph        (Primary narrative canvas layout)
+  ├── lore_data.json          (Codex of characters, factions, and artifacts)
+  ├── history.json            (Chronological backstory timeline)
+  ├── conflicts.json          (Detected continuity errors and plot holes)
+  ├── resolved.json           (Author rulings on resolved plot points)
+  └── plans.json              (Story follow-up hooks and future arcs)
+  ```
+
+---
+
+## 🤖 Model Context Protocol (MCP) & AI Integration
+
+Ensemble exposes an embedded **Model Context Protocol (MCP)** server over localhost WebSocket (`ws://127.0.0.1:26303`) with a hybrid Stdio bridge for AI pair-programmers:
+
+- **Supported AI Environments:** Claude Desktop, Claude Code CLI, Cursor IDE, Gemini Antigravity, and Local LLMs (Ollama, llama.cpp, LM Studio, Jan, LocalAI).
+- **Available MCP Tools:**
+  `get_project_summary`, `list_chapters`, `get_chapter`, `update_chapter_html`, `add_chapter`, `delete_chapter`, `reorder_chapters`, `get_workskin_css`, `set_workskin_css`, `load_project`, `save_project`, `get_project_history`, `add_history_commit`, `get_lore_graph`, `update_lore_graph`, `add_lore_node`, `connect_lore_nodes`, `get_lore_data`, `manage_lore_data`, `update_project_metadata`, `list_image_embeds`, `insert_image_embed`, `post_agent_thought`, `get_agent_presence`, `register_agent_presence`, `get_agentic_summary`, `read_agentic_file`, `write_agentic_file`, `get_problems`, `get_preview_screenshot`.
+
+```bash
+# 1-Click setup: Export configuration and schemas for Claude and Antigravity
+ensemble --send-mcp-manual-to-agents
+
+# Diagnose loopback connectivity and reachability
+ensemble --mcp-status
+```
+
+---
+
+## 🎨 Themes & Design Systems
+
+- **Color Themes:**
+  - ☀️ **Light Mode:** High-contrast crisp bright palette (`#0f172a` primary text).
+  - 🌙 **Dark Mode:** Deep slate theme tailored for late-night authoring.
+  - 🖤 **Darker Mode (OLED):** Pure pitch black (`#000000`) for OLED power savings.
+  - 🔴 **AO3 Reversi Mode:** Authentic AO3 dark crimson reading palette (`#111111` dark background, `#990000` accents).
+- **Skin Flavors & Design Systems:**
+  - 🤖 **Android Material You:** Dynamically extracts the dominant accent color from your active desktop wallpaper (GNOME, KDE DBus, Windows Desktop) with authentic Material 3 pill buttons (20px radius).
+  - ✨ **Standard Ensemble:** Curated violet modern styling.
+  - 🖥️ **Standard Qt:** Clean native desktop widgets (Fusion).
+  - 🐧 **KDE UI:** Native Breeze design integration.
+- **Mutual Exclusivity Guard:** Due to contrasting color schemes, AO3 Reversi and Android Material You styling are mutually exclusive. Selecting Reversi disables Material You in the skin settings, and selecting Material You disables Reversi theme options.
+
+---
+
+## ⌨️ Keyboard Shortcuts Reference
+
+| Shortcut | Action | Scope |
+|----------|--------|-------|
+| `Ctrl+N` | New Project | Global |
+| `Ctrl+O` | Open Project (`.ao3proj`) | Global |
+| `Ctrl+S` | Save Project | Global |
+| `Ctrl+Shift+S` | Save Project As… | Global |
+| `Alt+Enter` | Project Properties & Metadata | Global |
+| `Ctrl+Shift+O` | Open Chapter Manager & Search | Global |
+| `Ctrl+Shift+L` | Lore Graph & Narrative Map | Global |
+| `Ctrl+Shift+A` | AI Agent Thoughts Monitor | Global |
+| `Ctrl+Shift+U` | [Beta] Plugin Manager | Global |
+| `Ctrl+Shift+M` | Insert Image Embed Attachment | Editor |
+| `Ctrl+Shift+I` | Import Work from AO3… | Global |
+| `Ctrl+Shift+C` | Copy AO3 Clean HTML to Clipboard | Global |
+| `Ctrl+P` | Toggle Side-by-Side WebEngine Preview | Global |
+| `Ctrl+Shift+P` | Pop Out WebEngine Preview Window | Global |
+| `Ctrl+F` | Find Text | Editor |
+| `Ctrl+R` | Find and Replace Text | Editor |
+| `Ctrl+B` / `Ctrl+I` / `Ctrl+U` / `Ctrl+Shift+X` | Bold / Italic / Underline / Strikethrough | Editor |
+| `Ctrl+,` | Preferences & Settings | Global |
+| `F1` | Help & User Guide | Global |
+| `Ctrl+Alt+1` | Light Theme | Global |
+| `Ctrl+Alt+2` | Dark Mode | Global |
+| `Ctrl+Alt+3` | AO3 Reversi Mode | Global |
+| `Ctrl+Alt+4` | OLED Darker Mode | Global |
+| `Ctrl+Alt+T` | Cycle Themes | Global |
+
+---
+
+## 📄 Project File Format (`.ao3proj`)
+
+Ensemble saves stories in a unified binary container compressed with **Zstandard (ZSTD)**, with optional **AES-256-GCM** encryption:
+- `manifest.json`: Project schema, chapters index, and revision pointer.
+- `metadata.xml`: Structured AO3 tags, ratings, warnings, fandoms, relationships, and author notes.
+- `history.cmt`: Git-like commit ledger tracking 12-char SHA-1 hashes and commit notes.
+- `chapters/`: Individual chapter HTML drafts.
+- `workskin.css`: Custom AO3 Work Skin stylesheet.
+- `lore/`: Narrative graph (`.grph`), entities, timelines, conflicts, and plans.
+- `agentic-datas/`: Shared (5 MB) and private (20 MB) AI memory workspaces.
 
 ---
 
@@ -31,7 +148,7 @@
 
 ### Arch Linux
 ```bash
-sudo pacman -S qt6-base qt6-webengine cmake gcc ninja zstd vulkan-tools
+sudo pacman -S qt6-base qt6-webengine qt6-websockets cmake gcc ninja zstd vulkan-tools
 ```
 
 ### Debian / Ubuntu (24.04+)
@@ -42,7 +159,7 @@ sudo apt install qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-webengine-d
 
 ### Windows (MSVC 2022)
 - Visual Studio 2022 (with Desktop Development with C++)
-- Qt 6.8+ (including `qtwebengine`, `qtwebchannel`, `qtpositioning`)
+- Qt 6.8+ (including `qtwebengine`, `qtwebsockets`, `qtwebchannel`, `qtpositioning`)
 - CMake 3.16+
 - Python 3.9+
 - *(Optional)* [Inno Setup 6](https://jrsoftware.org/isdl.php) (for building the `.exe` Windows installer)
@@ -51,175 +168,36 @@ sudo apt install qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-webengine-d
 
 ## 🚀 Building & Packaging
 
-Ensemble provides a unified Python build orchestrator (`build.py`) with cross-platform wrappers (`build.sh`, `build.ps1`, `build.bat`), supporting an interactive GUI build studio, automated packaging, compiler flag guidance, and CI/CD automation.
+Ensemble includes a unified Python build orchestrator (`build.py`) with cross-platform wrappers (`build.sh`, `build.ps1`, `build.bat`):
 
-### Interactive Build Studio (GUI)
-Launch the visual build studio with live compiler flag assist and CI one-liner generator:
 ```bash
+# Interactive Build Studio GUI
 python3 build.py --gui
-```
-From the GUI, configure targets, custom compiler flags, version tags, and click **"📋 Copy One-Liner"** to export exact command-line arguments.
 
-### Compiler & CMake Flag Guidance
-Query the built-in compiler optimization and security flag knowledge base:
-```bash
-python3 build.py --list-flags
-```
+# Linux Release Build & Unit Tests
+./build.sh release --test
 
-### CLI One-Liners (Linux & macOS)
-
-```bash
-# 1. Native Linux Release Build
-python3 build.py --target linux --build-type Release
-
-# 2. Package Standalone Linux Tarball & Run Unit Tests
-python3 build.py --target linux --build-type Release --package --test
-
-# 3. Package Standalone AppImage with Custom Codename & Download Tools
-python3 build.py --target appimage --build-type Release --localversion agnestachyon --download-tools --test
-
-# 4. Custom Compiler Optimization Flags (-O3, CPU tuning)
-python3 build.py --cxxflags="-O3 -march=x86-64-v3" --build-type Release
-
-# 5. Shell wrapper shorthand
-./build.sh release
+# Standalone AppImage Package
 ./build.sh appimage
-```
 
-### CLI One-Liners (Windows PowerShell / CMD)
-
-```powershell
-# 1. Native Windows Release Build
-.\build.ps1 release
-
-# 2. Build and Package Standalone Portable Zip (.zip)
-.\build.ps1 release --package
-
-# 3. Build and Package Both Portable Zip & Inno Setup Installer (.exe)
-.\build.ps1 release --installer
-
-# 4. Run Unit Tests with Debug symbols
-.\build.ps1 debug --test
+# Windows PowerShell (Portable .zip & Installer .exe)
+.\build.ps1 release --installer --test
 ```
 
 ---
 
-## 💻 Command-Line Options
+## 📜 License & Community
 
-Ensemble can be launched directly from the command line, terminal, or file manager:
-
-```bash
-# Open an existing story directly
-ensemble /path/to/my_story.ao3proj
-
-# Force software rasterization (useful for headless setups or GPU-less virtual machines)
-ensemble --disable-gpu-acceleration
-```
-
-| Option | Description |
-|--------|-------------|
-| `[project.ao3proj]` | Optional path to a `.ao3proj` file to load immediately on startup. |
-| `--disable-gpu-acceleration`, `--disable-gpu` | Disable hardware GPU acceleration and force software rasterization across WebEngine and Qt. |
-| `--allow-multiple-instances`, `--new-instance` | Allow multiple independent instances of Ensemble to run concurrently. |
-| `--enable-mcp` | Start embedded Model Context Protocol (MCP) WebSocket server on launch. |
-| `--mcp-port <port>` | Specify preferred port for MCP server (default: `26303`). |
-| `--mcp-bridge` | Run in Model Context Protocol (MCP) Stdio Bridge mode for AI agents. |
-| `--mcp-status` | Query active MCP Server status and verify loopback reachability. |
-| `--send-mcp-manual-to-agents` | Export `ENSEMBLE_MCP_MANUAL.md` and configure MCP schemas in Antigravity & Claude. |
-| `-h`, `--help` | Displays command-line options help. |
-| `-v`, `--version` | Displays version and build configuration information. |
-
----
-
-## 🤖 Model Context Protocol (MCP) & AI Integration
-
-Ensemble exposes an embedded **Model Context Protocol (MCP)** server over localhost WebSocket (`ws://127.0.0.1:26303`) with a hybrid Stdio bridge for developer AI pair-programmers (such as **Google Antigravity**, **Claude Code**, and **Claude Desktop**).
-
-### Quick Setup for AI Agents
-Export the agent manual and automatically register tool schemas:
-```bash
-# Linux / macOS
-ensemble --send-mcp-manual-to-agents
-
-# Windows (PowerShell / Command Prompt)
-.\ensemble.exe --send-mcp-manual-to-agents
-```
-
-### Checking Server & Firewall Status
-Diagnose loopback connectivity and reachability:
-```bash
-# Linux / macOS
-ensemble --mcp-status
-
-# Windows (PowerShell / Command Prompt)
-.\ensemble.exe --mcp-status
-```
-
----
-
-## ⌨️ Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+N` | New Project |
-| `Ctrl+O` | Open Project (`.ao3proj`) |
-| `Ctrl+S` | Save Project |
-| `Ctrl+Shift+S` | Save Project As |
-| `Ctrl+Shift+I` | Import Work from AO3 |
-| `Ctrl+Shift+C` | Copy AO3 Clean HTML to Clipboard |
-| `Ctrl+P` | Toggle Side-by-Side WebEngine Preview |
-| `Ctrl+Shift+P` | Pop Out WebEngine Preview Window |
-| `Ctrl+F` | Find & Replace |
-| `Ctrl+Shift+L` | Open Lore Graph Studio |
-| `Ctrl+Shift+A` | Open AI Agent Thoughts Monitor |
-
----
-
-## 📄 Project File Format (`.ao3proj`)
-
-Ensemble saves projects as binary archives compressed with **Zstandard (ZSTD)**, with optional **AES-256-GCM** encryption for privacy and security. Inside each unencrypted or unlocked project file is a structured JSON metadata document:
-- `formatVersion`
-- `title`
-- `workSkinCss`
-- `chapters` array (`id`, `title`, `order`, `html`)
-- `lore` metadata (characters, affiliations, relations, timeline nodes)
-- `agentic` thoughts and metadata cache
-
----
-
-## 🔄 Automated CI/CD Workflows
-
-Ensemble utilizes a fault-tolerant multi-platform GitHub Actions workflow (`.github/workflows/build.yaml`):
-- **Matrix Parallelism**: Concurrently compiles Linux AppImage, Linux portable archive, and Windows 64-bit packages (portable `.zip` and Inno Setup installer `.exe`) across both `Release` and `Debug` variants.
-- **Fault-Tolerant Deployment**: If an isolated target encounters an environment error, sibling builds are not interrupted; all successful targets and verified tests are staged and released.
-- **Automated Verification**: Integrates Git tag annotations, release notes extraction, and cryptographic SHA256 checksum generation into every GitHub Release.
-
----
-
-## 📜 License & Credits
-
-- **Developer**: [Mizumo-prjkt](https://github.com/Mizumo-prjkt)
-- **Built with**: Qt 6, Chromium WebEngine, Zstandard, and Miniz
 - **License**: MIT License ([LICENSE](LICENSE))
+- **Code of Conduct**: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- **Security Policy**: [SECURITY.md](SECURITY.md)
 
 ### ⚖️ LGPLv3 Compliance & Freedom to Modify Qt
 
-Ensemble's own application code is licensed under the permissive **MIT License**.
-
-Ensemble dynamically links with the **Qt 6 Framework** (and Qt WebEngine), which is licensed under the **GNU Lesser General Public License (LGPL) version 3** (and/or GNU GPL v3). In compliance with the LGPLv3:
-
-1. **Dynamic Linking**: Qt libraries are strictly dynamically linked (`.so` on Linux, `.dll` on Windows). No Qt components are statically linked into the application binary.
-2. **License Texts Provided**: Complete copies of the LGPLv3 and GPLv3 are distributed alongside the software in [LICENSE.LGPLv3](LICENSE.LGPLv3) and [LICENSE.GPLv3](LICENSE.GPLv3), as well as within the application's *Help → Open Source Credits* dialog.
-3. **Source Code Access**: The source code for Qt can be obtained directly from the official Qt Project repositories at [https://code.qt.io](https://code.qt.io) and [https://download.qt.io](https://download.qt.io).
-4. **AppImage & Bundle Freedom**:
-   - The distributed AppImage packages are standard, unencrypted SquashFS containers without DRM, encryption, or proprietary locks.
-   - Users have the complete freedom to inspect, modify, replace, or upgrade the Qt libraries:
-     - **Extraction & Modification**: Extract the bundle using `./Ensemble-*.AppImage --appimage-extract`, replace any `.so` shared library in `squashfs-root/usr/lib/`, and execute `./squashfs-root/AppRun` or repack using `appimagetool squashfs-root/`.
-     - **Runtime Library Override**: Set `LD_LIBRARY_PATH=/path/to/custom/qt/lib:$LD_LIBRARY_PATH` (or `ENSEMBLE_LIBRARY_PATH=/path/to/custom/qt/lib`) to inject custom Qt libraries on the fly without extracting.
-5. **Windows Distributions**: Dynamic Qt `.dll` files are deployed alongside `ensemble.exe` in the application directory and can be replaced directly by the user.
+Ensemble's application code is licensed under the **MIT License**. Ensemble dynamically links against the **Qt 6 Framework** (and Qt WebEngine), licensed under the **GNU LGPLv3**. In compliance with the LGPLv3:
+1. **Dynamic Linking**: Qt components are dynamically linked (`.so` on Linux, `.dll` on Windows).
+2. **Freedom to Modify & Replace**: Distributed AppImage packages are standard, unencrypted SquashFS containers. Users can extract the bundle (`./Ensemble-*.AppImage --appimage-extract`), swap any Qt shared libraries in `squashfs-root/usr/lib/`, or inject custom builds using `LD_LIBRARY_PATH`. On Windows, dynamic `.dll` files can be updated directly in the program folder.
 
 ## ⚖️ Legal Notice
 
-This project is an independent community tool and is not affiliated with, endorsed by, or associated with Archive of Our Own (AO3), the Organization for Transformative Works (OTW), or any of their affiliates. AO3 and OTW are registered trademarks of the Organization for Transformative Works.
-
-Qt is a trademark of Qt Group Plc. Chromium is a trademark of Google LLC. Zstandard is a trademark of Meta Platforms, Inc.
+Ensemble is an independent community project and is not affiliated with, endorsed by, or associated with Archive of Our Own (AO3) or the Organization for Transformative Works (OTW). AO3 and OTW are registered trademarks of the Organization for Transformative Works.
