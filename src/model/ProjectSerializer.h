@@ -4,6 +4,7 @@
 
 #include <QByteArray>
 #include <QString>
+#include <functional>
 
 enum class ProjectFormatType {
     Unknown,
@@ -40,8 +41,10 @@ struct ProjectLoadReport {
 class ProjectSerializer
 {
 public:
+    using ProgressCallback = std::function<void(int percent, const QString &stageText)>;
+
     // Comprehensive 3-phase loading pipeline with diagnostics
-    static ProjectLoadReport loadWithValidation(const QString &path, Ao3Project &project);
+    static ProjectLoadReport loadWithValidation(const QString &path, Ao3Project &project, ProgressCallback progress = nullptr);
 
     // Standard load and save (backward-compatible)
     static bool load(const QString &path, Ao3Project &project, QString *error = nullptr);

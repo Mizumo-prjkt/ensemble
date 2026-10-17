@@ -695,6 +695,44 @@ int main(int argc, char *argv[]) {
     qDebug() << "✓ Verified history/ diff snapshots, author tags, and persistence in .ao3proj archive.";
   }
 
+  // 18. Test loadWithValidation ProgressCallback
+  {
+    Ao3Project proj;
+    proj.resetToNew();
+    proj.setTitle(QStringLiteral("Progress Test Project"));
+    proj.setAuthor(QStringLiteral("Progress Author"));
+    proj.chapters()[0].setHtml(QStringLiteral("<p>Progress test chapter 1.</p>"));
+    proj.addChapter(QStringLiteral("Progress Chapter 2"));
+    proj.chapters()[1].setHtml(QStringLiteral("<p>Progress test chapter 2.</p>"));
+
+    const QString progressProjPath = tempDir.filePath(QStringLiteral("progress_test.ao3proj"));
+    QString saveErr;
+    assert(ProjectSerializer::save(progressProjPath, proj, &saveErr));
+    assert(QFile::exists(progressProjPath));
+
+    QVector<QPair<int, QString>> progressSteps;
+    Ao3Project loadedProj;
+    ProjectLoadReport rep = ProjectSerializer::loadWithValidation(
+        progressProjPath, loadedProj,
+        [&progressSteps](int percent, const QString &status) {
+          progressSteps.append(qMakePair(percent, status));
+        });
+
+    assert(rep.success);
+    assert(!progressSteps.isEmpty());
+    // Verify steps are strictly non-decreasing and in [0, 100]
+    int lastPercent = -1;
+    for (const auto &step : progressSteps) {
+      assert(step.first >= lastPercent);
+      assert(step.first >= 0 && step.first <= 100);
+      assert(!step.second.isEmpty());
+      lastPercent = step.first;
+    }
+    assert(progressSteps.first().first >= 10);
+    assert(progressSteps.last().first >= 80);
+    qDebug() << "✓ Verified ProjectSerializer::loadWithValidation ProgressCallback execution and sequence.";
+  }
+
   qDebug() << "✓ All 3-Stage validation, magic byte verification, structural integrity, "
               "legacy compatibility, .ao3projasve recovery, agentic-datas, and Lore Graph tests passed successfully!";
   return 0;

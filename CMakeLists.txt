@@ -135,6 +135,7 @@ set(SOURCES
     src/ui/LoreGraphDialog.cpp
     src/ui/ProjectPropertiesDialog.cpp
     src/ui/ProjectLoadErrorDialog.cpp
+    src/ui/ProjectLoadingDialog.cpp
     src/ui/ChapterManagerDialog.cpp
     src/ui/ImageEmbedDialog.cpp
     src/themes/themes.cpp
@@ -190,6 +191,7 @@ set(HEADERS
     src/ui/AboutDialog.h
     src/ui/CreditsDialog.h
     src/ui/ProjectLoadErrorDialog.h
+    src/ui/ProjectLoadingDialog.h
     src/ui/ImageEmbedDialog.h
     src/ui/ChapterManagerDialog.h
     src/ui/AppIcon.h
@@ -379,6 +381,8 @@ add_executable(test_settings_dialog
     src/ui/MainMenuWindow.h
     src/ui/AboutDialog.cpp
     src/ui/AboutDialog.h
+    src/ui/ProjectLoadingDialog.cpp
+    src/ui/ProjectLoadingDialog.h
     src/net/UpdateChecker.cpp
     src/net/UpdateChecker.h
     src/ui/AppIcon.cpp
@@ -462,6 +466,8 @@ add_executable(test_editor_diagnostics
     src/utils/AesCipher.h
     src/model/Chapter.cpp
     src/model/Chapter.h
+    src/export/Ao3HtmlSanitizer.cpp
+    src/export/Ao3TagWhitelist.h
     src/themes/themes.cpp
     src/themes/ThemeManager.h
     src/debug/debug.cpp

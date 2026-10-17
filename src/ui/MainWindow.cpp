@@ -25,6 +25,7 @@
 #include "ui/ProjectPropertiesDialog.h"
 #include "ui/CodeEditor.h"
 #include "ui/ProjectLoadErrorDialog.h"
+#include "ui/ProjectLoadingDialog.h"
 #include "debug/debug.hpp"
 #include "themes/ThemeManager.h"
 #include "mcp/McpServer.h"
@@ -423,6 +424,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
           &MainWindow::onHtmlEditingFinished);
   connect(m_htmlPane, &HtmlSourcePane::htmlChanged, this,
           &MainWindow::onHtmlChanged);
+  connect(m_htmlPane, &HtmlSourcePane::openProblemsRequested, this,
+          &MainWindow::onShowProblemsDialog);
+  connect(m_htmlPane, &HtmlSourcePane::statusMessageRequested, this,
+          [this](const QString &msg) {
+            statusBar()->showMessage(msg, 3000);
+          });
   connect(m_editorTabs, &QTabWidget::currentChanged, this,
           &MainWindow::onTabChanged);
   connect(m_cssPane, &CssEditorPane::cssChanged, this,
@@ -699,10 +706,19 @@ bool MainWindow::openProjectFile(const QString &path) {
     }
   }
 
+  ProjectLoadingDialog loadingDialog(cleanPath, this);
+  loadingDialog.show();
+  loadingDialog.setProgress(5, QStringLiteral("Preparing to load project…"));
+
   qCInfo(logApp) << "Opening project with 3-stage validation:" << loadPath;
-  ProjectLoadReport report = ProjectSerializer::loadWithValidation(loadPath, m_project);
+  ProjectLoadReport report = ProjectSerializer::loadWithValidation(
+      loadPath, m_project,
+      [&loadingDialog](int percent, const QString &status) {
+        loadingDialog.setProgress(percent, status);
+      });
 
   if (!report.success) {
+    loadingDialog.close();
     qCWarning(logApp) << "Failed to open project file:" << loadPath
                       << "Stage:" << static_cast<int>(report.failedStage)
                       << "Reason:" << report.summaryError;
@@ -718,6 +734,8 @@ bool MainWindow::openProjectFile(const QString &path) {
     return false;
   }
 
+  loadingDialog.setProgress(92, QStringLiteral("Rendering chapter content & Work Skin CSS…"));
+
   // Render project
   m_hasActiveProject = true;
   m_chapterSidebar->refresh();
@@ -725,6 +743,8 @@ bool MainWindow::openProjectFile(const QString &path) {
   m_cssPane->setCss(m_project.workSkinCss());
   m_editorPane->setCustomCss(m_project.workSkinCss());
   m_editorPane->setAvailableCssClasses(m_cssPane->cssClassNames());
+
+  loadingDialog.setProgress(98, QStringLiteral("Preparing workspace…"));
 
   if (isRecoveredSession) {
     if (cleanPath.endsWith(QStringLiteral(".ao3projasve"), Qt::CaseInsensitive)) {
@@ -742,6 +762,7 @@ bool MainWindow::openProjectFile(const QString &path) {
     schedulePreviewUpdate();
     m_centralStack->setCurrentIndex(1); // Workspace
     statusBar()->showMessage(QStringLiteral("Project successfully recovered from autosave (.ao3projasve)"), 6000);
+    loadingDialog.finish();
     return true;
   }
 
@@ -757,6 +778,8 @@ bool MainWindow::openProjectFile(const QString &path) {
   updateMainMenuState();
   schedulePreviewUpdate();
   m_centralStack->setCurrentIndex(1); // Workspace
+
+  loadingDialog.finish();
 
   if (report.isLegacy) {
     qCInfo(logApp) << "Legacy project format detected for:" << cleanPath;
@@ -1085,8 +1108,15 @@ void MainWindow::onCopyHtmlToClipboard() {
   if (!chapter)
     return;
 
-  QApplication::clipboard()->setText(chapter->html());
-  statusBar()->showMessage(QStringLiteral("HTML copied to clipboard"), 2000);
+  QString htmlToCopy;
+  if (m_editorTabs && m_editorTabs->currentWidget() == m_htmlPane && m_htmlPane) {
+    htmlToCopy = Ao3HtmlSanitizer::sanitize(m_htmlPane->html());
+  } else {
+    htmlToCopy = chapter->html();
+  }
+
+  QApplication::clipboard()->setText(htmlToCopy);
+  statusBar()->showMessage(QStringLiteral("AO3 HTML copied to clipboard"), 2500);
 }
 
 void MainWindow::onImportFromAo3() {
@@ -2055,6 +2085,7 @@ void MainWindow::onThemeChanged(AppTheme theme) {
 }
 
 void MainWindow::onShowProblemsDialog() {
+  saveCurrentChapterFromEditors();
   updateProblemsDiagnostics();
   if (!m_problemsDialog) {
     m_problemsDialog = new ProblemsDialog(this);

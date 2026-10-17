@@ -2,6 +2,7 @@
 #include "ui/SettingsDialog.h"
 #include "ui/HelpGuideDialog.h"
 #include "ui/AboutDialog.h"
+#include "ui/ProjectLoadingDialog.h"
 #include "ui/MainMenuWindow.h"
 #include "ui/ToolbarIcons.h"
 #include "net/UpdateChecker.h"
@@ -619,6 +620,45 @@ int main(int argc, char *argv[])
         aboutDlg.updateTheme();
 
         std::cout << "✓ AboutDialog updater UI components and theme integration verified." << std::endl;
+    }
+
+    // 12. Test ProjectLoadingDialog progress bar, labels, clamping, theme styling, and finish lifecycle
+    {
+        ProjectLoadingDialog loadDlg(QStringLiteral("/home/user/stories/epic_fanfic.ao3proj"));
+
+        // Initial state
+        assert(loadDlg.progressValue() == 0);
+        assert(!loadDlg.currentStatus().isEmpty());
+        assert(loadDlg.windowTitle() == QStringLiteral("Opening Project…"));
+
+        // Progress update
+        loadDlg.setProgress(25, QStringLiteral("Decompressing project archive container…"));
+        assert(loadDlg.progressValue() == 25);
+        assert(loadDlg.currentStatus() == QStringLiteral("Decompressing project archive container…"));
+
+        // Clamping bounds
+        loadDlg.setProgress(150, QStringLiteral("Clamped max"));
+        assert(loadDlg.progressValue() == 100);
+
+        loadDlg.setProgress(-20, QStringLiteral("Clamped min"));
+        assert(loadDlg.progressValue() == 0);
+
+        // Verify updateTheme works across all themes
+        ThemeManager::instance().setTheme(AppTheme::Light);
+        loadDlg.updateTheme();
+        ThemeManager::instance().setTheme(AppTheme::Dark);
+        loadDlg.updateTheme();
+        ThemeManager::instance().setTheme(AppTheme::Darker);
+        loadDlg.updateTheme();
+        ThemeManager::instance().setTheme(AppTheme::Ao3Reversi);
+        loadDlg.updateTheme();
+
+        // Finish lifecycle
+        loadDlg.finish();
+        assert(loadDlg.progressValue() == 100);
+        assert(loadDlg.currentStatus() == QStringLiteral("Ready!"));
+
+        std::cout << "✓ ProjectLoadingDialog progress, bounds, theme updates, and finish lifecycle verified." << std::endl;
     }
 
     std::cout << "All Settings, Preferences, Help Guide & Main Menu lifecycle tests passed successfully!" << std::endl;

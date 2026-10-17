@@ -74,11 +74,15 @@ QString ProjectSerializer::formatAsciiPreview(const QByteArray &bytes)
     return ascii;
 }
 
-ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3Project &project)
+ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3Project &project, ProgressCallback progress)
 {
     ENSEMBLE_PROFILE_CAT_SCOPE("ProjectSerializer::loadWithValidation", logModel);
     ProjectLoadReport report;
     report.filePath = path;
+
+    if (progress) {
+        progress(10, QStringLiteral("Checking file integrity & magic signatures…"));
+    }
 
     // -------------------------------------------------------------
     // STAGE 0 & 1: File Access and Magic Bytes Check
@@ -220,6 +224,10 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
     if (report.formatType == ProjectFormatType::ModernArchiveZstd ||
         report.formatType == ProjectFormatType::ModernArchiveZip) {
 
+        if (progress) {
+            progress(25, QStringLiteral("Decompressing project archive container…"));
+        }
+
         QMap<QString, QByteArray> entries;
         QString decompressErr;
         if (!ZstdArchive::decompressArchive(path, entries, &decompressErr)) {
@@ -320,6 +328,10 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
         // -------------------------------------------------------------
         // STAGE 3: Render / Populate Project Model
         // -------------------------------------------------------------
+        if (progress) {
+            progress(50, QStringLiteral("Reading project metadata & chapter structure…"));
+        }
+
         project.resetToNew();
         project.chapters().clear();
 
@@ -446,6 +458,9 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
         const bool needsReorder = (!hasNonZero && chapMetas.size() > 1) || (hasDuplicateOrders && chapMetas.size() > 1);
 
         int fallbackOrder = 0;
+        if (progress) {
+            progress(70, QStringLiteral("Unpacking chapters and story content…"));
+        }
         for (const ChapterMeta &meta : chapMetas) {
             Chapter ch;
             ch.setTitle(meta.title.isEmpty() ? QStringLiteral("Untitled Chapter") : meta.title);
@@ -469,6 +484,10 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
             }
         }
 
+        if (progress) {
+            progress(85, QStringLiteral("Loading lore graph and project history…"));
+        }
+
         if (project.historyLog().trimmed().isEmpty()) {
             project.appendHistoryCommit(
                 project.author().isEmpty() ? QStringLiteral("Anonymous") : project.author(),
@@ -488,6 +507,11 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
         project.setDirty(false);
         project.setLegacyFormat(false);
         project.setLastSnapshotState(project.currentProjectState());
+
+        if (progress) {
+            progress(90, QStringLiteral("Project data unpacked successfully."));
+        }
+
         report.success = true;
         return report;
     }
@@ -496,6 +520,10 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
     // STAGE 2 & 3 FOR LEGACY JSON
     // -------------------------------------------------------------
     if (report.formatType == ProjectFormatType::LegacyJsonV1) {
+        if (progress) {
+            progress(25, QStringLiteral("Reading legacy JSON project file…"));
+        }
+
         QFile jsonFile(path);
         if (!jsonFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
             report.failedStage = ValidationStage::FileAccess;
@@ -547,6 +575,10 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
             return report;
         }
 
+        if (progress) {
+            progress(55, QStringLiteral("Parsing JSON data and chapter schema…"));
+        }
+
         project.resetToNew();
         project.setTitle(root.value(QStringLiteral("title")).toString(QStringLiteral("Untitled Work")));
         project.setWorkSkinCss(root.value(QStringLiteral("workSkinCss")).toString());
@@ -556,6 +588,9 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
         if (chapters.isEmpty()) {
             project.addChapter(QStringLiteral("Chapter 1"));
         } else {
+            if (progress) {
+                progress(75, QStringLiteral("Populating story chapters…"));
+            }
             for (const QJsonValue &val : chapters) {
                 if (!val.isObject()) {
                     report.failedStage = ValidationStage::StructureCheck;
@@ -578,6 +613,11 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
         project.setFilePath(path);
         project.setDirty(false);
         project.setLegacyFormat(true);
+
+        if (progress) {
+            progress(90, QStringLiteral("Legacy project data loaded successfully."));
+        }
+
         report.success = true;
         report.isLegacy = true;
         return report;

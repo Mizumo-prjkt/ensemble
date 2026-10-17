@@ -5,6 +5,7 @@
 #include "themes/ThemeManager.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QSettings>
 #include <QLabel>
 #include <QPushButton>
@@ -78,20 +79,71 @@ int main(int argc, char *argv[])
         assert(foundDisallowedTag);
         std::cout << "✓ HTML Linter diagnostic issue tracking and extra selections verified." << std::endl;
 
-        // Test Linter diagnostics for <span> tags: allowed as inline text highlighter (tip, not a hard error)
-        const QString spanHtml = QStringLiteral("<p><span class=\"highlight\">Amber text</span></p>");
-        htmlPane.editor()->setPlainText(spanHtml);
+        // Test HTML Issue Banner widgets: counts issues instead of listing them, collapsible details, and problem window button
+        auto *htmlSummaryLabel = htmlPane.findChild<QLabel *>(QStringLiteral("issueSummaryLabel"));
+        auto *htmlToggleBtn = htmlPane.findChild<QPushButton *>(QStringLiteral("toggleDetailsBtn"));
+        auto *htmlDetailsLabel = htmlPane.findChild<QLabel *>(QStringLiteral("issueDetailsLabel"));
+        auto *htmlProblemsBtn = htmlPane.findChild<QPushButton *>(QStringLiteral("viewProblemsBtn"));
+        auto *htmlBreadcrumbLabel = htmlPane.findChild<QLabel *>(QStringLiteral("tagBreadcrumbLabel"));
+        auto *htmlCopyBtn = htmlPane.findChild<QPushButton *>(QStringLiteral("copyAo3Button"));
+
+        assert(htmlSummaryLabel != nullptr);
+        assert(htmlToggleBtn != nullptr);
+        assert(htmlDetailsLabel != nullptr);
+        assert(htmlProblemsBtn != nullptr);
+        assert(htmlBreadcrumbLabel != nullptr);
+        assert(htmlCopyBtn != nullptr);
+
+        // Put unsafe HTML with disallowed tag (<script> and </script>) and 1 warning (inline style)
+        htmlPane.editor()->setPlainText(unsafeHtml);
         QMetaObject::invokeMethod(&htmlPane, "runLinter", Qt::DirectConnection);
-        const auto spanIssues = htmlPane.editor()->diagnosticIssues();
-        assert(!spanIssues.isEmpty());
-        bool foundSpanTip = false;
-        for (const auto &iss : spanIssues) {
-            if (iss.message.contains(QStringLiteral("inline text highlighters")) && !iss.isError) {
-                foundSpanTip = true;
-            }
-        }
-        assert(foundSpanTip);
-        std::cout << "✓ HTML Linter <span> tag non-error tip diagnostic verified." << std::endl;
+        assert(htmlSummaryLabel->text().contains(QStringLiteral("3 HTML issues detected")));
+        assert(htmlSummaryLabel->text().contains(QStringLiteral("2 errors, 1 warning")));
+        assert(htmlDetailsLabel->isHidden()); // Collapsed by default
+
+        // Expand and collapse details
+        htmlToggleBtn->click();
+        assert(!htmlDetailsLabel->isHidden());
+        assert(htmlDetailsLabel->text().contains(QStringLiteral("inline style"), Qt::CaseInsensitive));
+        assert(htmlDetailsLabel->text().contains(QStringLiteral("script"), Qt::CaseInsensitive));
+        htmlToggleBtn->click();
+        assert(htmlDetailsLabel->isHidden());
+
+        // Test Problems Window button signal
+        bool problemSignalEmitted = false;
+        QObject::connect(&htmlPane, &HtmlSourcePane::openProblemsRequested, [&]() {
+            problemSignalEmitted = true;
+        });
+        htmlProblemsBtn->click();
+        assert(problemSignalEmitted);
+        std::cout << "✓ HTML Issue Card count summary, collapsible details, and Problems Dialog button verified." << std::endl;
+
+        // Test HTML Tag Path / Breadcrumbs calculation ("say the tags")
+        const QString nestedHtml = QStringLiteral("<div class=\"card-box\"><p>Hello <span class=\"speaker\">world</span></p></div>");
+        int spanPos = nestedHtml.indexOf(QStringLiteral("world"));
+        QStringList tagPath = HtmlSourcePane::getTagPathAt(nestedHtml, spanPos);
+        assert(tagPath.size() == 3);
+        assert(tagPath.at(0) == QStringLiteral("div.card-box"));
+        assert(tagPath.at(1) == QStringLiteral("p"));
+        assert(tagPath.at(2) == QStringLiteral("span.speaker"));
+        std::cout << "✓ HTML tag path breadcrumbs calculation verified." << std::endl;
+
+        // Test Tag Insertion for tags rich text can't work out (span with class)
+        htmlPane.editor()->setPlainText(QStringLiteral("Dialogue snippet"));
+        QTextCursor cur = htmlPane.editor()->textCursor();
+        cur.select(QTextCursor::Document);
+        htmlPane.editor()->setTextCursor(cur);
+        htmlPane.insertTag(QStringLiteral("span"), QStringLiteral("speech"));
+        assert(htmlPane.html().contains(QStringLiteral("<span class=\"speech\">Dialogue snippet</span>")));
+        std::cout << "✓ HTML Quick Tag wrapping and insertion verified." << std::endl;
+
+        // Test Alternative Copy for AO3
+        htmlPane.editor()->setPlainText(QStringLiteral("<p>Story text with <script>alert(1)</script> dangerous tag.</p>"));
+        htmlPane.copyAo3Html();
+        QString clipboardText = QApplication::clipboard()->text();
+        assert(!clipboardText.contains(QStringLiteral("<script>")));
+        assert(clipboardText.contains(QStringLiteral("Story text with")));
+        std::cout << "✓ Alternative Copy for AO3 with live sanitization verified." << std::endl;
     }
 
     // 2. Test CssEditorPane duplicate selector detection & issue card
