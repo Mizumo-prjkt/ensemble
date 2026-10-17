@@ -70,7 +70,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "assoc"; Description: "Associate .ao3proj project files with {#AppName}"; GroupDescription: "File associations:"
+Name: "assoc"; Description: "Associate supported files (.ao3proj projects, .er plugins) with {#AppName}"; GroupDescription: "File associations:"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -80,15 +80,61 @@ Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Registry]
+; ------------------------------------------------------------------------------
+; File Association: .ao3proj (Ensemble AO3 Project Archive)
+; ------------------------------------------------------------------------------
+Root: HKA; Subkey: "Software\Classes\.ao3proj"; ValueType: string; ValueName: ""; ValueData: "Ensemble.ao3proj"; Flags: uninsdeletevalue; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\.ao3proj"; ValueType: string; ValueName: "Content Type"; ValueData: "application/x-ao3proj"; Flags: uninsdeletevalue; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\.ao3proj"; ValueType: string; ValueName: "PerceivedType"; ValueData: "Document"; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.ao3proj\OpenWithProgids"; ValueType: string; ValueName: "Ensemble.ao3proj"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Ensemble.ao3proj"; ValueType: string; ValueName: ""; ValueData: "Ensemble AO3 Project Archive"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Ensemble.ao3proj"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "Ensemble AO3 Project Archive"; Flags: uninsdeletekey; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Ensemble.ao3proj\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Ensemble.ao3proj\shell\open"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#AppName}"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Ensemble.ao3proj\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: assoc
 
+; ------------------------------------------------------------------------------
+; File Association: .ao3projasve (Ensemble AO3 Autosave Recovery)
+; ------------------------------------------------------------------------------
+Root: HKA; Subkey: "Software\Classes\.ao3projasve"; ValueType: string; ValueName: ""; ValueData: "Ensemble.ao3projasve"; Flags: uninsdeletevalue; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\.ao3projasve"; ValueType: string; ValueName: "Content Type"; ValueData: "application/x-ao3proj"; Flags: uninsdeletevalue; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\.ao3projasve"; ValueType: string; ValueName: "PerceivedType"; ValueData: "Document"; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.ao3projasve\OpenWithProgids"; ValueType: string; ValueName: "Ensemble.ao3projasve"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Ensemble.ao3projasve"; ValueType: string; ValueName: ""; ValueData: "Ensemble AO3 Autosave Recovery"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Ensemble.ao3projasve"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "Ensemble AO3 Autosave Recovery"; Flags: uninsdeletekey; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Ensemble.ao3projasve\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Ensemble.ao3projasve\shell\open"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#AppName}"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Ensemble.ao3projasve\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: assoc
+
+; ------------------------------------------------------------------------------
+; File Association: .er (Ensemble Plugin Package)
+; ------------------------------------------------------------------------------
+Root: HKA; Subkey: "Software\Classes\.er"; ValueType: string; ValueName: ""; ValueData: "Ensemble.Plugin"; Flags: uninsdeletevalue; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\.er"; ValueType: string; ValueName: "Content Type"; ValueData: "application/x-ensemble-plugin"; Flags: uninsdeletevalue; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\.er"; ValueType: string; ValueName: "PerceivedType"; ValueData: "Package"; Flags: uninsdeletevalue; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\.er\OpenWithProgids"; ValueType: string; ValueName: "Ensemble.Plugin"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Ensemble.Plugin"; ValueType: string; ValueName: ""; ValueData: "Ensemble Plugin Package"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Ensemble.Plugin"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "Ensemble Plugin Package"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Ensemble.Plugin\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Ensemble.Plugin\shell\open"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#AppName}"; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Ensemble.Plugin\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: assoc
+
+; ------------------------------------------------------------------------------
+; Windows Open With & Registered Application Capabilities
+; ------------------------------------------------------------------------------
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#AppName}"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".ao3proj"; ValueData: ""; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".ao3projasve"; ValueData: ""; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".er"; ValueData: ""; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: assoc
+
+Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "{#AppName}"; ValueData: "Software\{#AppName}\Capabilities"; Flags: uninsdeletevalue; Tasks: assoc
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#AppName}"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Ensemble AO3 Typewriter and Fanfiction Studio"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ao3proj"; ValueData: "Ensemble.ao3proj"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ao3projasve"; ValueData: "Ensemble.ao3projasve"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".er"; ValueData: "Ensemble.Plugin"; Flags: uninsdeletekey; Tasks: assoc
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
