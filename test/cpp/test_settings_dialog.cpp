@@ -247,7 +247,11 @@ int main(int argc, char *argv[])
         assert(topicList != nullptr);
         assert(contentBrowser != nullptr);
         assert(searchEdit != nullptr);
-        assert(topicList->count() == 17);
+        assert(topicList->count() == 18);
+
+        // Verify plugins_dsl topic selection
+        helpDialog.selectTopic("plugins_dsl");
+        assert(contentBrowser->toHtml().contains("Sandboxed Scripting Engine"));
 
         // Verify topic selection
         helpDialog.selectTopic("work_skins");
@@ -303,10 +307,10 @@ int main(int argc, char *argv[])
         for (int i = 0; i < topicList->count(); ++i) {
             if (!topicList->item(i)->isHidden()) restoredCount++;
         }
-        assert(restoredCount == 17);
+        assert(restoredCount == 18);
 
         helpDialog.updateTheme();
-        std::cout << "✓ HelpGuideDialog 17 topics (including Chapter Manager, MCP, Lore Graph, Properties, Image Embeds, Snapshots), search filtering, and documentation browser verified." << std::endl;
+        std::cout << "✓ HelpGuideDialog 18 topics (including Plugins DSL, Chapter Manager, MCP, Lore Graph, Properties, Image Embeds, Snapshots), search filtering, and documentation browser verified." << std::endl;
     }
 
     // 6. Test MainMenuWidget project open/close state tracking

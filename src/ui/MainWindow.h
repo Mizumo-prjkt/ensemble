@@ -34,6 +34,10 @@ class LoreGraphDialog;
 class McpServer;
 class McpHandler;
 
+namespace EnsemblePlugin {
+class PluginManagerDialog;
+}
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -98,6 +102,8 @@ private slots:
     void onShowSettings();
     void onShowAgentThoughts();
     void onShowLoreGraph();
+    void onShowPluginManager();
+    void updatePluginActionsMenu();
     void onOpenChapterManager();
     void onEditProperties();
     void updateCursorPosition();
@@ -169,6 +175,9 @@ private:
     HelpGuideDialog *m_helpGuideDialog = nullptr;
     AgentThoughtsDialog *m_agentThoughtsDialog = nullptr;
     LoreGraphDialog *m_loreGraphDialog = nullptr;
+    EnsemblePlugin::PluginManagerDialog *m_pluginManagerDialog = nullptr;
+    QMenu *m_toolsMenu = nullptr;
+    QList<QAction*> m_pluginToolbarActions;
 
     QAction *m_closeProjectAction = nullptr;
     QAction *m_saveAction = nullptr;

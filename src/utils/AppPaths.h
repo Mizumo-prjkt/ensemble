@@ -22,6 +22,12 @@ QString sessionFilePath();
 // Directory for emergency session autosaves (.ao3projasve)
 QString autosaveDir();
 
+// Directory where user plugins (.py, .ensp) reside
+QString pluginsDir();
+
+// Directory for plugin persistent key-value storage (<secret_uidp>/)
+QString pluginStoreDir();
+
 // Ensure all application directories exist on disk
 void ensureDirectoriesExist();
 

@@ -36,11 +36,27 @@ QString autosaveDir()
     return path;
 }
 
+QString pluginsDir()
+{
+    const QString path = QDir(appDataDir()).filePath(QStringLiteral("plugins"));
+    QDir().mkpath(path);
+    return path;
+}
+
+QString pluginStoreDir()
+{
+    const QString path = QDir(appDataDir()).filePath(QStringLiteral("plugin_store"));
+    QDir().mkpath(path);
+    return path;
+}
+
 void ensureDirectoriesExist()
 {
     appDataDir();
     appConfigDir();
     autosaveDir();
+    pluginsDir();
+    pluginStoreDir();
 }
 
 } // namespace AppPaths

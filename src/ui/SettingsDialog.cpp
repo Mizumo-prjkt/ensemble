@@ -5,8 +5,11 @@
 #include "mcp/McpServer.h"
 #include "mcp/McpAgentInstaller.h"
 #include "debug/debug.hpp"
+#include "ui/PluginManagerDialog.h"
+#include "utils/AppPaths.h"
 
 #include <QApplication>
+#include <QDesktopServices>
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QClipboard>
@@ -713,24 +716,25 @@ QWidget *SettingsDialog::createPluginsTab()
     layout->setContentsMargins(12, 12, 12, 12);
     layout->setSpacing(14);
 
-    auto *pluginGroup = new QGroupBox(QStringLiteral("Plugins Architecture"), container);
+    auto *pluginGroup = new QGroupBox(QStringLiteral("[Beta] Sandboxed Scripting Plugins"), container);
     auto *pluginLayout = new QVBoxLayout(pluginGroup);
     pluginLayout->setSpacing(12);
 
-    auto *todoTitle = new QLabel(
-        QStringLiteral("<b>🧩 Plugins [TODO: Coming soon]</b>"), pluginGroup);
-    todoTitle->setWordWrap(true);
-    todoTitle->setStyleSheet(QStringLiteral("font-size: 14px;"));
-    pluginLayout->addWidget(todoTitle);
+    auto *betaTitle = new QLabel(
+        QStringLiteral("<b>🧩 Third-Party Scripting Engine (Beta)</b>"), pluginGroup);
+    betaTitle->setWordWrap(true);
+    betaTitle->setStyleSheet(QStringLiteral("font-size: 14px;"));
+    pluginLayout->addWidget(betaTitle);
 
     m_pluginsDesc = new QLabel(
-        QStringLiteral("A full-featured plugin extension system is currently under active development.<br><br>"
-                       "Planned plugin extension points will allow you to add:<br>"
-                       "• <b>Custom Work Skin Themes</b> &amp; responsive template galleries<br>"
-                       "• <b>LanguageTool</b> &amp; advanced style/grammar linting backends<br>"
-                       "• <b>Custom Exporters</b>: EPUB3, Kindle MOBI, PDF, Markdown, and LaTeX<br>"
-                       "• <b>AO3 Analytics</b>: Kudos, hit counters, and comment notification feeds<br>"
-                       "• <b>Cloud Synchronization</b>: Nextcloud, Google Drive, WebDAV, and Git repositories"),
+        QStringLiteral("Ensemble features a custom, memory-bounded, Python-like DSL interpreter for third-party scripts.<br><br>"
+                       "<b>Non-Negotiable Sandbox Protection:</b><br>"
+                       "• <b>Zero Native Risk:</b> No CPython, Lua, or dynamic libraries (<code>.so</code> / <code>.dll</code>).<br>"
+                       "• <b>Thread Isolation:</b> Runs in dedicated <code>QThread</code> workers without GUI pointers.<br>"
+                       "• <b>Memory &amp; Time Guards:</b> 8 MB RAM cap, 150,000 steps / 250ms timeout, 64-frame stack depth.<br>"
+                       "• <b>Opaque Storage:</b> Isolated key-value storage (5 MB cap) with strict path-traversal traps.<br>"
+                       "• <b>Host Connectors:</b> <code>editor</code>, <code>storage</code>, <code>status</code>, and <code>plugins</code>.<br><br>"
+                       "Use the Plugin Manager to view active plugins, test hooks, or load new Python-like scripts."),
         pluginGroup);
     m_pluginsDesc->setWordWrap(true);
     m_pluginsDesc->setTextFormat(Qt::RichText);
@@ -738,9 +742,22 @@ QWidget *SettingsDialog::createPluginsTab()
     pluginLayout->addWidget(m_pluginsDesc);
 
     auto *btnRow = new QHBoxLayout();
-    auto *installBtn = new QPushButton(QStringLiteral("📦 Install Plugin Package… [TODO: Coming soon]"), pluginGroup);
-    installBtn->setEnabled(false);
-    btnRow->addWidget(installBtn);
+    auto *openManagerBtn = new QPushButton(QStringLiteral("🧩 Open Plugin Manager…"), pluginGroup);
+    openManagerBtn->setCursor(Qt::PointingHandCursor);
+    connect(openManagerBtn, &QPushButton::clicked, this, [this]() {
+        auto *dialog = new EnsemblePlugin::PluginManagerDialog(this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
+    });
+    btnRow->addWidget(openManagerBtn);
+
+    auto *openFolderBtn = new QPushButton(QStringLiteral("📂 Open Plugins Folder"), pluginGroup);
+    openFolderBtn->setCursor(Qt::PointingHandCursor);
+    connect(openFolderBtn, &QPushButton::clicked, this, []() {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(AppPaths::pluginsDir()));
+    });
+    btnRow->addWidget(openFolderBtn);
+
     btnRow->addStretch(1);
     pluginLayout->addLayout(btnRow);
 

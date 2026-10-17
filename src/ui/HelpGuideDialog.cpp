@@ -846,7 +846,69 @@ void HelpGuideDialog::populateTopics()
             "  <tr class='row-alt'><td><kbd>Ctrl+Alt+3</kbd></td><td>Light Mode</td><td>Global</td></tr>"
             "  <tr><td><kbd>Ctrl+Alt+T</kbd></td><td>Cycle Theme (Light / Dark / Reversi)</td><td>Global</td></tr>"
             "  <tr class='row-alt'><td><kbd>Ctrl+Alt+D</kbd></td><td>Debug Console (Debug build)</td><td>Global</td></tr>"
+            "  <tr><td><kbd>Ctrl+Shift+U</kbd></td><td>Open [Beta] Plugin Manager</td><td>Global</td></tr>"
             "</table>"
+        );
+        m_topics.append(t);
+    }
+
+    // 18. [Beta] Sandboxed Scripting Plugins (DSL)
+    {
+        HelpTopic t;
+        t.id = QStringLiteral("plugins_dsl");
+        t.icon = QStringLiteral("🧩");
+        t.title = QStringLiteral("[Beta] Sandboxed Scripting Plugins");
+        t.summary = QStringLiteral("Custom memory-bounded Python-like DSL interpreter running in isolated worker threads");
+        t.contentHtml = QStringLiteral(
+            "<h2>🧩 [Beta] Sandboxed Scripting Engine</h2>"
+            "<p>Ensemble includes a custom, memory-bounded, Python-like Domain-Specific Language (DSL) and Tree-Walking AST interpreter designed specifically for running third-party plugins safely.</p>"
+            "<div class='callout-note'>"
+            "  <b>🔒 Strict Sandboxing &amp; Host Protection:</b>"
+            "  <ul>"
+            "    <li><b>No Native Shared Objects:</b> Does not embed CPython, Lua, or dynamic libraries (<code>.so</code> / <code>.dll</code>). Zero risk of native memory corruption.</li>"
+            "    <li><b>Worker Thread Isolation:</b> Every plugin executes in its own dedicated background <code>QThread</code>. The UI thread never blocks or freezes.</li>"
+            "    <li><b>Memory Cap (8 MB):</b> Every string, list, and dictionary allocation is guarded. Exceeding 8 MB immediately traps the plugin before allocation.</li>"
+            "    <li><b>Execution Watchdog:</b> Limits execution to 150,000 AST steps and 250ms per hook, preventing infinite loops.</li>"
+            "    <li><b>Call Stack Depth (64 frames):</b> Strict recursion limit prevents C++ stack overflows.</li>"
+            "    <li><b>Opaque Storage UIDP:</b> Plugins use a strictly host-private UUID token for isolated key-value storage (5 MB quota) with complete path traversal protection.</li>"
+            "  </ul>"
+            "</div>"
+            "<h3>Exposed Host Namespaces</h3>"
+            "<ul>"
+            "  <li><code>editor.get_chapter_text()</code>: Returns the active chapter's plain text.</li>"
+            "  <li><code>editor.get_selection()</code>: Returns the currently highlighted text.</li>"
+            "  <li><code>editor.replace_selection(new_text)</code>: Replaces the selection and pushes onto the editor undo stack (<kbd>Ctrl+Z</kbd>).</li>"
+            "  <li><code>editor.get_chapter_title()</code>: Returns the active chapter's title.</li>"
+            "  <li><code>storage.read(key)</code> / <code>storage.write(key, val)</code> / <code>storage.delete(key)</code> / <code>storage.list_keys()</code>: Persistent 5 MB isolated storage.</li>"
+            "  <li><code>status.warn(msg, line)</code> / <code>status.error(msg, line)</code> / <code>status.notify(msg)</code>: Status bar and gutter alerts.</li>"
+            "  <li><code>plugins.list()</code> / <code>plugins.is_active(id)</code> / <code>plugins.send_message(id, payload)</code>: Safe inter-plugin communication.</li>"
+            "</ul>"
+            "<h3>Supported Decorator Hooks</h3>"
+            "<pre><code># ID: author.dialogue-checker\n"
+            "# Name: Dialogue Checker\n"
+            "# Version: 1.0\n\n"
+            "@on_toolbar_click(\"Check Dialogue\")\n"
+            "def check_dialogue():\n"
+            "    text = editor.get_chapter_text()\n"
+            "    lines = text.split(\"\\n\")\n"
+            "    unbalanced = 0\n"
+            "    for line in lines:\n"
+            "        count = 0\n"
+            "        for ch in line:\n"
+            "            if ch == '\"':\n"
+            "                count += 1\n"
+            "        if count % 2 != 0:\n"
+            "            unbalanced += 1\n"
+            "    if unbalanced > 0:\n"
+            "        status.warn(\"Dialogue check: found \" + str(unbalanced) + \" lines with unmatched quotes\", 1)\n"
+            "    else:\n"
+            "        status.notify(\"Dialogue check passed!\")\n\n"
+            "@on_chapter_change\n"
+            "def on_load(title, text, index):\n"
+            "    status.notify(\"Loaded chapter: \" + title)</code></pre>"
+            "<div class='callout-tip'>"
+            "  <b>💡 Accessing the Plugin Manager:</b> Open <i>Tools → 🧩 [Beta] Plugin Manager…</i> (<kbd>Ctrl+Shift+U</kbd>) or Preferences to load scripts, toggle plugins, and run custom actions!"
+            "</div>"
         );
         m_topics.append(t);
     }

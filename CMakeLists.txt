@@ -147,6 +147,14 @@ set(SOURCES
     src/mcp/McpHandler.cpp
     src/mcp/McpAgentInstaller.cpp
     src/mcp/McpBridge.cpp
+    src/plugins/ResourceGuard.cpp
+    src/plugins/ScriptValue.cpp
+    src/plugins/ScriptLexer.cpp
+    src/plugins/ScriptParser.cpp
+    src/plugins/PluginSandbox.cpp
+    src/plugins/ScriptEvaluator.cpp
+    src/plugins/PluginManager.cpp
+    src/ui/PluginManagerDialog.cpp
 )
 
 set(HEADERS
@@ -208,6 +216,14 @@ set(HEADERS
     src/mcp/AgentActivity.h
     src/mcp/McpAgentInstaller.h
     src/mcp/McpBridge.h
+    src/plugins/ResourceGuard.h
+    src/plugins/ScriptValue.h
+    src/plugins/ScriptLexer.h
+    src/plugins/ScriptParser.h
+    src/plugins/PluginSandbox.h
+    src/plugins/ScriptEvaluator.h
+    src/plugins/PluginManager.h
+    src/ui/PluginManagerDialog.h
 )
 
 set(CMAKE_QT_NO_ADD_WINDOWS_MANIFEST TRUE)
@@ -370,6 +386,22 @@ add_executable(test_settings_dialog
     src/mcp/McpServer.h
     src/mcp/McpAgentInstaller.cpp
     src/mcp/McpAgentInstaller.h
+    src/plugins/ResourceGuard.cpp
+    src/plugins/ResourceGuard.h
+    src/plugins/ScriptValue.cpp
+    src/plugins/ScriptValue.h
+    src/plugins/ScriptLexer.cpp
+    src/plugins/ScriptLexer.h
+    src/plugins/ScriptParser.cpp
+    src/plugins/ScriptParser.h
+    src/plugins/PluginSandbox.cpp
+    src/plugins/PluginSandbox.h
+    src/plugins/ScriptEvaluator.cpp
+    src/plugins/ScriptEvaluator.h
+    src/plugins/PluginManager.cpp
+    src/plugins/PluginManager.h
+    src/ui/PluginManagerDialog.cpp
+    src/ui/PluginManagerDialog.h
 )
 target_include_directories(test_settings_dialog PRIVATE src)
 target_compile_definitions(test_settings_dialog PRIVATE
@@ -480,11 +512,52 @@ endif()
 set_target_properties(test_mcp PROPERTIES QT_RESOURCE_PREFIX "/")
 qt_add_resources(test_mcp resources/resources.qrc)
 
+add_executable(test_plugin_engine
+    test/cpp/test_plugin_engine.cpp
+    src/plugins/ResourceGuard.cpp
+    src/plugins/ResourceGuard.h
+    src/plugins/ScriptValue.cpp
+    src/plugins/ScriptValue.h
+    src/plugins/ScriptLexer.cpp
+    src/plugins/ScriptLexer.h
+    src/plugins/ScriptParser.cpp
+    src/plugins/ScriptParser.h
+    src/plugins/PluginSandbox.cpp
+    src/plugins/PluginSandbox.h
+    src/plugins/ScriptEvaluator.cpp
+    src/plugins/ScriptEvaluator.h
+    src/plugins/PluginManager.cpp
+    src/plugins/PluginManager.h
+    src/utils/AppPaths.cpp
+)
+target_include_directories(test_plugin_engine PRIVATE src)
+target_compile_definitions(test_plugin_engine PRIVATE
+    $<$<CONFIG:Debug>:
+        ENSEMBLE_BUILD_TYPE="Debug"
+        QT_DEBUG
+    >
+    $<$<NOT:$<CONFIG:Debug>>:
+        ENSEMBLE_BUILD_TYPE="Release"
+        QT_NO_DEBUG_OUTPUT
+        NDEBUG
+    >
+    ENSEMBLE_APP_VERSION="${ENSEMBLE_FULL_VERSION}"
+    ENSEMBLE_BASE_VERSION="${ENSEMBLE_BASE_VERSION}"
+    ENSEMBLE_LOCALVERSION="${ENSEMBLE_LOCALVERSION}"
+    ENSEMBLE_GIT_DIRTY="${ENSEMBLE_GIT_DIRTY}"
+)
+target_link_libraries(test_plugin_engine PRIVATE Qt6::Core Qt6::Gui)
+if(WIN32)
+    target_link_libraries(test_plugin_engine PRIVATE ws2_32)
+endif()
+
 enable_testing()
 add_test(NAME test_ao3_parser COMMAND test_ao3_parser)
 add_test(NAME test_project_archive COMMAND test_project_archive)
 add_test(NAME test_editor_diagnostics COMMAND test_editor_diagnostics)
 add_test(NAME test_settings_dialog COMMAND test_settings_dialog)
 add_test(NAME test_mcp COMMAND test_mcp)
+add_test(NAME test_plugin_engine COMMAND test_plugin_engine)
+
 
 

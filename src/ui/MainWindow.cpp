@@ -29,6 +29,8 @@
 #include "themes/ThemeManager.h"
 #include "mcp/McpServer.h"
 #include "mcp/McpHandler.h"
+#include "plugins/PluginManager.h"
+#include "ui/PluginManagerDialog.h"
 
 #include <QPushButton>
 #include <QStackedWidget>
@@ -94,6 +96,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   auto *fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
   auto *exportMenu = menuBar()->addMenu(QStringLiteral("&Export"));
   auto *viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
+  m_toolsMenu = menuBar()->addMenu(QStringLiteral("&Tools"));
   auto *helpMenu = menuBar()->addMenu(QStringLiteral("&Help"));
 
   auto *newAction = fileMenu->addAction(QStringLiteral("&New"));
@@ -248,6 +251,54 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     debugConsoleAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+D")));
     connect(debugConsoleAction, &QAction::triggered, this, &MainWindow::onShowDebugConsole);
   }
+
+  // Tools menu
+  auto *pluginManagerAction = m_toolsMenu->addAction(QStringLiteral("🧩 [Beta] &Plugin Manager…"));
+  pluginManagerAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+U")));
+  connect(pluginManagerAction, &QAction::triggered, this, &MainWindow::onShowPluginManager);
+  m_toolsMenu->addSeparator();
+
+  // Initialize and connect Plugin Subsystem
+  EnsemblePlugin::PluginManager::instance().initialize();
+
+  connect(&EnsemblePlugin::PluginManager::instance(), &EnsemblePlugin::PluginManager::replaceSelectionRequested,
+          this, [this](const QString &newText) {
+    if (m_editorPane && m_editorPane->editor()) {
+      m_editorPane->editor()->textCursor().insertText(newText);
+    }
+  });
+
+  connect(&EnsemblePlugin::PluginManager::instance(), &EnsemblePlugin::PluginManager::pluginStatusWarn,
+          this, [this](const QString &pid, const QString &msg, int line) {
+    if (statusBar()) {
+      statusBar()->showMessage(tr("[Plugin %1] ⚠️ %2 (line %3)").arg(pid, msg).arg(line), 6000);
+    }
+  });
+
+  connect(&EnsemblePlugin::PluginManager::instance(), &EnsemblePlugin::PluginManager::pluginStatusError,
+          this, [this](const QString &pid, const QString &msg, int line) {
+    if (statusBar()) {
+      statusBar()->showMessage(tr("[Plugin %1] ❌ %2 (line %3)").arg(pid, msg).arg(line), 8000);
+    }
+  });
+
+  connect(&EnsemblePlugin::PluginManager::instance(), &EnsemblePlugin::PluginManager::pluginStatusNotify,
+          this, [this](const QString &pid, const QString &msg) {
+    if (statusBar()) {
+      statusBar()->showMessage(tr("[Plugin %1] ℹ️ %2").arg(pid, msg), 4000);
+    }
+  });
+
+  connect(&EnsemblePlugin::PluginManager::instance(), &EnsemblePlugin::PluginManager::pluginFaulted,
+          this, [this](const QString &pid, const QString &msg, int line) {
+    if (statusBar()) {
+      statusBar()->showMessage(tr("[Plugin %1 FAULTED] 💥 %2 (line %3)").arg(pid, msg).arg(line), 10000);
+    }
+  });
+
+  connect(&EnsemblePlugin::PluginManager::instance(), &EnsemblePlugin::PluginManager::toolbarActionsChanged,
+          this, &MainWindow::updatePluginActionsMenu);
+  updatePluginActionsMenu();
 
   // Help menu
   auto *helpGuideAction = helpMenu->addAction(QStringLiteral("📖 Help && User Guide…"));
@@ -419,6 +470,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 }
 
 MainWindow::~MainWindow() {
+  EnsemblePlugin::PluginManager::instance().shutdownAll();
   if (m_mcpServer) {
     m_mcpServer->disconnect();
     m_mcpServer->stop();
@@ -1027,6 +1079,14 @@ void MainWindow::onEditorContentChanged() {
   updateStatusBar();
   m_htmlSyncTimer->start();
   schedulePreviewUpdate();
+
+  if (m_editorPane && m_editorPane->editor()) {
+    const Chapter *chap = m_project.activeChapter();
+    QString title = chap ? chap->title() : QString();
+    QString text = m_editorPane->editor()->toPlainText();
+    QString sel = m_editorPane->editor()->textCursor().selectedText();
+    EnsemblePlugin::PluginManager::instance().notifyEditorSnapshot(title, text, sel);
+  }
 }
 
 void MainWindow::onEditorHtmlExported(const QString &html) {
@@ -1156,6 +1216,11 @@ void MainWindow::loadCurrentChapterIntoEditors() {
 
   updateStatusBar();
   m_editorPane->focusEditor();
+
+  if (chapter) {
+    EnsemblePlugin::PluginManager::instance().notifyChapterChanged(
+        chapter->title(), chapter->html(), m_project.activeChapterIndex());
+  }
 }
 
 void MainWindow::saveCurrentChapterFromEditors() {
@@ -2009,6 +2074,36 @@ void MainWindow::onShowLoreGraph() {
   m_loreGraphDialog->show();
   m_loreGraphDialog->raise();
   m_loreGraphDialog->activateWindow();
+}
+
+void MainWindow::onShowPluginManager() {
+  if (!m_pluginManagerDialog) {
+    m_pluginManagerDialog = new EnsemblePlugin::PluginManagerDialog(this);
+  }
+  m_pluginManagerDialog->refreshPluginList();
+  m_pluginManagerDialog->show();
+  m_pluginManagerDialog->raise();
+  m_pluginManagerDialog->activateWindow();
+}
+
+void MainWindow::updatePluginActionsMenu() {
+  if (!m_toolsMenu) return;
+  for (auto *act : m_pluginToolbarActions) {
+    m_toolsMenu->removeAction(act);
+    delete act;
+  }
+  m_pluginToolbarActions.clear();
+
+  const QStringList actions = EnsemblePlugin::PluginManager::instance().allToolbarActions();
+  if (!actions.isEmpty()) {
+    for (const QString &actName : actions) {
+      auto *act = m_toolsMenu->addAction(QStringLiteral("▶ ") + actName);
+      connect(act, &QAction::triggered, this, [actName]() {
+        EnsemblePlugin::PluginManager::instance().triggerToolbarAction(actName);
+      });
+      m_pluginToolbarActions.append(act);
+    }
+  }
 }
 
 void MainWindow::onOpenChapterManager() {
