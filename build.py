@@ -436,13 +436,19 @@ class EnsembleBuilder:
             self.log("[ERROR] CMake install to AppDir failed.")
             return ret
 
-        # 2. Stage AppDir root metadata
+        # 2. Stage AppDir root metadata & licenses
         desktop_src = REPO_ROOT / "resources" / "ensemble.desktop"
         icon_src = REPO_ROOT / "src" / "icons" / "icon.png"
 
         shutil.copy2(desktop_src, appdir / "ensemble.desktop")
         shutil.copy2(icon_src, appdir / "ensemble.png")
         shutil.copy2(icon_src, appdir / ".DirIcon")
+
+        # Copy license texts into AppDir root for LGPL compliance & transparency
+        for lic_name in ("LICENSE", "LICENSE.LGPLv3", "LICENSE.GPLv3"):
+            lic_file = REPO_ROOT / lic_name
+            if lic_file.exists():
+                shutil.copy2(lic_file, appdir / lic_name)
 
         # 3. Create AppRun launcher
         apprun_path = appdir / "AppRun"
@@ -451,7 +457,16 @@ class EnsembleBuilder:
             "set -e\n"
             'APPDIR="$(dirname "$(readlink -f "${0}")")"\n'
             'export PATH="${APPDIR}/usr/bin:${PATH}"\n'
-            'export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${APPDIR}/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"\n'
+            "# LGPLv3 Compliance: Allow runtime user override of dynamic libraries (including Qt).\n"
+            "# If ENSEMBLE_LIBRARY_PATH or a custom LD_LIBRARY_PATH is provided, give it precedence\n"
+            "# so users can freely replace or upgrade Qt libraries at runtime without repackaging.\n"
+            'if [ -n "${ENSEMBLE_LIBRARY_PATH}" ]; then\n'
+            '    export LD_LIBRARY_PATH="${ENSEMBLE_LIBRARY_PATH}:${APPDIR}/usr/lib:${APPDIR}/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"\n'
+            'elif [ -n "${LD_LIBRARY_PATH}" ]; then\n'
+            '    export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${APPDIR}/usr/lib:${APPDIR}/usr/lib/x86_64-linux-gnu"\n'
+            'else\n'
+            '    export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${APPDIR}/usr/lib/x86_64-linux-gnu"\n'
+            'fi\n'
             'export XDG_DATA_DIRS="${APPDIR}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"\n'
             'export QT_PLUGIN_PATH="${APPDIR}/usr/lib/qt6/plugins:${APPDIR}/usr/plugins:${QT_PLUGIN_PATH}"\n'
             'export QML2_IMPORT_PATH="${APPDIR}/usr/qml:${QML2_IMPORT_PATH}"\n'

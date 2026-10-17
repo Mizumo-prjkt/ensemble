@@ -6,6 +6,8 @@ class QLabel;
 class QFrame;
 class QPushButton;
 class QVBoxLayout;
+class UpdateChecker;
+struct ReleaseInfo;
 
 class AboutDialog : public QDialog
 {
@@ -13,9 +15,17 @@ class AboutDialog : public QDialog
 
 public:
     explicit AboutDialog(QWidget *parent = nullptr);
+    ~AboutDialog() override;
 
 public slots:
     void updateTheme();
+    void checkForUpdates();
+
+private slots:
+    void onUpdateCheckStarted();
+    void onUpdateCheckFinished(const ReleaseInfo &info);
+    void onUpdateCheckError(const QString &errorMessage);
+    void onOpenReleaseUrl();
 
 private:
     void setupUi();
@@ -28,5 +38,15 @@ private:
     QFrame *m_divider = nullptr;
     QLabel *m_creditsText = nullptr;
     QLabel *m_licenseText = nullptr;
+
+    // Updater UI in About section
+    QFrame *m_updateCard = nullptr;
+    QLabel *m_updateStatusLabel = nullptr;
+    QPushButton *m_checkUpdateBtn = nullptr;
+    QPushButton *m_getUpdateBtn = nullptr;
+
     QPushButton *m_closeBtn = nullptr;
+
+    UpdateChecker *m_updater = nullptr;
+    QString m_latestReleaseUrl;
 };

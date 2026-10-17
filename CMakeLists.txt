@@ -124,6 +124,7 @@ set(SOURCES
     src/net/Ao3Session.cpp
     src/net/Ao3Client.cpp
     src/net/Ao3AuthServer.cpp
+    src/net/UpdateChecker.cpp
     src/ui/Ao3ImportDialog.cpp
     src/ui/Ao3SkinDiffDialog.cpp
     src/ui/DebugConsoleDialog.cpp
@@ -186,6 +187,7 @@ set(HEADERS
     src/net/Ao3Session.h
     src/net/Ao3Client.h
     src/net/Ao3AuthServer.h
+    src/net/UpdateChecker.h
     src/ui/Ao3ImportDialog.h
     src/ui/Ao3SkinDiffDialog.h
     src/ui/DebugConsoleDialog.h
@@ -353,6 +355,10 @@ add_executable(test_settings_dialog
     src/ui/HelpGuideDialog.h
     src/ui/MainMenuWindow.cpp
     src/ui/MainMenuWindow.h
+    src/ui/AboutDialog.cpp
+    src/ui/AboutDialog.h
+    src/net/UpdateChecker.cpp
+    src/net/UpdateChecker.h
     src/ui/AppIcon.cpp
     src/themes/themes.cpp
     src/themes/ThemeManager.h

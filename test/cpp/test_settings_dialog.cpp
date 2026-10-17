@@ -1,8 +1,10 @@
 #include "themes/ThemeManager.h"
 #include "ui/SettingsDialog.h"
 #include "ui/HelpGuideDialog.h"
+#include "ui/AboutDialog.h"
 #include "ui/MainMenuWindow.h"
 #include "ui/ToolbarIcons.h"
+#include "net/UpdateChecker.h"
 #include "utils/SingleInstanceManager.h"
 #include "mcp/McpServer.h"
 #include "mcp/McpAgentInstaller.h"
@@ -457,6 +459,67 @@ int main(int argc, char *argv[])
         assert(ok);
         assert(stoppedInfo.value(QStringLiteral("status")).toString() == QStringLiteral("stopped"));
         std::cout << "✓ McpServer start/stop and discovery file lifecycle verified." << std::endl;
+    }
+
+    // 11. Test UpdateChecker semver comparison & GitHub releases JSON parsing
+    {
+        // A. Version parsing & semver comparison
+        assert(UpdateChecker::isVersionNewer("v1.2.2", "1.1.1") == true);
+        assert(UpdateChecker::isVersionNewer("1.2.2", "1.2.1") == true);
+        assert(UpdateChecker::isVersionNewer("v2.0.0", "1.9.9") == true);
+        assert(UpdateChecker::isVersionNewer("1.1.1", "1.1.1") == false);
+        assert(UpdateChecker::isVersionNewer("v1.1.0", "1.1.1") == false);
+        assert(UpdateChecker::isVersionNewer("1.0.5", "1.2.0") == false);
+        assert(UpdateChecker::isVersionNewer("v1.2.2", "1.2.2 (Debug-dirty)") == false);
+
+        // B. GitHub releases JSON parsing
+        const QByteArray sampleGithubJson = R"json({
+            "tag_name": "v1.2.2",
+            "name": "Ensemble Release v1.2.2",
+            "html_url": "https://github.com/Mizumo-prjkt/ensemble/releases/tag/v1.2.2",
+            "published_at": "2026-10-17T12:00:00Z",
+            "body": "### Changes\n- Enhanced rich text editor\n- Added snapshots diff\n- Fixed chapter indexing"
+        })json";
+
+        ReleaseInfo info = UpdateChecker::parseReleaseJson(sampleGithubJson, "1.1.1");
+        assert(info.tagName == "v1.2.2");
+        assert(info.version == "1.2.2");
+        assert(info.name == "Ensemble Release v1.2.2");
+        assert(info.htmlUrl == "https://github.com/Mizumo-prjkt/ensemble/releases/tag/v1.2.2");
+        assert(info.isUpdateAvailable == true);
+        assert(!info.body.isEmpty());
+
+        // Same version -> update not available
+        ReleaseInfo infoUpToDate = UpdateChecker::parseReleaseJson(sampleGithubJson, "1.2.2");
+        assert(infoUpToDate.isUpdateAvailable == false);
+
+        std::cout << "✓ UpdateChecker semver comparison and GitHub release JSON parsing verified." << std::endl;
+
+        // C. AboutDialog UI with UpdateChecker integration
+        AboutDialog aboutDlg;
+        auto *updateCard = aboutDlg.findChild<QFrame *>("updateCard");
+        assert(updateCard != nullptr);
+
+        bool foundCheckBtn = false;
+        bool foundGetBtn = false;
+        for (auto *btn : aboutDlg.findChildren<QPushButton *>()) {
+            if (btn->text().contains("Check for Updates") || btn->text().contains("Check")) {
+                foundCheckBtn = true;
+            }
+            if (btn->text().contains("Get Update") || btn->text().contains("Get")) {
+                foundGetBtn = true;
+            }
+        }
+        assert(foundCheckBtn);
+        assert(foundGetBtn);
+
+        // Verify updateTheme works cleanly in both Light and Dark
+        ThemeManager::instance().setTheme(AppTheme::Light);
+        aboutDlg.updateTheme();
+        ThemeManager::instance().setTheme(AppTheme::Dark);
+        aboutDlg.updateTheme();
+
+        std::cout << "✓ AboutDialog updater UI components and theme integration verified." << std::endl;
     }
 
     std::cout << "All Settings, Preferences, Help Guide & Main Menu lifecycle tests passed successfully!" << std::endl;

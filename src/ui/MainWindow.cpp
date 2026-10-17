@@ -254,6 +254,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   helpGuideAction->setShortcut(QKeySequence::HelpContents);
   connect(helpGuideAction, &QAction::triggered, this, &MainWindow::onShowHelpGuide);
 
+  auto *checkUpdatesAction = helpMenu->addAction(QStringLiteral("🔄 Check for &Updates…"));
+  connect(checkUpdatesAction, &QAction::triggered, this, &MainWindow::onCheckForUpdates);
+
   helpMenu->addSeparator();
   auto *aboutAction = helpMenu->addAction(QStringLiteral("&About Ensemble"));
   connect(aboutAction, &QAction::triggered, this, &MainWindow::onShowAbout);
@@ -1345,6 +1348,13 @@ void MainWindow::updateMainMenuState() {
   }
   if (m_loreGraphAction) {
     m_loreGraphAction->setEnabled(m_hasActiveProject);
+  }
+}
+
+void MainWindow::onCheckForUpdates() {
+  if (m_aboutDialog) {
+    m_aboutDialog->checkForUpdates();
+    m_aboutDialog->exec();
   }
 }
 

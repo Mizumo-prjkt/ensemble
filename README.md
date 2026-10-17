@@ -200,7 +200,23 @@ Ensemble utilizes a fault-tolerant multi-platform GitHub Actions workflow (`.git
 
 - **Developer**: [Mizumo-prjkt](https://github.com/Mizumo-prjkt)
 - **Built with**: Qt 6, Chromium WebEngine, Zstandard, and Miniz
-- **License**: MIT License
+- **License**: MIT License ([LICENSE](LICENSE))
+
+### ⚖️ LGPLv3 Compliance & Freedom to Modify Qt
+
+Ensemble's own application code is licensed under the permissive **MIT License**.
+
+Ensemble dynamically links with the **Qt 6 Framework** (and Qt WebEngine), which is licensed under the **GNU Lesser General Public License (LGPL) version 3** (and/or GNU GPL v3). In compliance with the LGPLv3:
+
+1. **Dynamic Linking**: Qt libraries are strictly dynamically linked (`.so` on Linux, `.dll` on Windows). No Qt components are statically linked into the application binary.
+2. **License Texts Provided**: Complete copies of the LGPLv3 and GPLv3 are distributed alongside the software in [LICENSE.LGPLv3](LICENSE.LGPLv3) and [LICENSE.GPLv3](LICENSE.GPLv3), as well as within the application's *Help → Open Source Credits* dialog.
+3. **Source Code Access**: The source code for Qt can be obtained directly from the official Qt Project repositories at [https://code.qt.io](https://code.qt.io) and [https://download.qt.io](https://download.qt.io).
+4. **AppImage & Bundle Freedom**:
+   - The distributed AppImage packages are standard, unencrypted SquashFS containers without DRM, encryption, or proprietary locks.
+   - Users have the complete freedom to inspect, modify, replace, or upgrade the Qt libraries:
+     - **Extraction & Modification**: Extract the bundle using `./Ensemble-*.AppImage --appimage-extract`, replace any `.so` shared library in `squashfs-root/usr/lib/`, and execute `./squashfs-root/AppRun` or repack using `appimagetool squashfs-root/`.
+     - **Runtime Library Override**: Set `LD_LIBRARY_PATH=/path/to/custom/qt/lib:$LD_LIBRARY_PATH` (or `ENSEMBLE_LIBRARY_PATH=/path/to/custom/qt/lib`) to inject custom Qt libraries on the fly without extracting.
+5. **Windows Distributions**: Dynamic Qt `.dll` files are deployed alongside `ensemble.exe` in the application directory and can be replaced directly by the user.
 
 ## ⚖️ Legal Notice
 

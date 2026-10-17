@@ -88,6 +88,7 @@ private slots:
     void onExportChapterHtml();
     void onExportAllChapters();
     void onCopyHtmlToClipboard();
+    void onCheckForUpdates();
     void onShowAbout();
     void onShowCredits();
     void onToggleLivePreview(bool checked);
