@@ -3,6 +3,7 @@
 #include <QWidget>
 
 class Ao3Project;
+class QLineEdit;
 class QListWidget;
 class QPushButton;
 
@@ -30,12 +31,16 @@ private slots:
     void onCurrentRowChanged(int row);
     void onRowsMoved();
     void showContextMenu(const QPoint &pos);
+    void onSearchFilterChanged(const QString &text);
 
 private:
     void rebuildList();
+    void updateIcons();
 
     Ao3Project *m_project = nullptr;
+    QLineEdit *m_searchEdit = nullptr;
     QListWidget *m_list = nullptr;
+    QPushButton *m_quickAddBtn = nullptr;
     QPushButton *m_managerBtn = nullptr;
     bool m_blockSignals = false;
 };

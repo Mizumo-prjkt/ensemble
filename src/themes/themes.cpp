@@ -1153,12 +1153,24 @@ QString ThemeManager::getSidebarStyleSheet() const
     const QString text = primaryTextColor().name();
     const QString border = borderColor().name();
     const QString accent = accentColor().name();
+    const QString accentHover = accentHoverColor().name();
     const QString selBg = selectionBgCss();
     const QString hoverBg = isDarkMode() ? QStringLiteral("rgba(255, 255, 255, 0.08)") : QStringLiteral("rgba(0, 0, 0, 0.05)");
     const int btnRad = buttonRadius();
     const int inRad = inputRadius();
 
     return QStringLiteral(
+        "QLineEdit {"
+        "  background-color: %1;"
+        "  color: %2;"
+        "  border: 1px solid %3;"
+        "  border-radius: %4px;"
+        "  padding: 5px 8px;"
+        "  font-size: 11px;"
+        "}"
+        "QLineEdit:focus {"
+        "  border-color: %6;"
+        "}"
         "QListWidget {"
         "  background-color: %1;"
         "  color: %2;"
@@ -1194,11 +1206,28 @@ QString ThemeManager::getSidebarStyleSheet() const
         "  font-weight: 600;"
         "}"
         "QPushButton:hover {"
-        "  background-color: %5;"
+        "  background-color: %6;"
         "  border-color: %6;"
-        "  color: %6;"
+        "  color: #ffffff;"
         "}"
-    ).arg(surface, text, border).arg(inRad).arg(selBg, accent, card).arg(btnRad).arg(hoverBg);
+        "QPushButton:pressed {"
+        "  background-color: %10;"
+        "  border-color: %10;"
+        "  color: #ffffff;"
+        "}"
+        "QPushButton#quickAddBtn {"
+        "  padding: 0px;"
+        "}"
+    ).arg(surface)
+     .arg(text)
+     .arg(border)
+     .arg(inRad)
+     .arg(selBg)
+     .arg(accent)
+     .arg(card)
+     .arg(btnRad)
+     .arg(hoverBg)
+     .arg(accentHover);
 }
 
 QString ThemeManager::getDialogStyleSheet() const

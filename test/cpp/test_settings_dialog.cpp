@@ -212,11 +212,16 @@ int main(int argc, char *argv[])
         assert(topicList != nullptr);
         assert(contentBrowser != nullptr);
         assert(searchEdit != nullptr);
-        assert(topicList->count() == 16);
+        assert(topicList->count() == 17);
 
         // Verify topic selection
         helpDialog.selectTopic("work_skins");
         assert(contentBrowser->toHtml().contains("Work Skin"));
+
+        // Verify chapter_manager topic selection
+        helpDialog.selectTopic("chapter_manager");
+        assert(contentBrowser->toHtml().contains("Chapter Manager"));
+        assert(contentBrowser->toHtml().contains("Strict 1-Based"));
 
         // Verify new topics selection
         helpDialog.selectTopic("mcp_setup");
@@ -240,7 +245,7 @@ int main(int argc, char *argv[])
         assert(contentBrowser->toHtml().contains("5 MB"));
 
         helpDialog.selectTopic("git_history");
-        assert(contentBrowser->toHtml().contains("Git-Like Version History"));
+        assert(contentBrowser->toHtml().contains("Snapshots"));
         assert(contentBrowser->toHtml().contains("history.cmt"));
 
         // Verify search filtering
@@ -263,10 +268,10 @@ int main(int argc, char *argv[])
         for (int i = 0; i < topicList->count(); ++i) {
             if (!topicList->item(i)->isHidden()) restoredCount++;
         }
-        assert(restoredCount == 16);
+        assert(restoredCount == 17);
 
         helpDialog.updateTheme();
-        std::cout << "✓ HelpGuideDialog 16 topics (including MCP, Lore Graph, Properties, Image Embeds, Agentic Data), search filtering, and documentation browser verified." << std::endl;
+        std::cout << "✓ HelpGuideDialog 17 topics (including Chapter Manager, MCP, Lore Graph, Properties, Image Embeds, Snapshots), search filtering, and documentation browser verified." << std::endl;
     }
 
     // 6. Test MainMenuWidget project open/close state tracking

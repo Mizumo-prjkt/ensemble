@@ -1,12 +1,14 @@
 #include "ChapterSidebar.h"
 
 #include "ChapterManagerDialog.h"
+#include "ToolbarIcons.h"
 #include "model/Ao3Project.h"
 #include "themes/ThemeManager.h"
 
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QMenu>
@@ -25,18 +27,29 @@ ChapterSidebar::ChapterSidebar(QWidget *parent)
     setStyleSheet(ThemeManager::instance().getSidebarStyleSheet());
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this](AppTheme) {
         setStyleSheet(ThemeManager::instance().getSidebarStyleSheet());
+        updateIcons();
     });
 
     auto *headerLayout = new QHBoxLayout;
     auto *label = new QLabel(QStringLiteral("<b>Chapters</b>"), this);
-    auto *quickAddBtn = new QPushButton(QStringLiteral("➕"), this);
-    quickAddBtn->setToolTip(QStringLiteral("Add new chapter"));
-    quickAddBtn->setFixedSize(26, 26);
+    m_quickAddBtn = new QPushButton(this);
+    m_quickAddBtn->setObjectName(QStringLiteral("quickAddBtn"));
+    m_quickAddBtn->setToolTip(QStringLiteral("Add new chapter"));
+    m_quickAddBtn->setFixedSize(26, 26);
+    m_quickAddBtn->setIconSize(QSize(16, 16));
+    m_quickAddBtn->setCursor(Qt::PointingHandCursor);
+    updateIcons();
 
     headerLayout->addWidget(label);
     headerLayout->addStretch();
-    headerLayout->addWidget(quickAddBtn);
+    headerLayout->addWidget(m_quickAddBtn);
     layout->addLayout(headerLayout);
+
+    m_searchEdit = new QLineEdit(this);
+    m_searchEdit->setObjectName(QStringLiteral("chapterSearchEdit"));
+    m_searchEdit->setPlaceholderText(QStringLiteral("🔍 Filter chapters…"));
+    m_searchEdit->setClearButtonEnabled(true);
+    layout->addWidget(m_searchEdit);
 
     m_list = new QListWidget(this);
     m_list->setDragDropMode(QAbstractItemView::InternalMove);
@@ -46,18 +59,36 @@ ChapterSidebar::ChapterSidebar(QWidget *parent)
 
     // Dedicated Chapter Manager Button replacing old cluttered bottom buttons
     m_managerBtn = new QPushButton(QStringLiteral("📚 Chapter Manager…"), this);
+    m_managerBtn->setObjectName(QStringLiteral("managerBtn"));
     m_managerBtn->setToolTip(QStringLiteral("Open Chapter Manager window to view words, lines, HTML syntaxes, reorder, or edit titles"));
     m_managerBtn->setCursor(Qt::PointingHandCursor);
-    m_managerBtn->setStyleSheet(QStringLiteral(
-        "QPushButton { padding: 6px 12px; font-weight: 600; }"
-    ));
     layout->addWidget(m_managerBtn);
 
-    connect(quickAddBtn, &QPushButton::clicked, this, &ChapterSidebar::onAddChapter);
+    connect(m_quickAddBtn, &QPushButton::clicked, this, &ChapterSidebar::onAddChapter);
     connect(m_managerBtn, &QPushButton::clicked, this, &ChapterSidebar::onOpenChapterManager);
+    connect(m_searchEdit, &QLineEdit::textChanged, this, &ChapterSidebar::onSearchFilterChanged);
+    connect(m_searchEdit, &QLineEdit::returnPressed, this, [this]() {
+        for (int i = 0; i < m_list->count(); ++i) {
+            if (!m_list->item(i)->isHidden()) {
+                m_list->setCurrentRow(i);
+                m_list->setFocus();
+                break;
+            }
+        }
+    });
     connect(m_list, &QListWidget::currentRowChanged, this, &ChapterSidebar::onCurrentRowChanged);
     connect(m_list->model(), &QAbstractItemModel::rowsMoved, this, &ChapterSidebar::onRowsMoved);
     connect(m_list, &QListWidget::customContextMenuRequested, this, &ChapterSidebar::showContextMenu);
+}
+
+void ChapterSidebar::updateIcons()
+{
+    const bool isDark = ThemeManager::instance().isDarkMode();
+    const QColor normalColor = isDark ? QColor(QStringLiteral("#cbd5e1")) : QColor(QStringLiteral("#334155"));
+    const QColor activeColor = QColor(QStringLiteral("#ffffff"));
+    if (m_quickAddBtn) {
+        m_quickAddBtn->setIcon(ToolbarIcons::plus(normalColor, activeColor));
+    }
 }
 
 void ChapterSidebar::bindProject(Ao3Project *project)
@@ -80,11 +111,39 @@ void ChapterSidebar::refresh()
 void ChapterSidebar::rebuildList()
 {
     m_list->clear();
+    if (!m_project)
+        return;
+
     int idx = 1;
     for (const Chapter &chapter : m_project->chapters()) {
         auto *item = new QListWidgetItem(QStringLiteral("%1. %2").arg(idx++).arg(chapter.title()));
         item->setData(Qt::UserRole, chapter.id().toString());
         m_list->addItem(item);
+    }
+
+    if (m_searchEdit) {
+        onSearchFilterChanged(m_searchEdit->text());
+    }
+}
+
+void ChapterSidebar::onSearchFilterChanged(const QString &text)
+{
+    const QString filter = text.trimmed();
+    const bool filtering = !filter.isEmpty();
+
+    // Disable drag reordering while filtering so chapters don't get accidentally misplaced
+    m_list->setDragEnabled(!filtering);
+
+    for (int i = 0; i < m_list->count(); ++i) {
+        QListWidgetItem *item = m_list->item(i);
+        if (!item)
+            continue;
+        if (!filtering) {
+            item->setHidden(false);
+        } else {
+            const bool matches = item->text().contains(filter, Qt::CaseInsensitive);
+            item->setHidden(!matches);
+        }
     }
 }
 

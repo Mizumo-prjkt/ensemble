@@ -155,13 +155,15 @@ void HelpGuideDialog::populateTopics()
         t.summary = QStringLiteral("Overview, project management, and writing your first work.");
         t.contentHtml = QStringLiteral(
             "<h1>🚀 Getting Started with Ensemble</h1>"
-            "<p class='lead'>Ensemble is a next-generation fanfiction typewriter designed specifically for authors on <b>Archive of Our Own (AO3)</b>. It combines a clean, distraction-free WYSIWYG editor with live AO3 HTML preview, native Work Skin CSS authorship, and unified single-file project archiving.</p>"
+            "<p class='lead'>Ensemble is a next-generation fanfiction typewriter designed specifically for authors on <b>Archive of Our Own (AO3)</b>. It combines a clean, distraction-free WYSIWYG editor with live AO3 HTML preview, native Work Skin CSS authorship, visual Chapter Manager, and unified single-file project archiving.</p>"
             "<hr>"
             "<h3>Key Workflows</h3>"
             "<ul>"
             "  <li><b>Starting a New Work:</b> From the Main Menu or <kbd>Ctrl+N</kbd>, select <i>New Project</i>. A fresh work is created with an initial Chapter 1 and standard AO3 HTML template.</li>"
             "  <li><b>Opening Existing Works:</b> Open any <code>.ao3proj</code> file directly with <kbd>Ctrl+O</kbd> or through the file open dialog.</li>"
             "  <li><b>Saving Your Work:</b> Press <kbd>Ctrl+S</kbd> to save. If saving for the first time, you will be prompted to pick a location for your <code>.ao3proj</code> archive.</li>"
+            "  <li><b>Chapter Organization:</b> Manage multi-chapter works, inspect syntax tag usage, and reorder chapters from the dedicated <i>📑 Chapter Manager</i> (<kbd>Ctrl+Shift+O</kbd>).</li>"
+            "  <li><b>In-App GitHub Updates:</b> Check for new releases directly from <i>Help → Check for Updates…</i> or the <i>About Ensemble</i> dialog, with 1-click redirection to the newest release tag on GitHub.</li>"
             "  <li><b>Closing & Reverting:</b> Use <i>File → Close Project</i> (<kbd>Ctrl+W</kbd>) or <i>Main Menu</i> to safely return to the welcome screen without keeping lingering unsaved edits.</li>"
             "</ul>"
             "<div class='callout-note'>"
@@ -182,6 +184,10 @@ void HelpGuideDialog::populateTopics()
             "<h1>✍️ WYSIWYG Editor & Text Formatting</h1>"
             "<p class='lead'>The primary editor tab lets you compose naturally with familiar rich-text shortcuts while internally producing standard, clean HTML that mirrors AO3's posting standards.</p>"
             "<hr>"
+            "<h3>Vector Toolbar & Active States</h3>"
+            "<p>Ensemble features clean, consistent vector SVG toolbar buttons (Bold, Italic, Underline, Strikethrough, Heading 1, Link, Horizontal Rule) that dynamically highlight their active state whenever your text cursor enters styled content.</p>"
+            "<h3>Exact Word Count Breakdown</h3>"
+            "<p>The bottom-left status bar displays exact word counts without approximations: <code>Words: 2,450 (Total: 14,200)</code> showing both current chapter words and total work words. Highlighting any text instantly displays the selection count as well (e.g. <code>[Selected: 120]</code>).</p>"
             "<h3>Standard Formatting Shortcuts</h3>"
             "<table border='0' cellpadding='7' cellspacing='0' width='100%'>"
             "  <tr><th>Shortcut</th><th>Action</th><th>AO3 HTML Output</th></tr>"
@@ -194,9 +200,46 @@ void HelpGuideDialog::populateTopics()
             "</table>"
             "<h3>Paragraph Structure & Dividers</h3>"
             "<p>Ensemble avoids double-spacing pitfalls by structuring lines into standard <code>&lt;p&gt;</code> tags. Scene breaks can be created using horizontal dividers (<code>&lt;hr/&gt;</code>) or styled separator asterisks.</p>"
-            "<div class='callout-tip'>"
-            "  <b>✨ Tip:</b> Right-click any text inside the editor to quickly apply custom Work Skin CSS classes directly to paragraphs, blockquotes, or spans!"
+            "<div class='callout-warning'>"
+            "  <b>⚠️ Crucial Formatting Rule — Avoid <code>&lt;span&gt;</code> Tags:</b><br>"
+            "  Even though Archive of Our Own technically permits <code>&lt;span&gt;</code> tags, <b>do not use <code>&lt;span&gt;</code> tags in chapter prose</b>. In rich-text and WYSIWYG authoring, <code>&lt;span&gt;</code> elements break cursor navigation, cause fragmented line styling, and disrupt word wrapping. Instead, use semantic formatting tags (<code>&lt;em&gt;</code>, <code>&lt;strong&gt;</code>) or apply custom Work Skin classes directly to paragraph blocks (<code>&lt;p class=\"...\"&gt;</code>) or division containers (<code>&lt;div class=\"...\"&gt;</code>). Ensemble's editor and MCP server actively disallow <code>&lt;span&gt;</code> to protect your story's typography."
             "</div>"
+            "<div class='callout-tip'>"
+            "  <b>✨ Tip:</b> Right-click any text inside the editor to quickly apply custom Work Skin CSS classes directly to paragraphs or blockquotes!"
+            "</div>"
+        );
+        m_topics.append(t);
+    }
+
+    // 3. Visual Chapter Manager & Metrics
+    {
+        HelpTopic t;
+        t.id = QStringLiteral("chapter_manager");
+        t.icon = QStringLiteral("📑");
+        t.title = QStringLiteral("Visual Chapter Manager & Metrics");
+        t.summary = QStringLiteral("Multi-chapter organization, 1-based ordering, drag-and-drop sorting, and syntax tag diagnostics.");
+        t.contentHtml = QStringLiteral(
+            "<h1>📑 Visual Chapter Manager & Metrics</h1>"
+            "<p class='lead'>Ensemble includes a dedicated Chapter Manager window for organizing multi-chapter works, inspecting syntax usage, and reordering chapters without cluttering the primary writing workspace.</p>"
+            "<hr>"
+            "<h3>Opening the Chapter Manager</h3>"
+            "<p>Click the <b>📑 Chapter Manager</b> button located below the chapter list in the left sidebar, or choose <i>Chapter → Chapter Manager…</i> (<kbd>Ctrl+Shift+O</kbd>).</p>"
+            "<h3>Comprehensive Chapter Statistics</h3>"
+            "<p>The Chapter Manager displays a complete tabular breakdown of every chapter in your work:</p>"
+            "<ul>"
+            "  <li><b>Chapter Number &amp; Title:</b> View and edit chapter titles in place.</li>"
+            "  <li><b>Word Count:</b> Exact word counts calculated for each individual chapter.</li>"
+            "  <li><b>Line Count:</b> Paragraph and line metrics.</li>"
+            "  <li><b>Syntax Tag Diagnostics:</b> Detailed breakdown of HTML formatting tags used in each chapter (e.g. <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, <code>&lt;u&gt;</code>, <code>&lt;s&gt;</code>, <code>&lt;div&gt;</code>, <code>&lt;blockquote&gt;</code>, <code>&lt;hr&gt;</code>, <code>&lt;a&gt;</code>).</li>"
+            "</ul>"
+            "<h3>Strict 1-Based Chapter Numbering</h3>"
+            "<p>In accordance with AO3 standards, Ensemble enforces <b>strict 1-based chapter numbering</b>. Chapter 1 is always Chapter 1; requests or attempts to use Chapter 0 are blocked across both the UI and AI MCP server to prevent index corruption.</p>"
+            "<h3>Sorting &amp; Reordering</h3>"
+            "<ul>"
+            "  <li><b>Drag-and-Drop:</b> Drag any row in the chapter table to reorder chapters interactively.</li>"
+            "  <li><b>Target Index Input:</b> Type a destination chapter number to move a chapter instantly to a specific slot.</li>"
+            "  <li><b>Chapter Management Toolbar:</b> Add new chapters or delete unwanted chapters cleanly from the manager interface.</li>"
+            "</ul>"
         );
         m_topics.append(t);
     }
@@ -302,6 +345,12 @@ void HelpGuideDialog::populateTopics()
             "  <li><b>Pop-Out Preview Window (<kbd>Ctrl+Shift+P</kbd>):</b> Opens an independent floating preview window, ideal for dual-monitor writing setups.</li>"
             "  <li><b>Zero-Flicker Live DOM Updates:</b> Edits in rich text or raw HTML are synced via lightweight DOM mutations, eliminating full-page reload flashes.</li>"
             "  <li><b>Hardware GPU Acceleration:</b> WebEngine runs with full OpenGL/Vulkan GPU acceleration enabled for smooth scrolling and responsive rendering.</li>"
+            "</ul>"
+            "<h3>AO3 Default (Light) vs Reversi (Dark) Testing</h3>"
+            "<p>A massive pain point for AO3 creators is ensuring custom Work Skins look legible and visually balanced on both light and dark backgrounds. The Live Preview header includes a dedicated <b>Skin Toggle</b> allowing you to test how your work skin and chapter formatting look against:</p>"
+            "<ul>"
+            "  <li><b>AO3 Default:</b> The official standard light background (<code>#ffffff</code> / cream).</li>"
+            "  <li><b>AO3 Reversi:</b> The official AO3 dark reading skin (<code>#111111</code> background with crimson accents), allowing you to verify text contrast, chat bubble borders, and link visibility before publishing.</li>"
             "</ul>"
         );
         m_topics.append(t);
@@ -572,42 +621,39 @@ void HelpGuideDialog::populateTopics()
         m_topics.append(t);
     }
 
-    // 10. Git-Like Version History (history.cmt)
+    // 11. Git-Like Snapshots & Revision Diffs (history/)
     {
         HelpTopic t;
         t.id = QStringLiteral("git_history");
-        t.icon = QStringLiteral("📜");
-        t.title = QStringLiteral("Git-Like Version History (history.cmt)");
-        t.summary = QStringLiteral("Internal story revision tracking, 12-char SHA-1 commits, commit messages, and author attribution.");
+        t.icon = QStringLiteral("📸");
+        t.title = QStringLiteral("Git-Like Snapshots & Revision Diffs (history/)");
+        t.summary = QStringLiteral("Internal story revision tracking, line-by-line diffs, host/user author tags, and dual timezone display.");
         t.contentHtml = QStringLiteral(
-            "<h1>📜 Git-Like Version History (history.cmt)</h1>"
-            "<p class='lead'>Ensemble brings software engineering-grade revision tracking to fanfiction. Every chapter update, Work Skin adjustment, and author edit can be committed into a permanent, Git-like version ledger inside your <code>.ao3proj</code> archive.</p>"
+            "<h1>📸 Git-Like Snapshots & Revision Diffs (history/)</h1>"
+            "<p class='lead'>Ensemble brings software engineering-grade revision tracking to fanfiction. Every chapter update, Work Skin adjustment, and author edit can be captured as a Snapshot with line-by-line diffs stored in your <code>.ao3proj</code> archive.</p>"
             "<hr>"
-            "<h3>How Story Versioning Works</h3>"
-            "<p>Fanfiction writing involves endless rewrites, alternate scenes, and experimental drafts. Instead of saving dozens of confusing file copies like <code>Chapter_2_final_v3_really_final.docx</code>, Ensemble maintains an append-only commit ledger inside <code>history.cmt</code>.</p>"
-            "<h3>Commit Entry Structure</h3>"
-            "<p>Each commit in <code>history.cmt</code> records four fundamental fields:</p>"
-            "<pre class='code-block'>commit 3f9a1b2c4e5d\n"
-            "Author: JaneDoe &lt;author@ensemble&gt;\n"
-            "Date:   2026-10-12T09:30:00+08:00\n\n"
-            "    Chapter 2: Expanded café dialogue and polished emotional beat.</pre>"
-            "<ul>"
-            "  <li><b>Commit Hash:</b> A unique 12-character SHA-1 hash identifying the revision state.</li>"
-            "  <li><b>Author Attribution:</b> Identifies who made the change (the user's name or the AI agent model name).</li>"
-            "  <li><b>ISO-8601 Timestamp:</b> The exact date and time the modification occurred.</li>"
-            "  <li><b>Commit Message:</b> A descriptive summary of what was written, edited, or refactored.</li>"
-            "</ul>"
-            "<h3>Inspecting History in Project Properties</h3>"
-            "<p>Open <i>File → Properties…</i> (<kbd>Alt+Enter</kbd>) and select the <b>📜 Revision History</b> tab. You will see a chronological log of all commits, with a filter search bar and detailed inspection pane.</p>"
-            "<h3>Recording Commits via MCP</h3>"
+            "<h3>How Story Snapshots Work</h3>"
+            "<p>Instead of saving dozens of confusing file copies like <code>Chapter_2_final_v3.docx</code>, Ensemble maintains an append-only commit ledger in <code>history.cmt</code> paired with unified diff files in the <code>history/</code> directory:</p>"
+            "<pre class='code-block'>history/\n"
+            "├── 3f9a1b2c4e5d.diff   (Line-by-line unified diff of modifications)\n"
+            "└── history.cmt         (Ledger with 12-char SHA-1 hashes, author tags, and messages)</pre>"
+            "<h3>Line-by-Line Diff Viewer</h3>"
+            "<p>Open <i>File → Properties…</i> (<kbd>Alt+Enter</kbd>) and select <b>📜 Revision History</b>. Selecting any snapshot displays an interactive line-by-line diff showing precisely what was added (<code>+</code>) in green and removed (<code>-</code>) in red.</p>"
+            "<h3>Host &amp; User Author Tagging</h3>"
+            "<p>To keep multi-device and collaborative writing organized, snapshots automatically tag authors with a host signature: <code>&lt;username&gt;@&lt;desktop-id&gt;</code> (e.g. <code>miku@DESKTOP-HH37G7</code>). Connected AI models are required to identify themselves with their unique model ID.</p>"
+            "<h3>Dual Timezone Timestamps</h3>"
+            "<p>Snapshots preserve standard ISO-8601 UTC timestamps while simultaneously rendering date and time adjusted to your system's configured local timezone.</p>"
+            "<h3>Backwards Compatibility</h3>"
+            "<p>Projects created before the snapshot diff system was introduced are safely handled with a gentle fallback notice indicating that older revisions predate diff storage.</p>"
+            "<h3>Recording Snapshots via MCP</h3>"
             "<p>AI agents automatically record their changes into the ledger using:</p>"
             "<ul>"
-            "  <li><code>add_history_commit(message, author)</code>: Records a new commit entry into <code>history.cmt</code>.</li>"
-            "  <li><code>save_project(commitMessage, author)</code>: Saves the project file to disk and records the commit in a single atomic step.</li>"
+            "  <li><code>add_history_commit(message, author)</code>: Records a new snapshot entry and generates a diff.</li>"
+            "  <li><code>save_project(commitMessage, author)</code>: Saves the project file to disk and records the snapshot in a single atomic step.</li>"
             "  <li><code>get_project_history(limit)</code>: Inspects recent commits to understand what was changed previously.</li>"
             "</ul>"
             "<div class='callout-tip'>"
-            "  <b>✨ Peace of Mind:</b> Because <code>history.cmt</code> travels inside your portable <code>.ao3proj</code> container, your entire creative journey and drafting history is preserved wherever you move your story file."
+            "  <b>✨ Peace of Mind:</b> Because <code>history/</code> travels inside your portable <code>.ao3proj</code> container, your entire creative journey and drafting history is preserved wherever you move your story file."
             "</div>"
         );
         m_topics.append(t);
@@ -627,19 +673,19 @@ void HelpGuideDialog::populateTopics()
             "<h3>Permitted AO3 HTML Tags</h3>"
             "<p>AO3 enforces strict HTML sanitization rules to protect readers. Ensemble's built-in sanitizer checks against the official whitelist:</p>"
             "<ul>"
-            "  <li><b>Structure:</b> <code>&lt;p&gt;</code>, <code>&lt;div&gt;</code>, <code>&lt;span&gt;</code>, <code>&lt;blockquote&gt;</code>, <code>&lt;hr&gt;</code>, <code>&lt;br&gt;</code></li>"
+            "  <li><b>Structure:</b> <code>&lt;p&gt;</code>, <code>&lt;div&gt;</code>, <code>&lt;blockquote&gt;</code>, <code>&lt;hr&gt;</code>, <code>&lt;br&gt;</code></li>"
             "  <li><b>Typography:</b> <code>&lt;h1&gt;</code> to <code>&lt;h6&gt;</code>, <code>&lt;em&gt;</code>, <code>&lt;strong&gt;</code>, <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, <code>&lt;u&gt;</code>, <code>&lt;s&gt;</code>, <code>&lt;strike&gt;</code></li>"
             "  <li><b>Details &amp; Lists:</b> <code>&lt;ul&gt;</code>, <code>&lt;ol&gt;</code>, <code>&lt;li&gt;</code>, <code>&lt;dl&gt;</code>, <code>&lt;dt&gt;</code>, <code>&lt;dd&gt;</code>, <code>&lt;details&gt;</code>, <code>&lt;summary&gt;</code></li>"
             "  <li><b>Tables &amp; Links:</b> <code>&lt;table&gt;</code>, <code>&lt;tr&gt;</code>, <code>&lt;td&gt;</code>, <code>&lt;th&gt;</code>, <code>&lt;a&gt;</code> (with <code>href</code>)</li>"
             "</ul>"
             "<div class='callout-warning'>"
-            "  <b>⚠️ Disallowed Tags:</b> Elements like <code>&lt;script&gt;</code>, <code>&lt;iframe&gt;</code>, <code>&lt;style&gt;</code>, and inline <code>onclick</code> attributes are automatically stripped by AO3's parser."
+            "  <b>⚠️ Disallowed Tags &amp; <code>&lt;span&gt;</code> Restriction:</b> Elements like <code>&lt;script&gt;</code>, <code>&lt;iframe&gt;</code>, <code>&lt;style&gt;</code>, and inline <code>onclick</code> attributes are automatically stripped by AO3's parser. In addition, <b><code>&lt;span&gt;</code> is actively disallowed in chapter text</b> by Ensemble because inline spans fragment WYSIWYG selection, cursor navigation, and line-spacing. Use <code>&lt;em&gt;</code>, <code>&lt;strong&gt;</code>, or class-styled <code>&lt;p&gt;</code> and <code>&lt;div&gt;</code> blocks instead."
             "</div>"
         );
         m_topics.append(t);
     }
 
-    // 12. Diagnostics & Problems
+    // 13. Diagnostics & Problems
     {
         HelpTopic t;
         t.id = QStringLiteral("diagnostics");
@@ -662,7 +708,7 @@ void HelpGuideDialog::populateTopics()
         m_topics.append(t);
     }
 
-    // 13. Project Archiving (.ao3proj)
+    // 14. Project Archiving (.ao3proj)
     {
         HelpTopic t;
         t.id = QStringLiteral("archiving");
@@ -690,7 +736,7 @@ void HelpGuideDialog::populateTopics()
         m_topics.append(t);
     }
 
-    // 14. Exporting to AO3
+    // 15. Exporting to AO3
     {
         HelpTopic t;
         t.id = QStringLiteral("exporting");
@@ -714,7 +760,7 @@ void HelpGuideDialog::populateTopics()
         m_topics.append(t);
     }
 
-    // 15. Themes & Design Systems
+    // 16. Themes & Design Systems
     {
         HelpTopic t;
         t.id = QStringLiteral("themes_design");
@@ -730,6 +776,7 @@ void HelpGuideDialog::populateTopics()
             "  <li><b>Dark Mode (<kbd>Ctrl+Alt+1</kbd>):</b> Deep slate dark palette with high-contrast pastel accents.</li>"
             "  <li><b>Darker Mode / OLED (<kbd>Ctrl+Alt+2</kbd>):</b> Pure <code>#000000</code> pitch-black background optimized for OLED and AMOLED displays.</li>"
             "  <li><b>Light Mode (<kbd>Ctrl+Alt+3</kbd>):</b> Clean, high-contrast bright theme using Slate 900 (<code>#0f172a</code>) text for crystal-clear readability.</li>"
+            "  <li><b>AO3 Reversi Mode (<kbd>Ctrl+Alt+T</kbd>):</b> Authentic AO3 dark theme palette with <code>#111111</code> dark charcoal background and crimson red accents.</li>"
             "</ul>"
             "<h3>Skin Flavors</h3>"
             "<ul>"
@@ -745,7 +792,7 @@ void HelpGuideDialog::populateTopics()
         m_topics.append(t);
     }
 
-    // 16. Keyboard Shortcuts
+    // 17. Keyboard Shortcuts
     {
         HelpTopic t;
         t.id = QStringLiteral("shortcuts");
@@ -765,26 +812,27 @@ void HelpGuideDialog::populateTopics()
             "  <tr><td><kbd>Ctrl+W</kbd></td><td>Close Project / Main Menu</td><td>Global</td></tr>"
             "  <tr class='row-alt'><td><kbd>Ctrl+Q</kbd></td><td>Quit Ensemble</td><td>Global</td></tr>"
             "  <tr><td><kbd>Alt+Enter</kbd></td><td>Project Properties &amp; Metadata</td><td>Global</td></tr>"
-            "  <tr class='row-alt'><td><kbd>Ctrl+Shift+L</kbd></td><td>Lore Graph &amp; Narrative Map</td><td>Global</td></tr>"
-            "  <tr><td><kbd>Ctrl+Shift+A</kbd></td><td>AI Agent Thoughts Monitor</td><td>Global</td></tr>"
-            "  <tr class='row-alt'><td><kbd>Ctrl+Shift+M</kbd></td><td>Insert Image Embed Attachment</td><td>Editor</td></tr>"
-            "  <tr><td><kbd>Ctrl+Shift+C</kbd></td><td>Copy Chapter HTML to Clipboard</td><td>Global</td></tr>"
-            "  <tr class='row-alt'><td><kbd>Ctrl+Shift+I</kbd></td><td>Import from AO3…</td><td>Global</td></tr>"
-            "  <tr><td><kbd>Ctrl+P</kbd></td><td>Toggle Live Preview Pane</td><td>Global</td></tr>"
-            "  <tr class='row-alt'><td><kbd>Ctrl+Shift+P</kbd></td><td>Pop Out Preview Window</td><td>Global</td></tr>"
-            "  <tr><td><kbd>Ctrl+F</kbd></td><td>Find Text</td><td>Editor</td></tr>"
-            "  <tr class='row-alt'><td><kbd>Ctrl+R</kbd></td><td>Find and Replace Text</td><td>Editor</td></tr>"
-            "  <tr><td><kbd>Ctrl+B</kbd></td><td>Bold Selection</td><td>Rich Text</td></tr>"
-            "  <tr class='row-alt'><td><kbd>Ctrl+I</kbd></td><td>Italic Selection</td><td>Rich Text</td></tr>"
-            "  <tr><td><kbd>Ctrl+U</kbd></td><td>Underline Selection</td><td>Rich Text</td></tr>"
-            "  <tr class='row-alt'><td><kbd>Ctrl+Shift+X</kbd></td><td>Strikethrough Selection</td><td>Rich Text</td></tr>"
-            "  <tr><td><kbd>Ctrl+,</kbd></td><td>Open Preferences / Settings</td><td>Global</td></tr>"
-            "  <tr class='row-alt'><td><kbd>F1</kbd></td><td>Open Help &amp; User Guide</td><td>Global</td></tr>"
-            "  <tr><td><kbd>Ctrl+Alt+1</kbd></td><td>Dark Mode</td><td>Global</td></tr>"
-            "  <tr class='row-alt'><td><kbd>Ctrl+Alt+2</kbd></td><td>Darker / OLED Mode</td><td>Global</td></tr>"
-            "  <tr><td><kbd>Ctrl+Alt+3</kbd></td><td>Light Mode</td><td>Global</td></tr>"
-            "  <tr class='row-alt'><td><kbd>Ctrl+Alt+T</kbd></td><td>Toggle Theme (Dark / Light)</td><td>Global</td></tr>"
-            "  <tr><td><kbd>Ctrl+Alt+D</kbd></td><td>Debug Console (Debug build)</td><td>Global</td></tr>"
+            "  <tr class='row-alt'><td><kbd>Ctrl+Shift+O</kbd></td><td>Open Chapter Manager</td><td>Global</td></tr>"
+            "  <tr><td><kbd>Ctrl+Shift+L</kbd></td><td>Lore Graph &amp; Narrative Map</td><td>Global</td></tr>"
+            "  <tr class='row-alt'><td><kbd>Ctrl+Shift+A</kbd></td><td>AI Agent Thoughts Monitor</td><td>Global</td></tr>"
+            "  <tr><td><kbd>Ctrl+Shift+M</kbd></td><td>Insert Image Embed Attachment</td><td>Editor</td></tr>"
+            "  <tr class='row-alt'><td><kbd>Ctrl+Shift+C</kbd></td><td>Copy Chapter HTML to Clipboard</td><td>Global</td></tr>"
+            "  <tr><td><kbd>Ctrl+Shift+I</kbd></td><td>Import from AO3…</td><td>Global</td></tr>"
+            "  <tr class='row-alt'><td><kbd>Ctrl+P</kbd></td><td>Toggle Live Preview Pane</td><td>Global</td></tr>"
+            "  <tr><td><kbd>Ctrl+Shift+P</kbd></td><td>Pop Out Preview Window</td><td>Global</td></tr>"
+            "  <tr class='row-alt'><td><kbd>Ctrl+F</kbd></td><td>Find Text</td><td>Editor</td></tr>"
+            "  <tr><td><kbd>Ctrl+R</kbd></td><td>Find and Replace Text</td><td>Editor</td></tr>"
+            "  <tr class='row-alt'><td><kbd>Ctrl+B</kbd></td><td>Bold Selection</td><td>Rich Text</td></tr>"
+            "  <tr><td><kbd>Ctrl+I</kbd></td><td>Italic Selection</td><td>Rich Text</td></tr>"
+            "  <tr class='row-alt'><td><kbd>Ctrl+U</kbd></td><td>Underline Selection</td><td>Rich Text</td></tr>"
+            "  <tr><td><kbd>Ctrl+Shift+X</kbd></td><td>Strikethrough Selection</td><td>Rich Text</td></tr>"
+            "  <tr class='row-alt'><td><kbd>Ctrl+,</kbd></td><td>Open Preferences / Settings</td><td>Global</td></tr>"
+            "  <tr><td><kbd>F1</kbd></td><td>Open Help &amp; User Guide</td><td>Global</td></tr>"
+            "  <tr class='row-alt'><td><kbd>Ctrl+Alt+1</kbd></td><td>Dark Mode</td><td>Global</td></tr>"
+            "  <tr><td><kbd>Ctrl+Alt+2</kbd></td><td>Darker / OLED Mode</td><td>Global</td></tr>"
+            "  <tr class='row-alt'><td><kbd>Ctrl+Alt+3</kbd></td><td>Light Mode</td><td>Global</td></tr>"
+            "  <tr><td><kbd>Ctrl+Alt+T</kbd></td><td>Cycle Theme (Light / Dark / Reversi)</td><td>Global</td></tr>"
+            "  <tr class='row-alt'><td><kbd>Ctrl+Alt+D</kbd></td><td>Debug Console (Debug build)</td><td>Global</td></tr>"
             "</table>"
         );
         m_topics.append(t);

@@ -21,7 +21,7 @@ AboutDialog::AboutDialog(QWidget *parent)
   setWindowTitle(QStringLiteral("About Ensemble"));
   setWindowIcon(AppIcon::icon());
   setModal(true);
-  setFixedSize(540, 465);
+  setFixedSize(560, 495);
   setupUi();
   updateTheme();
 
@@ -44,13 +44,13 @@ AboutDialog::~AboutDialog()
 
 void AboutDialog::setupUi() {
   m_layout = new QVBoxLayout(this);
-  m_layout->setContentsMargins(22, 22, 22, 22);
-  m_layout->setSpacing(14);
+  m_layout->setContentsMargins(22, 20, 22, 18);
+  m_layout->setSpacing(12);
 
   // Header Banner
   auto *headerLayout = new QHBoxLayout();
   headerLayout->setContentsMargins(0, 0, 0, 0);
-  headerLayout->setSpacing(16);
+  headerLayout->setSpacing(14);
 
   auto *iconLabel = new QLabel(this);
   const QPixmap iconPix = AppIcon::pixmap(52, 52);
@@ -68,17 +68,26 @@ void AboutDialog::setupUi() {
   auto *titleContainer = new QWidget(this);
   auto *titleLayout = new QVBoxLayout(titleContainer);
   titleLayout->setContentsMargins(0, 0, 0, 0);
-  titleLayout->setSpacing(3);
+  titleLayout->setSpacing(2);
 
-  m_titleLabel = new QLabel(titleContainer);
-  m_titleLabel->setTextFormat(Qt::RichText);
+  auto *titleRow = new QHBoxLayout();
+  titleRow->setContentsMargins(0, 0, 0, 0);
+  titleRow->setSpacing(8);
+  titleRow->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+
+  m_titleLabel = new QLabel(QStringLiteral("Ensemble"), titleContainer);
+  m_versionBadge = new QLabel(titleContainer);
+  m_versionBadge->setObjectName(QStringLiteral("versionBadge"));
+
+  titleRow->addWidget(m_titleLabel);
+  titleRow->addWidget(m_versionBadge);
+  titleRow->addStretch(1);
 
   m_subTitleLabel = new QLabel(
-      QStringLiteral(
-          "Next-Gen Fanfiction Editor & Work Skin Composer"),
+      QStringLiteral("Next-Gen Fanfiction Editor & Work Skin Composer"),
       titleContainer);
 
-  titleLayout->addWidget(m_titleLabel);
+  titleLayout->addLayout(titleRow);
   titleLayout->addWidget(m_subTitleLabel);
 
   headerLayout->addWidget(iconLabel);
@@ -90,16 +99,15 @@ void AboutDialog::setupUi() {
   m_infoCard = new QFrame(this);
   m_infoCard->setObjectName(QStringLiteral("infoCard"));
   auto *infoLayout = new QVBoxLayout(m_infoCard);
-  infoLayout->setContentsMargins(16, 16, 16, 16);
-  infoLayout->setSpacing(10);
+  infoLayout->setContentsMargins(16, 14, 16, 14);
+  infoLayout->setSpacing(8);
 
   m_aboutText = new QLabel(
       QStringLiteral(
           "A specialized desktop writing suite for Archive of Our Own (AO3) "
-          "fanfiction authors. "
-          "Features a distraction-free WYSIWYG composer, live AO3 HTML source "
-          "view, Work Skin CSS recognition, "
-          "ZSTD project archiving, live preview, and spell checking."),
+          "fanfiction authors. Features a distraction-free WYSIWYG composer, "
+          "live AO3 HTML source view, Work Skin CSS recognition, live dual-flavor preview, "
+          "visual Chapter Manager, Git-like Snapshots with diffs, and Model Context Protocol (MCP) AI co-authoring."),
       m_infoCard);
   m_aboutText->setWordWrap(true);
 
@@ -119,6 +127,7 @@ void AboutDialog::setupUi() {
       new QLabel(QStringLiteral("Released under the MIT License. Dynamically links with Qt 6 (GNU LGPLv3). "
                                 "Portions generated with AI assistance."),
                  m_infoCard);
+  m_licenseText->setWordWrap(true);
 
   infoLayout->addWidget(m_aboutText);
   infoLayout->addWidget(m_divider);
@@ -191,15 +200,27 @@ void AboutDialog::onUpdateCheckFinished(const ReleaseInfo &info)
   if (info.isUpdateAvailable) {
     const QString releaseLink = QStringLiteral("<a href=\"%1\" style=\"color: #2cb67d; font-weight: bold; text-decoration: underline;\">%2</a>")
                                     .arg(info.htmlUrl, info.tagName);
+    QString curVer;
+#ifdef ENSEMBLE_APP_VERSION
+    curVer = QStringLiteral("v") + QStringLiteral(ENSEMBLE_APP_VERSION);
+#else
+    curVer = QStringLiteral("v1.1.1");
+#endif
     m_updateStatusLabel->setText(
         QStringLiteral("<b>🎉 New Update Available:</b> %1 &nbsp;<span style=\"color: #64748b; font-size: 11px;\">(Current: %2)</span>")
-            .arg(releaseLink, EnsembleDebug::fullVersion()));
+            .arg(releaseLink, curVer));
     m_getUpdateBtn->setText(QStringLiteral("🚀 Get %1").arg(info.tagName));
     m_getUpdateBtn->show();
   } else {
+    QString curVer;
+#ifdef ENSEMBLE_APP_VERSION
+    curVer = QStringLiteral("v") + QStringLiteral(ENSEMBLE_APP_VERSION);
+#else
+    curVer = QStringLiteral("v1.1.1");
+#endif
     m_updateStatusLabel->setText(
         QStringLiteral("<b>✓ Ensemble is up to date:</b> You are running the latest release (<b>%1</b>).")
-            .arg(!info.tagName.isEmpty() ? info.tagName : EnsembleDebug::fullVersion()));
+            .arg(!info.tagName.isEmpty() ? info.tagName : curVer));
     m_getUpdateBtn->hide();
   }
 }
@@ -224,10 +245,12 @@ void AboutDialog::onOpenReleaseUrl()
 
 void AboutDialog::updateTheme() {
   const bool isDark = ThemeManager::instance().isDarkMode();
-  const QString fullVersion = EnsembleDebug::fullVersion();
-  const QString badgeColor = fullVersion.contains(QStringLiteral("-dirty"))
-                                 ? QStringLiteral("#e53170")
-                                 : (isDark ? QStringLiteral("#7f5af0") : QStringLiteral("#6366f1"));
+  QString cleanVersion;
+#ifdef ENSEMBLE_APP_VERSION
+  cleanVersion = QStringLiteral("v") + QStringLiteral(ENSEMBLE_APP_VERSION);
+#else
+  cleanVersion = QStringLiteral("v1.1.1");
+#endif
 
   setStyleSheet(isDark ? QStringLiteral(
       "QDialog {"
@@ -244,11 +267,35 @@ void AboutDialog::updateTheme() {
   ));
 
   if (m_titleLabel) {
-    m_titleLabel->setText(
-        QString(
-            "<span style=\"color: %1; font-size: 22px; font-weight: 700;\">Ensemble</span> "
-            "<span style=\"background-color: %2; color: #ffffff; padding: 3px 8px; border-radius: 8px; font-size: 11px; font-weight: 600;\">v%3</span>")
-            .arg(isDark ? QStringLiteral("#fffffe") : QStringLiteral("#0f172a"), badgeColor, fullVersion));
+    m_titleLabel->setStyleSheet(isDark
+        ? QStringLiteral("color: #fffffe; font-size: 20px; font-weight: 700; background: transparent;")
+        : QStringLiteral("color: #0f172a; font-size: 20px; font-weight: 700; background: transparent;"));
+  }
+
+  if (m_versionBadge) {
+    m_versionBadge->setText(cleanVersion);
+    m_versionBadge->setToolTip(EnsembleDebug::fullVersion());
+    m_versionBadge->setStyleSheet(isDark ? QStringLiteral(
+        "QLabel#versionBadge {"
+        "  background-color: #282a36;"
+        "  color: #bd93f9;"
+        "  border: 1px solid #44475a;"
+        "  border-radius: 6px;"
+        "  padding: 2px 7px;"
+        "  font-size: 11px;"
+        "  font-weight: 600;"
+        "}"
+    ) : QStringLiteral(
+        "QLabel#versionBadge {"
+        "  background-color: #e0e7ff;"
+        "  color: #4338ca;"
+        "  border: 1px solid #c7d2fe;"
+        "  border-radius: 6px;"
+        "  padding: 2px 7px;"
+        "  font-size: 11px;"
+        "  font-weight: 600;"
+        "}"
+    ));
   }
 
   if (m_subTitleLabel) {

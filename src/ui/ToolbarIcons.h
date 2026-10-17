@@ -37,7 +37,7 @@ public:
             icon.addPixmap(renderPixmap(s, normalColor, drawFunc), QIcon::Normal, QIcon::Off);
             icon.addPixmap(renderPixmap(s, activeColor, drawFunc), QIcon::Normal, QIcon::On);
             icon.addPixmap(renderPixmap(s, activeColor, drawFunc), QIcon::Active, QIcon::On);
-            icon.addPixmap(renderPixmap(s, normalColor, drawFunc), QIcon::Active, QIcon::Off);
+            icon.addPixmap(renderPixmap(s, activeColor, drawFunc), QIcon::Active, QIcon::Off);
         }
         return icon;
     }
@@ -358,6 +358,17 @@ public:
         p.drawLine(QPointF(13, 5), QPointF(11, 19));
     }
 
+    // Plus (Lucide plus)
+    static void drawPlus(QPainter &p, qreal)
+    {
+        QPen pen = p.pen();
+        pen.setWidthF(2.2);
+        pen.setCapStyle(Qt::RoundCap);
+        p.setPen(pen);
+        p.drawLine(QPointF(12, 5), QPointF(12, 19));
+        p.drawLine(QPointF(5, 12), QPointF(19, 12));
+    }
+
     // --- High Level Builders ---
 
     static QIcon bold(const QColor &normal, const QColor &active) { return makeIcon(normal, active, drawBold); }
@@ -375,4 +386,5 @@ public:
     static QIcon numberedList(const QColor &normal, const QColor &active) { return makeIcon(normal, active, drawNumberedList); }
     static QIcon image(const QColor &normal, const QColor &active) { return makeIcon(normal, active, drawImage); }
     static QIcon code(const QColor &normal, const QColor &active) { return makeIcon(normal, active, drawCode); }
+    static QIcon plus(const QColor &normal, const QColor &active) { return makeIcon(normal, active, drawPlus); }
 };

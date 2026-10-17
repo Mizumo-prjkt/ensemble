@@ -33,6 +33,7 @@ private:
     QVBoxLayout *m_layout = nullptr;
     QFrame *m_infoCard = nullptr;
     QLabel *m_titleLabel = nullptr;
+    QLabel *m_versionBadge = nullptr;
     QLabel *m_subTitleLabel = nullptr;
     QLabel *m_aboutText = nullptr;
     QFrame *m_divider = nullptr;
