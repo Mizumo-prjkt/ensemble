@@ -107,14 +107,14 @@ Root: HKA; Subkey: "Software\Classes\Ensemble.ao3projasve\shell\open"; ValueType
 Root: HKA; Subkey: "Software\Classes\Ensemble.ao3projasve\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: assoc
 
 ; ------------------------------------------------------------------------------
-; File Association: .er (Ensemble Plugin Package)
+; File Association: .er (Ensemble Plugin Script)
 ; ------------------------------------------------------------------------------
 Root: HKA; Subkey: "Software\Classes\.er"; ValueType: string; ValueName: ""; ValueData: "Ensemble.Plugin"; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.er"; ValueType: string; ValueName: "Content Type"; ValueData: "application/x-ensemble-plugin"; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.er"; ValueType: string; ValueName: "PerceivedType"; ValueData: "Package"; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.er\OpenWithProgids"; ValueType: string; ValueName: "Ensemble.Plugin"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
-Root: HKA; Subkey: "Software\Classes\Ensemble.Plugin"; ValueType: string; ValueName: ""; ValueData: "Ensemble Plugin Package"; Flags: uninsdeletekey; Tasks: assoc
-Root: HKA; Subkey: "Software\Classes\Ensemble.Plugin"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "Ensemble Plugin Package"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Ensemble.Plugin"; ValueType: string; ValueName: ""; ValueData: "Ensemble Plugin Script"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\Ensemble.Plugin"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "Ensemble Plugin Script"; Flags: uninsdeletekey; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Ensemble.Plugin\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Ensemble.Plugin\shell\open"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#AppName}"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Ensemble.Plugin\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: assoc
