@@ -270,18 +270,21 @@ jobs:
 
       - name: Generate Checksums & Release Body
         id: release_notes
+        env:
+          GITHUB_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ needs.meta.outputs.tag_name }}
+          VER: ${{ needs.meta.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          TARGET_SHA: ${{ github.sha }}
         run: |
           cd dist
           sha256sum * > SHA256SUMS 2>/dev/null || true
           cd ..
 
-          TAG_NAME="${{ needs.meta.outputs.tag_name }}"
-          VER="${{ needs.meta.outputs.version }}"
-
           # Extract git tag notes/annotation or commit message
           TAG_MSG=$(git tag -l --format='%(contents)' "$TAG_NAME" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;};/\n$/ba')
-          if [ -z "$TAG_MSG" ] && [ -n "${{ github.ref_name }}" ]; then
-            TAG_MSG=$(git tag -l --format='%(contents)' "${{ github.ref_name }}" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;};/\n$/ba')
+          if [ -z "$TAG_MSG" ] && [ -n "$REF_NAME" ]; then
+            TAG_MSG=$(git tag -l --format='%(contents)' "$REF_NAME" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;};/\n$/ba')
           fi
           if [ -z "$TAG_MSG" ]; then
             TAG_MSG=$(git notes show "$TAG_NAME" 2>/dev/null || git notes show HEAD 2>/dev/null || true)
@@ -293,12 +296,63 @@ jobs:
             TAG_MSG="Ensemble Release ${VER}"
           fi
 
+          # Determine target ref and previous tag for patch list
+          TARGET_REF="HEAD"
+          if git rev-parse -q --verify "refs/tags/${TAG_NAME}" >/dev/null 2>&1; then
+            TARGET_REF="refs/tags/${TAG_NAME}"
+          elif [ -n "$TARGET_SHA" ]; then
+            TARGET_REF="$TARGET_SHA"
+          fi
+
+          CURR_TAG=$(git describe --tags --exact-match "$TARGET_REF" 2>/dev/null || true)
+          if [ "$CURR_TAG" = "$TAG_NAME" ]; then
+            PREV_TAG=$(git describe --tags --abbrev=0 "${TARGET_REF}^" 2>/dev/null || true)
+          else
+            PREV_TAG=$(git describe --tags --abbrev=0 "$TARGET_REF" 2>/dev/null || true)
+          fi
+
+          # Extract list of patches applied on this tag
+          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG_NAME" ]; then
+            PATCH_HEADER="**Patches applied in \`${TAG_NAME}\` (since \`${PREV_TAG}\`):**"
+            DIFF_LINK="**Full Diff**: https://github.com/${GITHUB_REPO}/compare/${PREV_TAG}...${TAG_NAME}"
+            if [ -n "$GITHUB_REPO" ]; then
+              PATCH_LIST=$(git log "${PREV_TAG}..${TARGET_REF}" --pretty=format:"* [\`%h\`](https://github.com/${GITHUB_REPO}/commit/%H) - %s (%an)" 2>/dev/null || true)
+            else
+              PATCH_LIST=$(git log "${PREV_TAG}..${TARGET_REF}" --pretty=format:"* \`%h\` - %s (%an)" 2>/dev/null || true)
+            fi
+          else
+            PATCH_HEADER="**Patches applied in \`${TAG_NAME}\`:**"
+            DIFF_LINK=""
+            if [ -n "$GITHUB_REPO" ]; then
+              PATCH_LIST=$(git log "${TARGET_REF}" -n 50 --pretty=format:"* [\`%h\`](https://github.com/${GITHUB_REPO}/commit/%H) - %s (%an)" 2>/dev/null || true)
+            else
+              PATCH_LIST=$(git log "${TARGET_REF}" -n 50 --pretty=format:"* \`%h\` - %s (%an)" 2>/dev/null || true)
+            fi
+          fi
+
+          if [ -z "$PATCH_LIST" ]; then
+            if [ -n "$GITHUB_REPO" ]; then
+              PATCH_LIST=$(git log -1 "${TARGET_REF}" --pretty=format:"* [\`%h\`](https://github.com/${GITHUB_REPO}/commit/%H) - %s (%an)" 2>/dev/null || echo "* No patch records found.")
+            else
+              PATCH_LIST=$(git log -1 "${TARGET_REF}" --pretty=format:"* \`%h\` - %s (%an)" 2>/dev/null || echo "* No patch records found.")
+            fi
+          fi
+
           cat << 'EOF' > release_body.md
           ## Release Notes
           EOF
-          echo "$TAG_MSG" >> release_body.md
+          printf "%s\n\n" "$TAG_MSG" >> release_body.md
           cat << 'EOF' >> release_body.md
+          ---
 
+          ### 📝 Applied Patches & Commits
+          EOF
+          printf "%s\n\n" "$PATCH_HEADER" >> release_body.md
+          printf "%s\n\n" "$PATCH_LIST" >> release_body.md
+          if [ -n "$DIFF_LINK" ]; then
+            printf "%s\n\n" "$DIFF_LINK" >> release_body.md
+          fi
+          cat << 'EOF' >> release_body.md
           ---
 
           ### Available Binaries & Packages
