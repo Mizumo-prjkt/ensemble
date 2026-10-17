@@ -151,12 +151,46 @@ int main(int argc, char *argv[])
         if (cb->text().contains("Allow Mimicking The whole AO3 Body page")) foundMimic = true;
         if (cb->text().contains("access this via MCP")) foundMcp = true;
         if (cb->text().contains("access this via API")) foundApi = true;
-        if (cb->text().contains("Allow Other local agents access this software")) foundLocal = true;
+        if (cb->text().contains("Allow Other local agents access this software") ||
+            cb->text().contains("local LLMs")) {
+            foundLocal = true;
+            assert(cb->isEnabled());
+            assert(cb->text().contains("[Beta]"));
+        }
     }
     assert(foundMimic);
     assert(foundMcp);
     assert(foundApi);
     assert(foundLocal);
+
+    // Verify Local LLMs Beta MCP Connector controls
+    auto *localAgentsCheck = dialog.findChild<QCheckBox *>(QStringLiteral("aiLocalAgentsCheck"));
+    assert(localAgentsCheck != nullptr);
+    assert(localAgentsCheck->isEnabled());
+    assert(localAgentsCheck->text().contains("[Beta]"));
+    assert(localAgentsCheck->text().contains("MCP connector"));
+
+    // Verify toggle persistence
+    localAgentsCheck->setChecked(true);
+    assert(settings.value("ai/localLlmsMcpEnabled").toBool() == true);
+    auto *localDetailsCard = dialog.findChild<QFrame *>(QStringLiteral("localLlmsDetailsCard"));
+    assert(localDetailsCard != nullptr);
+    assert(!localDetailsCard->isHidden());
+
+    localAgentsCheck->setChecked(false);
+    assert(settings.value("ai/localLlmsMcpEnabled").toBool() == false);
+    assert(localDetailsCard->isHidden());
+
+    // Verify Local LLM MCP JSON snippet generation
+    const QString localLlmConfig = McpAgentInstaller::generateLocalLlmMcpConfigJson();
+    assert(localLlmConfig.contains("ensemble"));
+    assert(localLlmConfig.contains("--mcp-bridge"));
+
+    // Verify Local LLM Python connector script generation (Ollama & llama.cpp)
+    const QString localLlmScript = McpAgentInstaller::generateLocalLlmAgentScript();
+    assert(localLlmScript.contains("--ollama"));
+    assert(localLlmScript.contains("--llama-cpp"));
+    assert(localLlmScript.contains("--mcp-bridge"));
 
     // Verify Editor Tab checkboxes
     bool foundHoverElem = false;
@@ -174,6 +208,7 @@ int main(int argc, char *argv[])
     assert(foundHoverDetails);
     assert(foundAutoFormat);
     std::cout << "✓ Editor settings checkboxes verified (Element hover, error highlight, error details, auto-format)." << std::endl;
+    std::cout << "✓ Local LLMs Beta MCP connector controls, settings persistence, and config snippet verified." << std::endl;
     std::cout << "✓ All requested SettingsDialog checkboxes and TODO items verified." << std::endl;
 
     // 4. Test SkinFlavor geometry metrics and styling

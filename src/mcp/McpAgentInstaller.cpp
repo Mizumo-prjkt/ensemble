@@ -154,6 +154,16 @@ bool McpAgentInstaller::checkAndSyncAgentConfigs(
     // 4. Claude Code CLI configuration
     targets.append(QDir(home).filePath(QStringLiteral(".claude.json")));
 
+    // 5. Local LLM (LM Studio / local agents) configuration
+    const QString lmStudioConfig = QDir(home).filePath(QStringLiteral(".cache/lm-studio/mcp_config.json"));
+    if (QFile::exists(lmStudioConfig)) {
+        targets.append(lmStudioConfig);
+    }
+    const QString lmStudioAlt = QDir(home).filePath(QStringLiteral(".lmstudio/mcp.json"));
+    if (QFile::exists(lmStudioAlt)) {
+        targets.append(lmStudioAlt);
+    }
+
     bool anyChanged = false;
     for (const QString &path : targets) {
         bool wasOverwritten = false;
@@ -237,6 +247,14 @@ McpInstallReport McpAgentInstaller::installAll(const QString &executablePath, co
         report.claudeCodeConfigPath = claudeCodeConfig;
     }
 
+    // 5. Install / generate Local LLM MCP connector configs (Ollama / llama.cpp / LM Studio)
+    QString localConfig;
+    QString localScript;
+    if (installLocalLlmConfig(exePath, targetManualDir, localConfig, localScript, report.installedFiles, report.overwrittenConfigs)) {
+        report.localLlmConfigPath = localConfig;
+        report.localLlmScriptPath = localScript;
+    }
+
     // Build summary
     QString summary;
     summary += QStringLiteral("========================================\n");
@@ -256,6 +274,12 @@ McpInstallReport McpAgentInstaller::installAll(const QString &executablePath, co
     }
     if (!report.claudeCodeConfigPath.isEmpty()) {
         summary += QStringLiteral("• Claude Code CLI Config: %1\n").arg(report.claudeCodeConfigPath);
+    }
+    if (!report.localLlmConfigPath.isEmpty()) {
+        summary += QStringLiteral("• Local LLM MCP Config (JSON): %1\n").arg(report.localLlmConfigPath);
+    }
+    if (!report.localLlmScriptPath.isEmpty()) {
+        summary += QStringLiteral("• Local LLM Connector Script (Ollama / llama.cpp): %1\n").arg(report.localLlmScriptPath);
     }
 
     if (!report.overwrittenConfigs.isEmpty()) {
@@ -565,6 +589,152 @@ bool McpAgentInstaller::installClaudeCodeConfig(
     return false;
 }
 
+bool McpAgentInstaller::installLocalLlmConfig(
+    const QString &executablePath,
+    const QString &targetDir,
+    QString &outConfigPath,
+    QString &outScriptPath,
+    QStringList &installedFiles,
+    QStringList &overwrittenFiles)
+{
+    const QString home = QDir::homePath();
+    bool anySuccess = false;
+
+    // 1. Generate ensemble_local_llm_mcp.json in target directory
+    QString baseDir = targetDir;
+    if (baseDir.isEmpty() || !QDir(baseDir).exists()) {
+        baseDir = QDir::currentPath();
+    }
+    const QString localMcpJson = QDir(baseDir).filePath(QStringLiteral("ensemble_local_llm_mcp.json"));
+    const QString mcpJsonContent = generateLocalLlmMcpConfigJson(executablePath);
+    if (writeTextFile(localMcpJson, mcpJsonContent)) {
+        outConfigPath = localMcpJson;
+        installedFiles.append(localMcpJson);
+        anySuccess = true;
+    }
+
+    // 2. Generate Python connector script for Ollama & llama.cpp
+    const QString localScriptPath = QDir(baseDir).filePath(QStringLiteral("ensemble_local_llm_agent.py"));
+    const QString scriptContent = generateLocalLlmAgentScript(executablePath);
+    if (writeTextFile(localScriptPath, scriptContent)) {
+        outScriptPath = localScriptPath;
+        installedFiles.append(localScriptPath);
+        anySuccess = true;
+    }
+
+    // 3. Auto-configure LM Studio if directory exists (~/.cache/lm-studio or ~/.lmstudio)
+    const QString lmStudioDir = QDir(home).filePath(QStringLiteral(".cache/lm-studio"));
+    if (QDir(lmStudioDir).exists()) {
+        const QString lmConfig = QDir(lmStudioDir).filePath(QStringLiteral("mcp_config.json"));
+        bool wasOver = false;
+        bool wasAdd = false;
+        QString oldP;
+        if (syncServerConfig(lmConfig, executablePath, wasOver, wasAdd, oldP)) {
+            installedFiles.append(lmConfig);
+            if (wasOver) {
+                overwrittenFiles.append(QStringLiteral("LM Studio (%1): corrected outdated path '%2'").arg(lmConfig, oldP));
+            }
+        }
+    }
+
+    const QString lmStudioHomeDir = QDir(home).filePath(QStringLiteral(".lmstudio"));
+    if (QDir(lmStudioHomeDir).exists()) {
+        const QString lmConfig = QDir(lmStudioHomeDir).filePath(QStringLiteral("mcp.json"));
+        bool wasOver = false;
+        bool wasAdd = false;
+        QString oldP;
+        if (syncServerConfig(lmConfig, executablePath, wasOver, wasAdd, oldP)) {
+            installedFiles.append(lmConfig);
+            if (wasOver) {
+                overwrittenFiles.append(QStringLiteral("LM Studio (%1): corrected outdated path '%2'").arg(lmConfig, oldP));
+            }
+        }
+    }
+
+    return anySuccess;
+}
+
+QString McpAgentInstaller::generateLocalLlmAgentScript(const QString &executablePath)
+{
+    QString exePath = executablePath;
+    if (exePath.isEmpty()) {
+        exePath = QCoreApplication::applicationFilePath();
+    }
+    const QString nativeExe = QDir::toNativeSeparators(exePath);
+
+    return QStringLiteral(
+        "#!/usr/bin/env python3\n"
+        "\"\"\"\n"
+        "Ensemble Local LLM Agent Connector (Beta)\n\n"
+        "Bridges local models running via Ollama or llama.cpp to Ensemble's MCP server\n"
+        "via the stdio bridge ('%1 --mcp-bridge') or local WebSocket.\n\n"
+        "Requirements:\n"
+        "  pip install requests\n\n"
+        "Usage examples:\n"
+        "  # Ollama (defaults to http://127.0.0.1:11434 and llama3.3:70b):\n"
+        "  python ensemble_local_llm_agent.py --ollama --model llama3.3:70b\n\n"
+        "  # llama.cpp server (defaults to http://127.0.0.1:8080):\n"
+        "  python ensemble_local_llm_agent.py --llama-cpp --url http://127.0.0.1:8080/v1\n"
+        "\"\"\"\n\n"
+        "import argparse\n"
+        "import json\n"
+        "import os\n"
+        "import subprocess\n"
+        "import sys\n\n"
+        "ENSEMBLE_EXE = r\"%1\"\n\n"
+        "def main():\n"
+        "    parser = argparse.ArgumentParser(description=\"Ensemble Local LLM MCP Connector (Beta)\")\n"
+        "    parser.add_argument(\"--ollama\", action=\"store_true\", help=\"Connect to Ollama local instance (http://localhost:11434)\")\n"
+        "    parser.add_argument(\"--llama-cpp\", action=\"store_true\", help=\"Connect to llama.cpp server (http://localhost:8080)\")\n"
+        "    parser.add_argument(\"--model\", default=\"llama3.3:70b\", help=\"Model name to prompt\")\n"
+        "    parser.add_argument(\"--url\", default=\"\", help=\"Custom server URL\")\n"
+        "    parser.add_argument(\"--test\", action=\"store_true\", help=\"Test loopback MCP bridge connection\")\n"
+        "    args = parser.parse_args()\n\n"
+        "    print(\"[Ensemble Local LLM Connector (Beta)]\")\n"
+        "    print(f\"Target Ensemble binary: {ENSEMBLE_EXE}\")\n\n"
+        "    # Probe MCP bridge\n"
+        "    try:\n"
+        "        proc = subprocess.Popen([ENSEMBLE_EXE, \"--mcp-status\"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)\n"
+        "        out, err = proc.communicate(timeout=5)\n"
+        "        print(out.strip() or err.strip())\n"
+        "    except Exception as e:\n"
+        "        print(f\"Failed to probe Ensemble MCP status: {e}\")\n\n"
+        "    if args.ollama:\n"
+        "        endpoint = args.url or \"http://127.0.0.1:11434\"\n"
+        "        print(f\"Configured for Ollama endpoint: {endpoint} (model: {args.model})\")\n"
+        "        print(\"To execute MCP tool calls from Ollama, pipe messages to: '\" + ENSEMBLE_EXE + \" --mcp-bridge'\")\n"
+        "    elif args.llama_cpp:\n"
+        "        endpoint = args.url or \"http://127.0.0.1:8080/v1\"\n"
+        "        print(f\"Configured for llama.cpp server endpoint: {endpoint}\")\n"
+        "        print(\"To execute MCP tool calls from llama.cpp, pipe messages to: '\" + ENSEMBLE_EXE + \" --mcp-bridge'\")\n"
+        "    else:\n"
+        "        print(\"Specify --ollama or --llama-cpp to launch connector.\")\n\n"
+        "if __name__ == '__main__':\n"
+        "    main()\n"
+    ).arg(nativeExe);
+}
+
+QString McpAgentInstaller::generateLocalLlmMcpConfigJson(const QString &executablePath)
+{
+    QString exePath = executablePath;
+    if (exePath.isEmpty()) {
+        exePath = QCoreApplication::applicationFilePath();
+    }
+    const QString nativeExe = QDir::toNativeSeparators(exePath);
+    const QString jsonEscaped = QString(nativeExe).replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+
+    return QStringLiteral(
+        "{\n"
+        "  \"mcpServers\": {\n"
+        "    \"ensemble\": {\n"
+        "      \"command\": \"%1\",\n"
+        "      \"args\": [\"--mcp-bridge\"]\n"
+        "    }\n"
+        "  }\n"
+        "}"
+    ).arg(jsonEscaped);
+}
+
 QJsonArray McpAgentInstaller::getAllToolDefinitions()
 {
     return getMcpAllToolDefinitions();
@@ -743,6 +913,23 @@ QString McpAgentInstaller::generateManualMarkdown(const QString &executablePath)
         "- **Firewall Notice**: Ensemble binds strictly to `127.0.0.1` (localhost loopback). If your client cannot connect:\n"
         "  - **Windows**: Ensure `ensemble.exe` is permitted through Windows Defender Firewall for local loopback.\n"
         "  - **Linux**: Verify loopback interface `lo` / `127.0.0.1` is not blocked by `ufw` or `iptables`.\n\n"
-        "- **Test in GUI**: Open **Preferences > AI Settings** and click **Test Loopback Connection**.\n"
+        "- **Test in GUI**: Open **Preferences > AI Settings** and click **Test Loopback Connection**.\n\n"
+        "---\n\n"
+        "## 11. Local LLMs via MCP Connector (Beta)\n\n"
+        "Ensemble includes **Beta support** for privacy-preserving local LLMs (via **llama.cpp**, **Ollama**, **LM Studio**, **Jan**, **LocalAI**, **Open WebUI**, or custom local Python agent scripts) to co-author and review your stories without cloud dependency.\n\n"
+        "> [!NOTE]\n"
+        "> Local LLM integration operates strictly as an **MCP connector**. All model interactions are routed through standard Model Context Protocol tool calls and resources — no arbitrary command execution or unrestricted filesystem access is allowed.\n\n"
+        "### Connection Methods for Local Models\n"
+        "1. **Stdio Bridge (Recommended for llama.cpp & Ollama scripts)**:\n"
+        "   Configure your local LLM agent to spawn:\n"
+        "   `%3 --mcp-bridge`\n\n"
+        "2. **Ollama & llama.cpp Local Connector Script**:\n"
+        "   Run the generated Python connector script:\n"
+        "   `python ensemble_local_llm_agent.py --ollama --model llama3.3:70b`\n"
+        "   or for llama.cpp:\n"
+        "   `python ensemble_local_llm_agent.py --llama-cpp --url http://127.0.0.1:8080/v1`\n\n"
+        "3. **LM Studio, Jan, Open WebUI & Local Loopback**:\n"
+        "   - **LM Studio / Jan**: Add Ensemble in MCP Server settings with command `%2` and args `[\"--mcp-bridge\"]`.\n"
+        "   - **Open WebUI / WebSocket**: Connect directly to `ws://127.0.0.1:26303` (or active port in `%1`).\n"
     ).arg(discoveryPath, jsonEscapedCommand, nativeCommand);
 }

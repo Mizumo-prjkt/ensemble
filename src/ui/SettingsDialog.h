@@ -39,6 +39,10 @@ private slots:
     void onMcpInstallAgentsClicked();
     void onMcpDiagnosticsClicked();
     void updateMcpStatusDisplay();
+    void onLocalLlmsMcpToggled(bool enabled);
+    void onLocalLlmsCopyConfigClicked();
+    void onLocalLlmsExportConfigsClicked();
+    void onLocalLlmsGuideClicked();
 
 signals:
     void editorSettingsChanged();
@@ -96,6 +100,11 @@ private:
     QPushButton *m_mcpInstallAgentsBtn = nullptr;
     QPushButton *m_mcpDiagnosticsBtn = nullptr;
     QCheckBox *m_aiLocalAgentsCheck = nullptr;
+    QFrame *m_localLlmsDetailsCard = nullptr;
+    QPushButton *m_localLlmsCopyConfigBtn = nullptr;
+    QPushButton *m_localLlmsExportConfigsBtn = nullptr;
+    QPushButton *m_localLlmsGuideBtn = nullptr;
+    QLabel *m_localLlmsStatusLabel = nullptr;
 
     // Plugins Tab
     QLabel *m_pluginsDesc = nullptr;

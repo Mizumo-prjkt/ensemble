@@ -1,5 +1,6 @@
 #include "SettingsDialog.h"
 #include "AppIcon.h"
+#include "HelpGuideDialog.h"
 #include "themes/ThemeManager.h"
 #include "mcp/McpServer.h"
 #include "mcp/McpAgentInstaller.h"
@@ -603,24 +604,100 @@ QWidget *SettingsDialog::createAiTab()
     m_mcpDetailsCard->setVisible(mcpEnabled);
     aiLayout->addWidget(mcpBox);
 
-    // Item 3: Local Agents (Ollama / llama.cpp / LocalAI)
+    // Item 3: Local LLMs via MCP Connector (Beta)
     auto *localBox = new QFrame(aiGroup);
     auto *localBoxLayout = new QVBoxLayout(localBox);
     localBoxLayout->setContentsMargins(0, 0, 0, 0);
-    localBoxLayout->setSpacing(3);
+    localBoxLayout->setSpacing(6);
+
+    const bool localMcpEnabled = settings.value(QStringLiteral("ai/localLlmsMcpEnabled"), false).toBool();
 
     m_aiLocalAgentsCheck = new QCheckBox(
-        QStringLiteral("[TODO: Coming soon] Allow Other local agents access this software"), localBox);
-    m_aiLocalAgentsCheck->setEnabled(false);
+        QStringLiteral("[Beta] Allow local LLMs to access Ensemble via MCP connector"), localBox);
+    m_aiLocalAgentsCheck->setObjectName(QStringLiteral("aiLocalAgentsCheck"));
+    m_aiLocalAgentsCheck->setEnabled(true);
+    m_aiLocalAgentsCheck->setChecked(localMcpEnabled);
+    connect(m_aiLocalAgentsCheck, &QCheckBox::toggled, this, &SettingsDialog::onLocalLlmsMcpToggled);
     localBoxLayout->addWidget(m_aiLocalAgentsCheck);
 
     auto *localDesc = new QLabel(
-        QStringLiteral("Enable local IPC / REST / WebSocket endpoints for privacy-friendly local LLMs "
-                       "running via Ollama, llama.cpp, LocalAI, or custom Python agent scripts."),
+        QStringLiteral("Enable privacy-preserving local LLMs (Ollama, llama.cpp, LM Studio, LocalAI, Jan, "
+                       "Open WebUI) to interact with your story strictly through the Model Context "
+                       "Protocol (MCP connector only). Beta feature."),
         localBox);
     localDesc->setWordWrap(true);
     localDesc->setStyleSheet(QStringLiteral("font-size: 11px; opacity: 0.8; padding-left: 20px;"));
     localBoxLayout->addWidget(localDesc);
+
+    // Local LLMs Details Card
+    m_localLlmsDetailsCard = new QFrame(localBox);
+    m_localLlmsDetailsCard->setObjectName(QStringLiteral("localLlmsDetailsCard"));
+    auto *localCardLayout = new QVBoxLayout(m_localLlmsDetailsCard);
+    localCardLayout->setContentsMargins(14, 12, 14, 12);
+    localCardLayout->setSpacing(10);
+
+    // Notice banner
+    auto *localBannerFrame = new QFrame(m_localLlmsDetailsCard);
+    localBannerFrame->setObjectName(QStringLiteral("localBannerFrame"));
+    auto *localBannerLayout = new QHBoxLayout(localBannerFrame);
+    localBannerLayout->setContentsMargins(10, 8, 10, 8);
+    localBannerLayout->setSpacing(8);
+
+    auto *localBannerIcon = new QLabel(QStringLiteral("🧪"), localBannerFrame);
+    localBannerIcon->setStyleSheet(QStringLiteral("font-size: 16px;"));
+    localBannerLayout->addWidget(localBannerIcon, 0, Qt::AlignTop);
+
+    auto *localBannerText = new QLabel(
+        QStringLiteral("<b>Beta MCP Connector:</b> Local models connect exclusively via the Model Context Protocol (MCP). "
+                       "All tool invocations (chapter edits, work skins, lore graph) are strictly validated and sanitized "
+                       "against Ensemble's schema and AO3 HTML standards. No direct OS shell access or raw filesystem execution is permitted."),
+        localBannerFrame);
+    localBannerText->setWordWrap(true);
+    localBannerText->setStyleSheet(QStringLiteral("font-size: 11px; opacity: 0.9; line-height: 1.3;"));
+    localBannerLayout->addWidget(localBannerText, 1);
+    localCardLayout->addWidget(localBannerFrame);
+
+    auto *localInfoLabel = new QLabel(
+        QStringLiteral("<b>Supported Frameworks:</b> Ollama, llama.cpp, LM Studio, LocalAI, Jan, Open WebUI, and local Python scripts.<br>"
+                       "<b>Connection Methods:</b> Stdio Bridge (<code>ensemble --mcp-bridge</code>) or Localhost WebSocket (<code>ws://127.0.0.1:26303</code>)."),
+        m_localLlmsDetailsCard);
+    localInfoLabel->setWordWrap(true);
+    localInfoLabel->setStyleSheet(QStringLiteral("font-size: 11px; opacity: 0.85; line-height: 1.3;"));
+    localCardLayout->addWidget(localInfoLabel);
+
+    // Buttons
+    auto *localBtnLayout = new QHBoxLayout();
+    localBtnLayout->setSpacing(10);
+
+    m_localLlmsCopyConfigBtn = new QPushButton(QStringLiteral("📋 Copy Local LLM Config"), m_localLlmsDetailsCard);
+    m_localLlmsCopyConfigBtn->setCursor(Qt::PointingHandCursor);
+    m_localLlmsCopyConfigBtn->setToolTip(QStringLiteral("Copy JSON configuration snippet for local LLM clients (Ollama, llama.cpp, LM Studio, Open WebUI) to clipboard."));
+    connect(m_localLlmsCopyConfigBtn, &QPushButton::clicked, this, &SettingsDialog::onLocalLlmsCopyConfigClicked);
+    localBtnLayout->addWidget(m_localLlmsCopyConfigBtn);
+
+    m_localLlmsExportConfigsBtn = new QPushButton(QStringLiteral("📤 Export to Local Clients"), m_localLlmsDetailsCard);
+    m_localLlmsExportConfigsBtn->setCursor(Qt::PointingHandCursor);
+    m_localLlmsExportConfigsBtn->setToolTip(QStringLiteral("Generate local LLM config and Python connector script (for Ollama, llama.cpp, LM Studio)."));
+    connect(m_localLlmsExportConfigsBtn, &QPushButton::clicked, this, &SettingsDialog::onLocalLlmsExportConfigsClicked);
+    localBtnLayout->addWidget(m_localLlmsExportConfigsBtn);
+
+    m_localLlmsGuideBtn = new QPushButton(QStringLiteral("📖 Setup Guide"), m_localLlmsDetailsCard);
+    m_localLlmsGuideBtn->setCursor(Qt::PointingHandCursor);
+    m_localLlmsGuideBtn->setToolTip(QStringLiteral("Open Help Guide for step-by-step instructions on connecting local LLMs."));
+    connect(m_localLlmsGuideBtn, &QPushButton::clicked, this, &SettingsDialog::onLocalLlmsGuideClicked);
+    localBtnLayout->addWidget(m_localLlmsGuideBtn);
+
+    localBtnLayout->addStretch(1);
+    localCardLayout->addLayout(localBtnLayout);
+
+    m_localLlmsStatusLabel = new QLabel(m_localLlmsDetailsCard);
+    m_localLlmsStatusLabel->setWordWrap(true);
+    m_localLlmsStatusLabel->setTextFormat(Qt::RichText);
+    m_localLlmsStatusLabel->setStyleSheet(QStringLiteral("font-size: 11px;"));
+    localCardLayout->addWidget(m_localLlmsStatusLabel);
+
+    localBoxLayout->addWidget(m_localLlmsDetailsCard);
+    m_localLlmsDetailsCard->setVisible(localMcpEnabled);
     aiLayout->addWidget(localBox);
 
     layout->addWidget(aiGroup);
@@ -829,6 +906,27 @@ void SettingsDialog::updateMcpStatusDisplay()
             "}"
         ).arg(border, cardBg, noticeBorder, noticeBg));
     }
+
+    if (m_localLlmsDetailsCard) {
+        const QString border = ThemeManager::instance().borderColor().name();
+        const QString cardBg = ThemeManager::instance().cardBgColor().name();
+        const bool isDark = ThemeManager::instance().isDarkMode();
+        const QString noticeBg = isDark ? QStringLiteral("rgba(139, 92, 246, 0.08)") : QStringLiteral("rgba(139, 92, 246, 0.1)");
+        const QString noticeBorder = isDark ? QStringLiteral("rgba(139, 92, 246, 0.25)") : QStringLiteral("rgba(139, 92, 246, 0.35)");
+
+        m_localLlmsDetailsCard->setStyleSheet(QStringLiteral(
+            "QFrame#localLlmsDetailsCard {"
+            "  border: 1px solid %1;"
+            "  border-radius: 12px;"
+            "  background-color: %2;"
+            "}"
+            "QFrame#localBannerFrame {"
+            "  border: 1px solid %3;"
+            "  border-radius: 8px;"
+            "  background-color: %4;"
+            "}"
+        ).arg(border, cardBg, noticeBorder, noticeBg));
+    }
 }
 
 void SettingsDialog::onMcpTestClicked()
@@ -998,3 +1096,61 @@ void SettingsDialog::onMcpDiagnosticsClicked()
     diagDialog->setStyleSheet(ThemeManager::instance().getDialogStyleSheet());
     diagDialog->exec();
 }
+
+void SettingsDialog::onLocalLlmsMcpToggled(bool enabled)
+{
+    QSettings settings(QStringLiteral("Ensemble"), QStringLiteral("Ensemble"));
+    settings.setValue(QStringLiteral("ai/localLlmsMcpEnabled"), enabled);
+
+    if (m_localLlmsDetailsCard) {
+        m_localLlmsDetailsCard->setVisible(enabled);
+    }
+    if (enabled && m_localLlmsStatusLabel) {
+        m_localLlmsStatusLabel->setText(QStringLiteral("<span style=\"color: #50fa7b;\">🧪 Local LLM Beta MCP connector enabled. Use the config snippet or exported settings to connect your local model.</span>"));
+    }
+}
+
+void SettingsDialog::onLocalLlmsCopyConfigClicked()
+{
+    const QString configSnippet = McpAgentInstaller::generateLocalLlmMcpConfigJson();
+    QApplication::clipboard()->setText(configSnippet);
+    if (m_localLlmsStatusLabel) {
+        m_localLlmsStatusLabel->setText(QStringLiteral("<span style=\"color: #8be9fd;\">📋 Local LLM MCP configuration snippet copied to clipboard! Paste into Ollama/llama.cpp agent runner, LM Studio, or Open WebUI.</span>"));
+    }
+}
+
+void SettingsDialog::onLocalLlmsExportConfigsClicked()
+{
+    const QString exePath = QApplication::applicationFilePath();
+    McpInstallReport report = McpAgentInstaller::installAll(exePath);
+
+    QString msg;
+    if (!report.localLlmConfigPath.isEmpty() || !report.localLlmScriptPath.isEmpty()) {
+        msg = QStringLiteral("<span style=\"color: #50fa7b;\">📤 Exported Local LLM MCP config (%1) and connector script (%2).</span>")
+                  .arg(report.localLlmConfigPath, report.localLlmScriptPath);
+    } else {
+        msg = QStringLiteral("<span style=\"color: #f1fa8c;\">ℹ️ Manual generated at %1. Configure your local client (Ollama/llama.cpp/LM Studio) using this path.</span>")
+                  .arg(report.manualPath);
+    }
+
+    if (m_localLlmsStatusLabel) {
+        m_localLlmsStatusLabel->setText(msg);
+    }
+    QMessageBox::information(this, QStringLiteral("Local LLM MCP Connector (Beta)"),
+                             QStringLiteral("Local LLM MCP integration files synchronized.\n\n"
+                                            "• Executable: %1\n"
+                                            "• Bridge command: %1 --mcp-bridge\n"
+                                            "• Local MCP Config: %2\n"
+                                            "• Agent Connector Script: %3\n"
+                                            "• Agent Manual: %4\n\n"
+                                            "Compatible with Ollama, llama.cpp, LM Studio, LocalAI, Jan, Open WebUI, and Python scripts.")
+                                 .arg(exePath, report.localLlmConfigPath, report.localLlmScriptPath, report.manualPath));
+}
+
+void SettingsDialog::onLocalLlmsGuideClicked()
+{
+    HelpGuideDialog guideDlg(this);
+    guideDlg.selectTopic(QStringLiteral("mcp_setup"));
+    guideDlg.exec();
+}
+
