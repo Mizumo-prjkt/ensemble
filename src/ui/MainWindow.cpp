@@ -233,6 +233,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   m_loreGraphAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+L")));
   connect(m_loreGraphAction, &QAction::triggered, this, &MainWindow::onShowLoreGraph);
 
+  m_chapterManagerAction = viewMenu->addAction(QStringLiteral("📚 &Chapter Manager…"));
+  m_chapterManagerAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+M")));
+  connect(m_chapterManagerAction, &QAction::triggered, this, &MainWindow::onOpenChapterManager);
+
   viewMenu->addSeparator();
   auto *viewPrefAction = viewMenu->addAction(QStringLiteral("Preference&s…"));
   viewPrefAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+,")));
@@ -1336,6 +1340,9 @@ void MainWindow::updateMainMenuState() {
   if (m_propertiesAction) {
     m_propertiesAction->setEnabled(m_hasActiveProject);
   }
+  if (m_chapterManagerAction) {
+    m_chapterManagerAction->setEnabled(m_hasActiveProject);
+  }
   if (m_loreGraphAction) {
     m_loreGraphAction->setEnabled(m_hasActiveProject);
   }
@@ -1982,6 +1989,13 @@ void MainWindow::onShowLoreGraph() {
   m_loreGraphDialog->show();
   m_loreGraphDialog->raise();
   m_loreGraphDialog->activateWindow();
+}
+
+void MainWindow::onOpenChapterManager() {
+  if (!m_hasActiveProject || !m_chapterSidebar) {
+    return;
+  }
+  m_chapterSidebar->onOpenChapterManager();
 }
 
 void MainWindow::onEditProperties() {

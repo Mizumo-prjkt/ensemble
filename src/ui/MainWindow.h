@@ -97,6 +97,7 @@ private slots:
     void onShowSettings();
     void onShowAgentThoughts();
     void onShowLoreGraph();
+    void onOpenChapterManager();
     void onEditProperties();
     void updateCursorPosition();
     void toggleInsertMode();
@@ -172,6 +173,7 @@ private:
     QAction *m_saveAction = nullptr;
     QAction *m_saveAsAction = nullptr;
     QAction *m_propertiesAction = nullptr;
+    QAction *m_chapterManagerAction = nullptr;
     QAction *m_loreGraphAction = nullptr;
     QAction *m_exportChapterAction = nullptr;
     QAction *m_exportAllAction = nullptr;

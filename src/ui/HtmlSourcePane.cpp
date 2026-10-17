@@ -359,6 +359,22 @@ void HtmlSourcePane::runLinter() {
     warnings << QStringLiteral("❌ Disallowed tag <%1> detected.").arg(m.captured(1).toLower());
   }
 
+  // Check 2b: <span> tags - even though AO3 accepts <span>, it breaks rich text styling and editing in Ensemble
+  static const QRegularExpression spanTagRe(
+      R"(<\/?span\b[^>]*>)",
+      QRegularExpression::CaseInsensitiveOption);
+  QRegularExpressionMatchIterator spanIt = spanTagRe.globalMatch(text);
+  while (spanIt.hasNext()) {
+    QRegularExpressionMatch m = spanIt.next();
+    CodeDiagnosticIssue issue;
+    issue.startPos = m.capturedStart();
+    issue.length = m.capturedLength();
+    issue.isError = true;
+    issue.message = QStringLiteral("<span> tags break styling and rich text editing in Ensemble. Even though AO3 accepts <span>, avoid using it; use semantic tags (e.g. <b>, <em>, <strong>, <i>, <blockquote>, <p>, <div>) instead.");
+    issues.append(issue);
+    warnings << QStringLiteral("❌ <span> tag detected (breaks styling in Ensemble; avoid using).");
+  }
+
   // Check 3: Mismatched tags using QXmlStreamReader
   const QString wrapped = QStringLiteral("<root>%1</root>").arg(text);
   QXmlStreamReader reader(wrapped);

@@ -5,11 +5,15 @@
 #include "ui/AgentThoughtsDialog.h"
 #include "ui/PreviewPane.h"
 #include "ui/EditorPane.h"
+#include "ui/ChapterManagerDialog.h"
+#include "ui/ChapterSidebar.h"
 #include "model/Ao3Project.h"
 #include "export/Ao3HtmlSanitizer.h"
 
 #include <QApplication>
 #include <QLabel>
+#include <QPushButton>
+#include <QSpinBox>
 #include <QStatusBar>
 #include <QToolBar>
 #include <QTextEdit>
@@ -1802,6 +1806,202 @@ int main(int argc, char *argv[])
         assert(foundDetailedLoreAction);
 
         std::cout << "✓ MCP 'manage_lore_data' field validation, default graph reset, and enriched audit logging verified." << std::endl;
+    }
+
+    // 25. Test ChapterManagerDialog UI and ChapterSidebar integration
+    {
+        auto *sidebar = mainWindow.findChild<ChapterSidebar *>();
+        assert(sidebar != nullptr);
+
+        // Sidebar must have m_managerBtn and no old cluttered buttons
+        auto *managerBtn = sidebar->findChild<QPushButton *>();
+        assert(managerBtn != nullptr);
+        bool foundManagerBtn = false;
+        for (auto *btn : sidebar->findChildren<QPushButton *>()) {
+            if (btn->text().contains("Chapter Manager")) {
+                foundManagerBtn = true;
+                break;
+            }
+        }
+        assert(foundManagerBtn);
+
+        // Ensure the active project has at least 2 chapters for reordering tests
+        Ao3Project &proj = mainWindow.project();
+        while (proj.chapters().size() < 3) {
+            proj.addChapter(QStringLiteral("Test Extra Chapter %1").arg(proj.chapters().size() + 1));
+        }
+        proj.chapters()[0].setTitle(QStringLiteral("First Chapter"));
+        proj.chapters()[0].setHtml(QStringLiteral("<p><b>Bold sentence</b> <i>italic note</i> <div>div box</div></p>"));
+        proj.chapters()[1].setTitle(QStringLiteral("Second Chapter"));
+        proj.chapters()[1].setHtml(QStringLiteral("<p>Plain text paragraph in chapter 2.</p>"));
+
+        ChapterManagerDialog dlg(&proj, &mainWindow);
+        auto *tree = dlg.findChild<QTreeWidget *>();
+        assert(tree != nullptr);
+        assert(tree->topLevelItemCount() == proj.chapters().size());
+
+        // Check columns: Chapter #, Title, Words, Lines, Syntaxes Used
+        auto *item0 = tree->topLevelItem(0);
+        assert(item0->text(0) == "Chapter 1");
+        assert(item0->text(1) == "First Chapter");
+        assert(item0->text(4).contains("<b>"));
+        assert(item0->text(4).contains("<i>"));
+        assert(item0->text(4).contains("<div>"));
+
+        // Check spinbox minimum is 1 (never 0!)
+        auto *spin = dlg.findChild<QSpinBox *>();
+        assert(spin != nullptr);
+        assert(spin->minimum() == 1);
+        assert(spin->maximum() == proj.chapters().size());
+
+        std::cout << "✓ ChapterManagerDialog metadata display, syntax extraction, and 1-based spinbox minimum verified." << std::endl;
+    }
+
+    // 26. Test MCP 'reorder_chapters': Chapter 0 rejection and 1-based indexing
+    {
+        // A. Attempting to use fromIndex: 0 must be rejected
+        QJsonObject req0;
+        req0["jsonrpc"] = "2.0";
+        req0["id"] = 90;
+        req0["method"] = "tools/call";
+        req0["params"] = QJsonObject{
+            {"name", "reorder_chapters"},
+            {"arguments", QJsonObject{
+                {"fromIndex", 0},
+                {"toIndex", 2}
+            }}
+        };
+        QJsonObject resp0 = sendAndReceive(req0);
+        assert(resp0.value("id").toInt() == 90);
+        QJsonObject res0 = resp0.value("result").toObject();
+        assert(res0.value("isError").toBool() == true);
+        QString errText0 = res0.value("content").toArray().first().toObject().value("text").toString();
+        assert(errText0.contains("Chapter 0 is not permitted"));
+        assert(errText0.contains("Chapter 1 must stay Chapter 1"));
+
+        // B. Attempting to use toChapter: 0 must be rejected
+        QJsonObject req0b;
+        req0b["jsonrpc"] = "2.0";
+        req0b["id"] = 91;
+        req0b["method"] = "tools/call";
+        req0b["params"] = QJsonObject{
+            {"name", "reorder_chapters"},
+            {"arguments", QJsonObject{
+                {"fromChapter", 1},
+                {"toChapter", 0}
+            }}
+        };
+        QJsonObject resp0b = sendAndReceive(req0b);
+        assert(resp0b.value("id").toInt() == 91);
+        QJsonObject res0b = resp0b.value("result").toObject();
+        assert(res0b.value("isError").toBool() == true);
+        QString errText0b = res0b.value("content").toArray().first().toObject().value("text").toString();
+        assert(errText0b.contains("Chapter 0 is not permitted"));
+
+        // C. Claude test case: attempting out of bounds resort (e.g. position 25) must be rejected
+        QJsonObject req25;
+        req25["jsonrpc"] = "2.0";
+        req25["id"] = 92;
+        req25["method"] = "tools/call";
+        req25["params"] = QJsonObject{
+            {"name", "reorder_chapters"},
+            {"arguments", QJsonObject{
+                {"fromIndex", 1},
+                {"toIndex", 25}
+            }}
+        };
+        QJsonObject resp25 = sendAndReceive(req25);
+        assert(resp25.value("id").toInt() == 92);
+        QJsonObject res25 = resp25.value("result").toObject();
+        assert(res25.value("isError").toBool() == true);
+        QString errText25 = res25.value("content").toArray().first().toObject().value("text").toString();
+        assert(errText25.contains("Valid chapter positions are 1 to"));
+
+        // D. Valid 1-based reorder: Move Chapter 1 to position 2
+        const QString origCh1Title = mainWindow.project().chapters().at(0).title();
+        QJsonObject reqValid;
+        reqValid["jsonrpc"] = "2.0";
+        reqValid["id"] = 93;
+        reqValid["method"] = "tools/call";
+        reqValid["params"] = QJsonObject{
+            {"name", "reorder_chapters"},
+            {"arguments", QJsonObject{
+                {"fromIndex", 1},
+                {"toIndex", 2}
+            }}
+        };
+        QJsonObject respValid = sendAndReceive(reqValid);
+        assert(respValid.value("id").toInt() == 93);
+        QJsonObject resValid = respValid.value("result").toObject();
+        assert(!resValid.value("isError").toBool());
+        QJsonObject dataValid = QJsonDocument::fromJson(resValid.value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(dataValid.value("success").toBool() == true);
+        assert(dataValid.value("fromChapter").toInt() == 1);
+        assert(dataValid.value("toChapter").toInt() == 2);
+        assert(mainWindow.project().chapters().at(1).title() == origCh1Title);
+
+        std::cout << "✓ MCP 'reorder_chapters' Chapter 0 rejection, out-of-bounds rejection, and 1-based reordering verified." << std::endl;
+    }
+
+    // 27. Test MCP 'update_chapter_html': <span> rejection and semantic HTML acceptance
+    {
+        // A. Submitting HTML with <span> must be rejected with styling warning
+        QJsonObject spanReq;
+        spanReq["jsonrpc"] = "2.0";
+        spanReq["id"] = 94;
+        spanReq["method"] = "tools/call";
+        spanReq["params"] = QJsonObject{
+            {"name", "update_chapter_html"},
+            {"arguments", QJsonObject{
+                {"chapterIndex", 0},
+                {"html", "<p><span class=\"custom-style\">This breaks styling in Ensemble</span></p>"}
+            }}
+        };
+        QJsonObject spanResp = sendAndReceive(spanReq);
+        assert(spanResp.value("id").toInt() == 94);
+        QJsonObject spanRes = spanResp.value("result").toObject();
+        assert(spanRes.value("isError").toBool() == true);
+        QString spanErr = spanRes.value("content").toArray().first().toObject().value("text").toString();
+        assert(spanErr.contains("HTML contains <span> tags"));
+        assert(spanErr.contains("Even though AO3 accepts <span>, it actually breaks styling"));
+
+        // B. Submitting Chapter 0 must be rejected
+        QJsonObject ch0Req;
+        ch0Req["jsonrpc"] = "2.0";
+        ch0Req["id"] = 95;
+        ch0Req["method"] = "tools/call";
+        ch0Req["params"] = QJsonObject{
+            {"name", "update_chapter_html"},
+            {"arguments", QJsonObject{
+                {"chapterNumber", 0},
+                {"html", "<p><b>Some valid text</b></p>"}
+            }}
+        };
+        QJsonObject ch0Resp = sendAndReceive(ch0Req);
+        assert(ch0Resp.value("id").toInt() == 95);
+        assert(ch0Resp.value("result").toObject().value("isError").toBool() == true);
+
+        // C. Submitting valid semantic HTML without <span> must succeed
+        QJsonObject validReq;
+        validReq["jsonrpc"] = "2.0";
+        validReq["id"] = 96;
+        validReq["method"] = "tools/call";
+        validReq["params"] = QJsonObject{
+            {"name", "update_chapter_html"},
+            {"arguments", QJsonObject{
+                {"chapterIndex", 0},
+                {"html", "<p><strong>Valid bold</strong> and <em>italic prose</em>.</p>"}
+            }}
+        };
+        QJsonObject validResp = sendAndReceive(validReq);
+        assert(validResp.value("id").toInt() == 96);
+        QJsonObject validRes = validResp.value("result").toObject();
+        assert(!validRes.value("isError").toBool());
+        QJsonObject validData = QJsonDocument::fromJson(validRes.value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(validData.value("success").toBool() == true);
+        assert(validData.value("chapterNumber").toInt() == 1);
+
+        std::cout << "✓ MCP 'update_chapter_html' <span> tag prohibition and Chapter 0 rejection verified." << std::endl;
     }
 
     client.close();

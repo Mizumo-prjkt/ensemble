@@ -593,6 +593,7 @@ QJsonObject McpHandler::toolListChapters(const QJsonObject &args)
         const int words = plain.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts).size();
 
         QJsonObject item;
+        item[QStringLiteral("chapterNumber")] = idx + 1;
         item[QStringLiteral("index")] = idx;
         item[QStringLiteral("id")] = ch.id().toString();
         item[QStringLiteral("title")] = ch.title();
@@ -614,17 +615,42 @@ QJsonObject McpHandler::toolGetChapter(const QJsonObject &args)
         return makeToolResult(QStringLiteral("No project is currently open in Ensemble."), true);
     }
 
-    const int index = args.value(QStringLiteral("chapterIndex")).toInt(-1);
-    const QString format = args.value(QStringLiteral("format")).toString(QStringLiteral("all")).toLower();
     const Ao3Project &proj = m_mainWindow->project();
+    const int count = proj.chapters().size();
 
-    if (index < 0 || index >= proj.chapters().size()) {
-        return makeToolResult(QStringLiteral("Invalid chapterIndex %1. Valid range is 0 to %2.")
-                                  .arg(index).arg(proj.chapters().size() - 1), true);
+    // Check for chapter 0
+    if ((args.contains(QStringLiteral("chapter")) && args.value(QStringLiteral("chapter")).toInt() == 0) ||
+        (args.contains(QStringLiteral("chapterNumber")) && args.value(QStringLiteral("chapterNumber")).toInt() == 0)) {
+        return makeToolResult(QStringLiteral("Invalid chapter position: Chapters in Ensemble and AO3 are 1-indexed (Chapter 1 to Chapter %1). Chapter 0 is not permitted; Chapter 1 must stay Chapter 1.").arg(count), true);
     }
 
+    int index = -1;
+    if (args.contains(QStringLiteral("chapterNumber"))) {
+        const int num = args.value(QStringLiteral("chapterNumber")).toInt(-1);
+        if (num >= 1 && num <= count) {
+            index = num - 1;
+        } else {
+            return makeToolResult(QStringLiteral("Invalid chapterNumber %1. Valid chapters are 1 to %2.").arg(num).arg(count), true);
+        }
+    } else if (args.contains(QStringLiteral("chapter"))) {
+        const int num = args.value(QStringLiteral("chapter")).toInt(-1);
+        if (num >= 1 && num <= count) {
+            index = num - 1;
+        } else {
+            return makeToolResult(QStringLiteral("Invalid chapter %1. Valid chapters are 1 to %2.").arg(num).arg(count), true);
+        }
+    } else {
+        index = args.value(QStringLiteral("chapterIndex")).toInt(-1);
+        if (index < 0 || index >= count) {
+            return makeToolResult(QStringLiteral("Invalid chapterIndex %1. Valid range is 0 to %2 (Chapter 1 to Chapter %3). Note: Chapter 0 is not permitted; Chapter 1 must stay Chapter 1.")
+                                      .arg(index).arg(count - 1).arg(count), true);
+        }
+    }
+
+    const QString format = args.value(QStringLiteral("format")).toString(QStringLiteral("all")).toLower();
     const Chapter &ch = proj.chapters().at(index);
     QJsonObject res;
+    res[QStringLiteral("chapterNumber")] = index + 1;
     res[QStringLiteral("chapterIndex")] = index;
     res[QStringLiteral("title")] = ch.title();
     res[QStringLiteral("order")] = ch.order();
@@ -653,13 +679,66 @@ QJsonObject McpHandler::toolUpdateChapterHtml(QWebSocket *client, const QJsonObj
         return makeToolResult(QStringLiteral("No project is currently open in Ensemble."), true);
     }
 
-    const int index = args.value(QStringLiteral("chapterIndex")).toInt(-1);
-    const QString html = args.value(QStringLiteral("html")).toString();
     const Ao3Project &proj = m_mainWindow->project();
+    const int count = proj.chapters().size();
+    const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
+    const QString callerName = caller.name.isEmpty() ? QStringLiteral("ai-assistant") : caller.name;
+    const QString callerModel = resolveCallerModel(caller, args);
+    const QString callerRole = caller.role.isEmpty() ? QStringLiteral("co-author") : caller.role;
 
-    if (index < 0 || index >= proj.chapters().size()) {
-        return makeToolResult(QStringLiteral("Invalid chapterIndex %1. Valid range is 0 to %2.")
-                                  .arg(index).arg(proj.chapters().size() - 1), true);
+    // Check for Chapter 0
+    if ((args.contains(QStringLiteral("chapter")) && args.value(QStringLiteral("chapter")).toInt() == 0) ||
+        (args.contains(QStringLiteral("chapterNumber")) && args.value(QStringLiteral("chapterNumber")).toInt() == 0)) {
+        const QString errMsg = QStringLiteral("Invalid chapter position: Chapters in Ensemble and AO3 are 1-indexed (Chapter 1 to Chapter %1). Chapter 0 is not permitted; Chapter 1 must stay Chapter 1.").arg(count);
+        m_mainWindow->project().agenticData().appendHistoryEntry(
+            callerName, callerModel, callerRole,
+            QStringLiteral("update_chapter_html"),
+            QStringLiteral("Failed: rejected Chapter 0"),
+            0,
+            0,
+            errMsg
+        );
+        return makeToolResult(errMsg, true);
+    }
+
+    int index = -1;
+    if (args.contains(QStringLiteral("chapterNumber"))) {
+        const int num = args.value(QStringLiteral("chapterNumber")).toInt(-1);
+        if (num >= 1 && num <= count) {
+            index = num - 1;
+        } else {
+            return makeToolResult(QStringLiteral("Invalid chapterNumber %1. Valid chapters are 1 to %2.").arg(num).arg(count), true);
+        }
+    } else if (args.contains(QStringLiteral("chapter"))) {
+        const int num = args.value(QStringLiteral("chapter")).toInt(-1);
+        if (num >= 1 && num <= count) {
+            index = num - 1;
+        } else {
+            return makeToolResult(QStringLiteral("Invalid chapter %1. Valid chapters are 1 to %2.").arg(num).arg(count), true);
+        }
+    } else {
+        index = args.value(QStringLiteral("chapterIndex")).toInt(-1);
+        if (index < 0 || index >= count) {
+            return makeToolResult(QStringLiteral("Invalid chapterIndex %1. Valid range is 0 to %2 (Chapter 1 to Chapter %3). Note: Chapter 0 is not permitted; Chapter 1 must stay Chapter 1.")
+                                      .arg(index).arg(count - 1).arg(count), true);
+        }
+    }
+
+    const QString html = args.value(QStringLiteral("html")).toString();
+
+    // Block <span> tags: even though AO3 accepts <span>, it actually breaks rich text styling and editing in Ensemble
+    static const QRegularExpression spanRe(QStringLiteral(R"(<\/?span\b)"), QRegularExpression::CaseInsensitiveOption);
+    if (html.contains(spanRe)) {
+        const QString errMsg = QStringLiteral("Submission rejected: HTML contains <span> tags. Even though AO3 accepts <span>, it actually breaks styling and rich text editing in Ensemble. Please avoid using <span> and use semantic HTML tags (e.g. <b>, <em>, <strong>, <i>, <blockquote>, <p>, <div>, etc.) instead.");
+        m_mainWindow->project().agenticData().appendHistoryEntry(
+            callerName, callerModel, callerRole,
+            QStringLiteral("update_chapter_html"),
+            QStringLiteral("Failed: rejected <span> tag"),
+            index,
+            0,
+            errMsg
+        );
+        return makeToolResult(errMsg, true);
     }
 
     QTextDocument oldDoc;
@@ -673,11 +752,6 @@ QJsonObject McpHandler::toolUpdateChapterHtml(QWebSocket *client, const QJsonObj
     doc.setHtml(sanRes.cleanHtml);
     const int words = doc.toPlainText().split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts).size();
     const int wordDelta = words - oldWords;
-
-    const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
-    const QString callerName = caller.name.isEmpty() ? QStringLiteral("ai-assistant") : caller.name;
-    const QString callerModel = resolveCallerModel(caller, args);
-    const QString callerRole = caller.role.isEmpty() ? QStringLiteral("co-author") : caller.role;
 
     m_mainWindow->project().markDirtyBy(callerName);
 
@@ -705,6 +779,7 @@ QJsonObject McpHandler::toolUpdateChapterHtml(QWebSocket *client, const QJsonObj
 
     QJsonObject res;
     res[QStringLiteral("success")] = true;
+    res[QStringLiteral("chapterNumber")] = index + 1;
     res[QStringLiteral("chapterIndex")] = index;
     res[QStringLiteral("title")] = updatedCh.title();
     res[QStringLiteral("wordCount")] = words;
@@ -772,10 +847,36 @@ QJsonObject McpHandler::toolDeleteChapter(QWebSocket *client, const QJsonObject 
         return makeToolResult(QStringLiteral("No project is currently open in Ensemble."), true);
     }
 
-    const int index = args.value(QStringLiteral("chapterIndex")).toInt(-1);
     const Ao3Project &proj = m_mainWindow->project();
-    if (index < 0 || index >= proj.chapters().size()) {
-        return makeToolResult(QStringLiteral("Invalid chapterIndex %1.").arg(index), true);
+    const int count = proj.chapters().size();
+
+    // Check for Chapter 0
+    if ((args.contains(QStringLiteral("chapter")) && args.value(QStringLiteral("chapter")).toInt() == 0) ||
+        (args.contains(QStringLiteral("chapterNumber")) && args.value(QStringLiteral("chapterNumber")).toInt() == 0)) {
+        return makeToolResult(QStringLiteral("Invalid chapter position: Chapters in Ensemble and AO3 are 1-indexed (Chapter 1 to Chapter %1). Chapter 0 is not permitted; Chapter 1 must stay Chapter 1.").arg(count), true);
+    }
+
+    int index = -1;
+    if (args.contains(QStringLiteral("chapterNumber"))) {
+        const int num = args.value(QStringLiteral("chapterNumber")).toInt(-1);
+        if (num >= 1 && num <= count) {
+            index = num - 1;
+        } else {
+            return makeToolResult(QStringLiteral("Invalid chapterNumber %1. Valid chapters are 1 to %2.").arg(num).arg(count), true);
+        }
+    } else if (args.contains(QStringLiteral("chapter"))) {
+        const int num = args.value(QStringLiteral("chapter")).toInt(-1);
+        if (num >= 1 && num <= count) {
+            index = num - 1;
+        } else {
+            return makeToolResult(QStringLiteral("Invalid chapter %1. Valid chapters are 1 to %2.").arg(num).arg(count), true);
+        }
+    } else {
+        index = args.value(QStringLiteral("chapterIndex")).toInt(-1);
+        if (index < 0 || index >= count) {
+            return makeToolResult(QStringLiteral("Invalid chapterIndex %1. Valid range is 0 to %2 (Chapter 1 to Chapter %3). Note: Chapter 0 is not permitted; Chapter 1 must stay Chapter 1.")
+                                      .arg(index).arg(count - 1).arg(count), true);
+        }
     }
 
     if (proj.chapters().size() <= 1) {
@@ -807,6 +908,7 @@ QJsonObject McpHandler::toolDeleteChapter(QWebSocket *client, const QJsonObject 
 
     QJsonObject res;
     res[QStringLiteral("success")] = true;
+    res[QStringLiteral("deletedChapterNumber")] = index + 1;
     res[QStringLiteral("deletedIndex")] = index;
     res[QStringLiteral("deletedTitle")] = deletedTitle;
     res[QStringLiteral("wordCountDelta")] = -delWords;
@@ -817,6 +919,7 @@ QJsonObject McpHandler::toolDeleteChapter(QWebSocket *client, const QJsonObject 
     int idx = 0;
     for (const Chapter &ch : m_mainWindow->project().chapters()) {
         QJsonObject chObj;
+        chObj[QStringLiteral("chapterNumber")] = idx + 1;
         chObj[QStringLiteral("index")] = idx++;
         chObj[QStringLiteral("title")] = ch.title();
         chObj[QStringLiteral("order")] = ch.order();
@@ -833,45 +936,105 @@ QJsonObject McpHandler::toolReorderChapters(QWebSocket *client, const QJsonObjec
         return makeToolResult(QStringLiteral("No project is currently open in Ensemble."), true);
     }
 
-    const int from = args.value(QStringLiteral("fromIndex")).toInt(-1);
-    const int to = args.value(QStringLiteral("toIndex")).toInt(-1);
     const int count = m_mainWindow->project().chapters().size();
-
-    if (from < 0 || from >= count || to < 0 || to >= count) {
-        return makeToolResult(QStringLiteral("Invalid indices: from=%1, to=%2 (count=%3).").arg(from).arg(to).arg(count), true);
-    }
-
-    const QString movedTitle = m_mainWindow->project().chapters().at(from).title();
-    m_mainWindow->reorderChaptersFromMcp(from, to);
-
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
     const QString callerName = caller.name.isEmpty() ? QStringLiteral("ai-assistant") : caller.name;
     const QString callerModel = resolveCallerModel(caller, args);
     const QString callerRole = caller.role.isEmpty() ? QStringLiteral("co-author") : caller.role;
 
+    // Chapters in Ensemble and AO3 are 1-indexed (Chapter 1 to Chapter N).
+    // Claude/AI test bug: attempting to resort from 0 to 25 or referencing Chapter 0.
+    int rawFrom = -1;
+    int rawTo = -1;
+    bool hasFrom = false;
+    bool hasTo = false;
+
+    if (args.contains(QStringLiteral("fromChapter"))) {
+        rawFrom = args.value(QStringLiteral("fromChapter")).toInt(-1);
+        hasFrom = true;
+    } else if (args.contains(QStringLiteral("fromIndex"))) {
+        rawFrom = args.value(QStringLiteral("fromIndex")).toInt(-1);
+        hasFrom = true;
+    } else if (args.contains(QStringLiteral("fromPosition"))) {
+        rawFrom = args.value(QStringLiteral("fromPosition")).toInt(-1);
+        hasFrom = true;
+    }
+
+    if (args.contains(QStringLiteral("toChapter"))) {
+        rawTo = args.value(QStringLiteral("toChapter")).toInt(-1);
+        hasTo = true;
+    } else if (args.contains(QStringLiteral("toIndex"))) {
+        rawTo = args.value(QStringLiteral("toIndex")).toInt(-1);
+        hasTo = true;
+    } else if (args.contains(QStringLiteral("toPosition"))) {
+        rawTo = args.value(QStringLiteral("toPosition")).toInt(-1);
+        hasTo = true;
+    }
+
+    if (!hasFrom || !hasTo) {
+        return makeToolResult(QStringLiteral("Missing required parameters: fromChapter (or fromIndex) and toChapter (or toIndex)."), true);
+    }
+
+    if (rawFrom == 0 || rawTo == 0) {
+        const QString errMsg = QStringLiteral("Invalid chapter position: Chapters in Ensemble and AO3 are 1-indexed (Chapter 1 to Chapter %1). Chapter 0 is not permitted; Chapter 1 must stay Chapter 1.").arg(count);
+        m_mainWindow->project().agenticData().appendHistoryEntry(
+            callerName, callerModel, callerRole,
+            QStringLiteral("reorder_chapters"),
+            QStringLiteral("Failed: rejected Chapter 0"),
+            0,
+            0,
+            errMsg
+        );
+        return makeToolResult(errMsg, true);
+    }
+
+    // Now validate 1-based bounds (1 <= pos <= count)
+    if (rawFrom < 1 || rawFrom > count || rawTo < 1 || rawTo > count) {
+        const QString errMsg = QStringLiteral("Invalid chapter position: from=%1, to=%2. Valid chapter positions are 1 to %3 (Chapter 1 to Chapter %3). Note: Chapter 0 is not permitted; Chapter 1 must stay Chapter 1.")
+                                  .arg(rawFrom).arg(rawTo).arg(count);
+        m_mainWindow->project().agenticData().appendHistoryEntry(
+            callerName, callerModel, callerRole,
+            QStringLiteral("reorder_chapters"),
+            QStringLiteral("Failed: position out of bounds"),
+            0,
+            0,
+            errMsg
+        );
+        return makeToolResult(errMsg, true);
+    }
+
+    const int fromIdx = rawFrom - 1;
+    const int toIdx = rawTo - 1;
+
+    const QString movedTitle = m_mainWindow->project().chapters().at(fromIdx).title();
+    m_mainWindow->reorderChaptersFromMcp(fromIdx, toIdx);
+
     m_mainWindow->project().markDirtyBy(callerName);
 
-    const QString summary = QStringLiteral("Reordered chapter '%1' from position %2 to %3").arg(movedTitle).arg(from + 1).arg(to + 1);
+    const QString summary = QStringLiteral("Reordered chapter '%1' from Chapter %2 to Chapter %3").arg(movedTitle).arg(rawFrom).arg(rawTo);
     m_mainWindow->project().agenticData().appendHistoryEntry(
         callerName, callerModel, callerRole,
         QStringLiteral("reorder_chapters"),
         summary,
-        to,
+        toIdx,
         0
     );
 
     QJsonObject res;
     res[QStringLiteral("success")] = true;
-    res[QStringLiteral("fromIndex")] = from;
-    res[QStringLiteral("toIndex")] = to;
+    res[QStringLiteral("fromChapter")] = rawFrom;
+    res[QStringLiteral("toChapter")] = rawTo;
+    res[QStringLiteral("fromIndex")] = fromIdx;
+    res[QStringLiteral("toIndex")] = toIdx;
     res[QStringLiteral("chapterTitle")] = movedTitle;
     res[QStringLiteral("modifiedBy")] = callerName;
-    res[QStringLiteral("chapterCount")] = m_mainWindow->project().chapters().size();
+    res[QStringLiteral("chapterCount")] = count;
 
     QJsonArray chaptersArr;
     int idx = 0;
     for (const Chapter &ch : m_mainWindow->project().chapters()) {
         QJsonObject chObj;
+        chObj[QStringLiteral("chapterNumber")] = idx + 1;
         chObj[QStringLiteral("index")] = idx++;
         chObj[QStringLiteral("title")] = ch.title();
         chObj[QStringLiteral("order")] = ch.order();

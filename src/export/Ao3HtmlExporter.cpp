@@ -113,9 +113,21 @@ QString wrapInline(const QString &text, const InlineStyle &style)
     if (!style.link.isEmpty())
         out = QStringLiteral("<a href=\"%1\">%2</a>").arg(escapeHtml(style.link), out);
 
-    // Wrap in a span with the CSS class if one is set
-    if (!style.cssClass.isEmpty())
-        out = QStringLiteral("<span class=\"%1\">%2</span>").arg(escapeHtml(style.cssClass), out);
+    // Apply CSS class using semantic HTML tags (avoid <span> which breaks Ensemble rich text editing)
+    if (!style.cssClass.isEmpty()) {
+        if (style.bold) {
+            out.replace(QStringLiteral("<strong>"), QStringLiteral("<strong class=\"%1\">").arg(escapeHtml(style.cssClass)));
+        } else if (style.italic) {
+            out.replace(QStringLiteral("<em>"), QStringLiteral("<em class=\"%1\">").arg(escapeHtml(style.cssClass)));
+        } else if (style.underline) {
+            out.replace(QStringLiteral("<u>"), QStringLiteral("<u class=\"%1\">").arg(escapeHtml(style.cssClass)));
+        } else if (style.strike) {
+            out.replace(QStringLiteral("<s>"), QStringLiteral("<s class=\"%1\">").arg(escapeHtml(style.cssClass)));
+        } else {
+            // Semantic tag fallback for unstyled inline text
+            out = QStringLiteral("<em class=\"%1\">%2</em>").arg(escapeHtml(style.cssClass), out);
+        }
+    }
 
     return out;
 }

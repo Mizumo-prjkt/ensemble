@@ -134,6 +134,7 @@ set(SOURCES
     src/ui/LoreGraphDialog.cpp
     src/ui/ProjectPropertiesDialog.cpp
     src/ui/ProjectLoadErrorDialog.cpp
+    src/ui/ChapterManagerDialog.cpp
     src/ui/ImageEmbedDialog.cpp
     src/themes/themes.cpp
     src/debug/debug.cpp
@@ -178,6 +179,7 @@ set(HEADERS
     src/ui/CreditsDialog.h
     src/ui/ProjectLoadErrorDialog.h
     src/ui/ImageEmbedDialog.h
+    src/ui/ChapterManagerDialog.h
     src/ui/AppIcon.h
     src/net/Ao3Types.h
     src/net/Ao3Parser.h
