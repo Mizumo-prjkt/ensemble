@@ -270,11 +270,15 @@ void PreviewPane::updatePreview(const QString &chapterTitle,
             let styleEl = document.getElementById("ensemble-base-style");
             let bannerEl = document.getElementById("preview-banner");
 
+            let titleChanged = (titleEl && titleEl.textContent !== %1);
             if (titleEl) titleEl.textContent = %1;
             if (contentEl) contentEl.innerHTML = %2;
             if (bannerEl) bannerEl.innerHTML = %3;
             if (styleEl) {
                 styleEl.textContent = %4 + "\n" + %5;
+            }
+            if (titleChanged) {
+                window.scrollTo(0, 0);
             }
         })();
     )js")

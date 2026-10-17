@@ -15,8 +15,9 @@
 #include <QTextList>
 #include <QTextListFormat>
 
-// Must match the property ID used in EditorPane.cpp
+// Must match the property IDs used in EditorPane.cpp
 static constexpr int CssClassProperty = QTextFormat::Property::UserProperty + 1;
+static constexpr int CssElementModeProperty = QTextFormat::Property::UserProperty + 2;
 
 namespace {
 
@@ -113,20 +114,9 @@ QString wrapInline(const QString &text, const InlineStyle &style)
     if (!style.link.isEmpty())
         out = QStringLiteral("<a href=\"%1\">%2</a>").arg(escapeHtml(style.link), out);
 
-    // Apply CSS class using semantic HTML tags (avoid <span> which breaks Ensemble rich text editing)
+    // Apply CSS class: wrap with <span class="..."> for inline text highlights
     if (!style.cssClass.isEmpty()) {
-        if (style.bold) {
-            out.replace(QStringLiteral("<strong>"), QStringLiteral("<strong class=\"%1\">").arg(escapeHtml(style.cssClass)));
-        } else if (style.italic) {
-            out.replace(QStringLiteral("<em>"), QStringLiteral("<em class=\"%1\">").arg(escapeHtml(style.cssClass)));
-        } else if (style.underline) {
-            out.replace(QStringLiteral("<u>"), QStringLiteral("<u class=\"%1\">").arg(escapeHtml(style.cssClass)));
-        } else if (style.strike) {
-            out.replace(QStringLiteral("<s>"), QStringLiteral("<s class=\"%1\">").arg(escapeHtml(style.cssClass)));
-        } else {
-            // Semantic tag fallback for unstyled inline text
-            out = QStringLiteral("<em class=\"%1\">%2</em>").arg(escapeHtml(style.cssClass), out);
-        }
+        out = QStringLiteral("<span class=\"%1\">%2</span>").arg(escapeHtml(style.cssClass), out);
     }
 
     return out;
@@ -321,31 +311,35 @@ QString Ao3HtmlExporter::exportDocument(const QTextDocument *document)
             continue;
         }
 
-        // Determine if this block has a container class
+        // Determine if this block has a container class (Div Mode)
         QString blockClass;
         const QVariant bClassProp = block.blockFormat().property(CssClassProperty);
+        const QVariant bModeProp = block.blockFormat().property(CssElementModeProperty);
         if (bClassProp.isValid() && !bClassProp.toString().isEmpty()) {
-            blockClass = bClassProp.toString();
+            if (bModeProp.toString() == QStringLiteral("div") || !bModeProp.isValid()) {
+                blockClass = bClassProp.toString();
+            }
         } else if (block.begin() != block.end()) {
             QString fragClass;
-            bool uniform = true;
+            bool uniformDiv = true;
             for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
                 const QTextFragment frag = it.fragment();
                 if (frag.isValid() && !frag.text().isEmpty()) {
                     const QString fc = frag.charFormat().property(CssClassProperty).toString();
-                    if (fc.isEmpty()) {
-                        uniform = false;
+                    const QString fm = frag.charFormat().property(CssElementModeProperty).toString();
+                    if (fc.isEmpty() || fm != QStringLiteral("div")) {
+                        uniformDiv = false;
                         break;
                     }
                     if (fragClass.isEmpty()) {
                         fragClass = fc;
                     } else if (fragClass != fc) {
-                        uniform = false;
+                        uniformDiv = false;
                         break;
                     }
                 }
             }
-            if (uniform && !fragClass.isEmpty()) {
+            if (uniformDiv && !fragClass.isEmpty()) {
                 blockClass = fragClass;
             }
         }
@@ -357,8 +351,11 @@ QString Ao3HtmlExporter::exportDocument(const QTextDocument *document)
             while (curr.isValid() && !curr.textList()) {
                 QString currClass;
                 const QVariant cProp = curr.blockFormat().property(CssClassProperty);
+                const QVariant cMode = curr.blockFormat().property(CssElementModeProperty);
                 if (cProp.isValid() && !cProp.toString().isEmpty()) {
-                    currClass = cProp.toString();
+                    if (cMode.toString() == QStringLiteral("div") || !cMode.isValid()) {
+                        currClass = cProp.toString();
+                    }
                 } else if (curr.begin() != curr.end()) {
                     QString fClass;
                     bool u = true;
@@ -366,7 +363,8 @@ QString Ao3HtmlExporter::exportDocument(const QTextDocument *document)
                         const QTextFragment frag = it.fragment();
                         if (frag.isValid() && !frag.text().isEmpty()) {
                             const QString fc = frag.charFormat().property(CssClassProperty).toString();
-                            if (fc.isEmpty() || (!fClass.isEmpty() && fc != fClass)) {
+                            const QString fm = frag.charFormat().property(CssElementModeProperty).toString();
+                            if (fc.isEmpty() || fm != QStringLiteral("div") || (!fClass.isEmpty() && fc != fClass)) {
                                 u = false;
                                 break;
                             }

@@ -13,8 +13,9 @@
 #include <QTextFormat>
 #include <QTextFragment>
 
-// Must match the property ID used in EditorPane.cpp and Ao3HtmlExporter.cpp
+// Must match the property IDs used in EditorPane.cpp and Ao3HtmlExporter.cpp
 static constexpr int CssClassProperty = QTextFormat::Property::UserProperty + 1;
+static constexpr int CssElementModeProperty = QTextFormat::Property::UserProperty + 2;
 
 namespace {
 
@@ -25,11 +26,11 @@ static const QString classMarkerPrefix = QStringLiteral("ao3class__");
 // Pre-process HTML to encode class= attributes as font-family markers.
 // Qt's setHtml() will preserve font-family but drops class attributes.
 // e.g. <span class="flashback"> becomes
-//      <span class="flashback" style="font-family: 'ao3class__flashback';">
+//      <span class="flashback" style="font-family: 'ao3class__span__flashback';">
 QString encodeClassesAsMarkers(const QString &html) {
-  // Match elements with a class attribute
+  // Match elements with a class attribute, capturing tag name and classes
   static const QRegularExpression classAttrRe(
-      R"re((<[a-zA-Z][\w:-]*\b[^>]*?)\bclass\s*=\s*"([^"]+)"([^>]*>))re",
+      R"re((<([a-zA-Z][\w:-]*)\b[^>]*?)\bclass\s*=\s*"([^"]+)"([^>]*>))re",
       QRegularExpression::CaseInsensitiveOption);
 
   QString result = html;
@@ -40,14 +41,18 @@ QString encodeClassesAsMarkers(const QString &html) {
     matches.prepend(it.next());
 
   for (const QRegularExpressionMatch &m : matches) {
-    QString className = m.captured(2).trimmed();
+    QString className = m.captured(3).trimmed();
     if (className.isEmpty())
       continue;
 
-    // Build marker font-family
-    const QString markerFont =
-        classMarkerPrefix +
-        className.replace(QLatin1Char(' '), QLatin1Char('_'));
+    const QString tagLower = m.captured(2).toLower();
+    const QString tagMode = (tagLower == QStringLiteral("div") || tagLower == QStringLiteral("blockquote") || tagLower == QStringLiteral("p"))
+                                ? QStringLiteral("div")
+                                : QStringLiteral("span");
+
+    // Build marker font-family: ao3class__div__<class> or ao3class__span__<class>
+    QString markerFont = classMarkerPrefix + tagMode + QStringLiteral("__") + className;
+    markerFont.replace(QLatin1Char(' '), QLatin1Char('_'));
 
     // Check if element already has a style attribute
     const QString fullMatch = m.captured(0);
@@ -64,7 +69,7 @@ QString encodeClassesAsMarkers(const QString &html) {
       replacement =
           m.captured(1) + QStringLiteral("class=\"%1\"").arg(className) +
           QStringLiteral(" style=\"font-family: '%1';\"").arg(markerFont) +
-          m.captured(3);
+          m.captured(4);
     }
 
     result.replace(m.capturedStart(), m.capturedLength(), replacement);
@@ -137,18 +142,28 @@ void Ao3HtmlImporter::importHtml(QTextEdit *editor, const QString &rawHtml) {
       QTextCharFormat fmt = fragment.charFormat();
       const QStringList families = fmt.fontFamilies().toStringList();
       QString foundClass;
+      QString foundMode = QStringLiteral("span");
 
       for (const QString &family : families) {
         if (family.startsWith(classMarkerPrefix)) {
-          foundClass = family.mid(classMarkerPrefix.length());
+          const QString payload = family.mid(classMarkerPrefix.length());
+          if (payload.startsWith(QStringLiteral("div__"))) {
+            foundMode = QStringLiteral("div");
+            foundClass = payload.mid(5);
+          } else if (payload.startsWith(QStringLiteral("span__"))) {
+            foundMode = QStringLiteral("span");
+            foundClass = payload.mid(6);
+          } else {
+            foundMode = QStringLiteral("span");
+            foundClass = payload;
+          }
           foundClass.replace(QLatin1Char('_'), QLatin1Char(' '));
           break;
         }
       }
 
       if (!foundClass.isEmpty()) {
-        // Set the CssClassProperty, visual skin highlight, and remove marker
-        // font
+        // Set the CssClassProperty, CssElementModeProperty, visual highlight, and remove marker font
         QTextCursor cursor(editor->document());
         cursor.setPosition(fragment.position());
         cursor.setPosition(fragment.position() + fragment.length(),
@@ -156,17 +171,45 @@ void Ao3HtmlImporter::importHtml(QTextEdit *editor, const QString &rawHtml) {
 
         QTextCharFormat newFmt;
         newFmt.setProperty(CssClassProperty, foundClass);
+        newFmt.setProperty(CssElementModeProperty, foundMode);
         const bool isDark = ThemeManager::instance().isDarkMode();
-        if (isDark) {
-          newFmt.setBackground(QColor(30, 41, 59, 200));
-          newFmt.setForeground(QColor(125, 211, 252));
-          newFmt.setUnderlineColor(QColor(56, 189, 248));
+
+        if (foundMode == QStringLiteral("div")) {
+          // Div card styling: cool deep indigo in dark, soft lavender in light
+          if (isDark) {
+            newFmt.setBackground(QColor(49, 46, 129, 75));
+            newFmt.setForeground(QColor(165, 180, 252));
+            newFmt.setUnderlineColor(QColor(129, 140, 248));
+          } else {
+            newFmt.setBackground(QColor(238, 242, 255, 230));
+            newFmt.setForeground(QColor(67, 56, 202));
+            newFmt.setUnderlineColor(QColor(99, 102, 241));
+          }
+          newFmt.setUnderlineStyle(QTextCharFormat::SingleUnderline);
+
+          // Also set block format indent and margins for card look
+          QTextBlockFormat bFmt = block.blockFormat();
+          bFmt.setProperty(CssClassProperty, foundClass);
+          bFmt.setProperty(CssElementModeProperty, QStringLiteral("div"));
+          bFmt.setLeftMargin(20);
+          bFmt.setRightMargin(20);
+          bFmt.setTopMargin(4);
+          bFmt.setBottomMargin(4);
+          QTextCursor bCursor(block);
+          bCursor.setBlockFormat(bFmt);
         } else {
-          newFmt.setBackground(QColor(224, 242, 254));
-          newFmt.setForeground(QColor(3, 105, 161));
-          newFmt.setUnderlineColor(QColor(2, 132, 199));
+          // Span highlighter styling: warm amber glow in dark, sunny yellow in light
+          if (isDark) {
+            newFmt.setBackground(QColor(245, 158, 11, 45));
+            newFmt.setForeground(QColor(252, 211, 77));
+            newFmt.setUnderlineColor(QColor(245, 158, 11));
+          } else {
+            newFmt.setBackground(QColor(254, 240, 138, 200));
+            newFmt.setForeground(QColor(161, 98, 7));
+            newFmt.setUnderlineColor(QColor(217, 119, 6));
+          }
+          newFmt.setUnderlineStyle(QTextCharFormat::DotLine);
         }
-        newFmt.setUnderlineStyle(QTextCharFormat::DashUnderline);
 
         // Remove the marker from font families
         QStringList cleanFamilies;

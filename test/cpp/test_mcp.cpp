@@ -1943,9 +1943,9 @@ int main(int argc, char *argv[])
         std::cout << "✓ MCP 'reorder_chapters' Chapter 0 rejection, out-of-bounds rejection, and 1-based reordering verified." << std::endl;
     }
 
-    // 27. Test MCP 'update_chapter_html': <span> rejection and semantic HTML acceptance
+    // 27. Test MCP 'update_chapter_html': <span> support with layout warning tip, and Chapter 0 rejection
     {
-        // A. Submitting HTML with <span> must be rejected with styling warning
+        // A. Submitting HTML with <span> succeeds and returns spanTip warning against card layout
         QJsonObject spanReq;
         spanReq["jsonrpc"] = "2.0";
         spanReq["id"] = 94;
@@ -1954,16 +1954,17 @@ int main(int argc, char *argv[])
             {"name", "update_chapter_html"},
             {"arguments", QJsonObject{
                 {"chapterIndex", 0},
-                {"html", "<p><span class=\"custom-style\">This breaks styling in Ensemble</span></p>"}
+                {"html", "<p><span class=\"custom-highlight\">Valid inline text highlighter</span></p>"}
             }}
         };
         QJsonObject spanResp = sendAndReceive(spanReq);
         assert(spanResp.value("id").toInt() == 94);
         QJsonObject spanRes = spanResp.value("result").toObject();
-        assert(spanRes.value("isError").toBool() == true);
-        QString spanErr = spanRes.value("content").toArray().first().toObject().value("text").toString();
-        assert(spanErr.contains("HTML contains <span> tags"));
-        assert(spanErr.contains("Even though AO3 accepts <span>, it actually breaks styling"));
+        assert(spanRes.value("isError").toBool() == false);
+        QJsonObject spanData = QJsonDocument::fromJson(spanRes.value("content").toArray().first().toObject().value("text").toString().toUtf8()).object();
+        assert(spanData.value("success").toBool() == true);
+        assert(spanData.value("spanTip").toString().contains("inline text highlighters"));
+        assert(spanData.value("spanTip").toString().contains("card layout"));
 
         // B. Submitting Chapter 0 must be rejected
         QJsonObject ch0Req;
@@ -2001,7 +2002,7 @@ int main(int argc, char *argv[])
         assert(validData.value("success").toBool() == true);
         assert(validData.value("chapterNumber").toInt() == 1);
 
-        std::cout << "✓ MCP 'update_chapter_html' <span> tag prohibition and Chapter 0 rejection verified." << std::endl;
+        std::cout << "✓ MCP 'update_chapter_html' <span> support with layout warning tip and Chapter 0 rejection verified." << std::endl;
     }
 
     client.close();

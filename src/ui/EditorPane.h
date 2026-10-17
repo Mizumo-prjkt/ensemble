@@ -19,8 +19,16 @@ class EditorPane : public QWidget
 public:
     explicit EditorPane(QWidget *parent = nullptr);
 
+    enum class StyleTargetMode {
+        Span,   // Inline text highlighter (<span class="...">)
+        Div     // Card / block container (<div class="...">)
+    };
+
     QTextEdit *editor() const { return m_editor; }
     QString currentHtml() const;
+    StyleTargetMode styleMode() const { return m_styleMode; }
+    void setStyleMode(StyleTargetMode mode);
+    void refreshClassHighlights();
 
 public slots:
     void setHtml(const QString &html);
@@ -55,6 +63,7 @@ private slots:
     void onInsertHorizontalRule();
     void onCodeBlock();
     void onApplyCssClass(const QString &className);
+    void onApplyCssClassWithMode(const QString &className, StyleTargetMode mode);
     void onDocumentChanged();
     void showEditorContextMenu(const QPoint &pos);
 
@@ -74,6 +83,8 @@ private:
     QString m_customCss;
     QStringList m_availableCssClasses;
     bool m_blockChanges = false;
+    class QComboBox *m_styleModeSelector = nullptr;
+    StyleTargetMode m_styleMode = StyleTargetMode::Span;
 
     QAction *m_boldAction = nullptr;
     QAction *m_italicAction = nullptr;

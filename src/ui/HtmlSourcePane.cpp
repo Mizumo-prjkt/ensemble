@@ -359,7 +359,7 @@ void HtmlSourcePane::runLinter() {
     warnings << QStringLiteral("❌ Disallowed tag <%1> detected.").arg(m.captured(1).toLower());
   }
 
-  // Check 2b: <span> tags - even though AO3 accepts <span>, it breaks rich text styling and editing in Ensemble
+  // Check 2b: <span> tags tip - valid as inline text highlighter, but warn against using as card/container layout
   static const QRegularExpression spanTagRe(
       R"(<\/?span\b[^>]*>)",
       QRegularExpression::CaseInsensitiveOption);
@@ -369,10 +369,10 @@ void HtmlSourcePane::runLinter() {
     CodeDiagnosticIssue issue;
     issue.startPos = m.capturedStart();
     issue.length = m.capturedLength();
-    issue.isError = true;
-    issue.message = QStringLiteral("<span> tags break styling and rich text editing in Ensemble. Even though AO3 accepts <span>, avoid using it; use semantic tags (e.g. <b>, <em>, <strong>, <i>, <blockquote>, <p>, <div>) instead.");
+    issue.isError = false; // Informational tip/warning, not a hard error
+    issue.message = QStringLiteral("Tip: <span> tags should ONLY be used as inline text highlighters. Using <span> like a card layout or container will break the layout; use <div> instead.");
     issues.append(issue);
-    warnings << QStringLiteral("❌ <span> tag detected (breaks styling in Ensemble; avoid using).");
+    warnings << QStringLiteral("ℹ️ <span> tag detected: Use ONLY as an inline text highlighter. Use <div> for card/block layouts.");
   }
 
   // Check 3: Mismatched tags using QXmlStreamReader

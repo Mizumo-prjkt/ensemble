@@ -24,7 +24,7 @@ inline QSet<QString> allowedTags()
         QStringLiteral("ol"), QStringLiteral("p"), QStringLiteral("pre"),
         QStringLiteral("q"), QStringLiteral("rp"), QStringLiteral("rt"),
         QStringLiteral("ruby"), QStringLiteral("s"), QStringLiteral("samp"),
-        QStringLiteral("small"), QStringLiteral("strike"),
+        QStringLiteral("small"), QStringLiteral("span"), QStringLiteral("strike"),
         QStringLiteral("strong"), QStringLiteral("sub"), QStringLiteral("summary"),
         QStringLiteral("sup"), QStringLiteral("table"), QStringLiteral("tbody"),
         QStringLiteral("td"), QStringLiteral("tfoot"), QStringLiteral("th"),

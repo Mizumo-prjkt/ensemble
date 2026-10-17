@@ -77,6 +77,14 @@ ChapterSidebar::ChapterSidebar(QWidget *parent)
         }
     });
     connect(m_list, &QListWidget::currentRowChanged, this, &ChapterSidebar::onCurrentRowChanged);
+    connect(m_list, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
+        if (m_blockSignals || !m_project || !item)
+            return;
+        const int row = m_list->row(item);
+        if (row >= 0) {
+            emit chapterSelected(row);
+        }
+    });
     connect(m_list->model(), &QAbstractItemModel::rowsMoved, this, &ChapterSidebar::onRowsMoved);
     connect(m_list, &QListWidget::customContextMenuRequested, this, &ChapterSidebar::showContextMenu);
 }

@@ -1112,13 +1112,23 @@ void MainWindow::onCssClassesChanged(const QStringList &classNames) {
 }
 
 void MainWindow::onChapterSelected(int index) {
-  if (index == m_project.activeChapterIndex())
+  if (index < 0 || index >= m_project.chapters().size())
     return;
 
+  if (index == m_project.activeChapterIndex()) {
+    saveCurrentChapterFromEditors();
+    m_pendingHtml.clear();
+    m_htmlSourceEditing = false;
+    debouncedUpdatePreview();
+    return;
+  }
+
   saveCurrentChapterFromEditors();
+  m_pendingHtml.clear();
+  m_htmlSourceEditing = false;
   m_project.setActiveChapterIndex(index);
   loadCurrentChapterIntoEditors();
-  schedulePreviewUpdate();
+  debouncedUpdatePreview();
 }
 
 void MainWindow::onChaptersReordered() {

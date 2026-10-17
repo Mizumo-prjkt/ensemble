@@ -77,6 +77,21 @@ int main(int argc, char *argv[])
         assert(foundInlineStyle);
         assert(foundDisallowedTag);
         std::cout << "✓ HTML Linter diagnostic issue tracking and extra selections verified." << std::endl;
+
+        // Test Linter diagnostics for <span> tags: allowed as inline text highlighter (tip, not a hard error)
+        const QString spanHtml = QStringLiteral("<p><span class=\"highlight\">Amber text</span></p>");
+        htmlPane.editor()->setPlainText(spanHtml);
+        QMetaObject::invokeMethod(&htmlPane, "runLinter", Qt::DirectConnection);
+        const auto spanIssues = htmlPane.editor()->diagnosticIssues();
+        assert(!spanIssues.isEmpty());
+        bool foundSpanTip = false;
+        for (const auto &iss : spanIssues) {
+            if (iss.message.contains(QStringLiteral("inline text highlighters")) && !iss.isError) {
+                foundSpanTip = true;
+            }
+        }
+        assert(foundSpanTip);
+        std::cout << "✓ HTML Linter <span> tag non-error tip diagnostic verified." << std::endl;
     }
 
     // 2. Test CssEditorPane duplicate selector detection & issue card

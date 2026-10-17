@@ -726,20 +726,10 @@ QJsonObject McpHandler::toolUpdateChapterHtml(QWebSocket *client, const QJsonObj
 
     const QString html = args.value(QStringLiteral("html")).toString();
 
-    // Block <span> tags: even though AO3 accepts <span>, it actually breaks rich text styling and editing in Ensemble
+    // Support <span> tags as inline text highlighters; warn AI models not to use <span> for card/block layouts
     static const QRegularExpression spanRe(QStringLiteral(R"(<\/?span\b)"), QRegularExpression::CaseInsensitiveOption);
-    if (html.contains(spanRe)) {
-        const QString errMsg = QStringLiteral("Submission rejected: HTML contains <span> tags. Even though AO3 accepts <span>, it actually breaks styling and rich text editing in Ensemble. Please avoid using <span> and use semantic HTML tags (e.g. <b>, <em>, <strong>, <i>, <blockquote>, <p>, <div>, etc.) instead.");
-        m_mainWindow->project().agenticData().appendHistoryEntry(
-            callerName, callerModel, callerRole,
-            QStringLiteral("update_chapter_html"),
-            QStringLiteral("Failed: rejected <span> tag"),
-            index,
-            0,
-            errMsg
-        );
-        return makeToolResult(errMsg, true);
-    }
+    const bool hasSpanTags = html.contains(spanRe);
+    const QString spanTip = QStringLiteral("Tip: <span> tags should ONLY be used as inline text highlighters. Using <span> like a card layout or block container will break the layout; use <div> instead when creating card/block layouts.");
 
     QTextDocument oldDoc;
     oldDoc.setHtml(proj.chapters().at(index).html());
@@ -762,6 +752,9 @@ QJsonObject McpHandler::toolUpdateChapterHtml(QWebSocket *client, const QJsonObj
                                 .arg(wordDelta >= 0 ? QStringLiteral("+") : QString())
                                 .arg(wordDelta);
     QStringList detailsList;
+    if (hasSpanTags) {
+        detailsList << QStringLiteral("Notice: <span> tags detected (use ONLY as inline text highlighter; use <div> for card/block layouts)");
+    }
     if (!sanRes.strippedTags.isEmpty()) {
         detailsList << QStringLiteral("Stripped tags: %1").arg(sanRes.strippedTags.join(QStringLiteral(", ")));
     }
@@ -786,6 +779,9 @@ QJsonObject McpHandler::toolUpdateChapterHtml(QWebSocket *client, const QJsonObj
     res[QStringLiteral("wordCountDelta")] = wordDelta;
     res[QStringLiteral("modifiedBy")] = callerName;
     res[QStringLiteral("wasSanitized")] = sanRes.wasModified;
+    if (hasSpanTags) {
+        res[QStringLiteral("spanTip")] = spanTip;
+    }
 
     QJsonArray strippedTagsArr;
     for (const QString &t : sanRes.strippedTags) {

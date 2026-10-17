@@ -9,10 +9,12 @@
 
 #include <QAbstractTextDocumentLayout>
 #include <QAction>
+#include <QComboBox>
 #include <QFont>
 #include <QHelpEvent>
 #include <QInputDialog>
 #include <QKeySequence>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QNetworkAccessManager>
@@ -42,13 +44,15 @@
 
 #include "utils/DiffUtil.h"
 
-// Custom property ID for storing CSS class names on text formats
+// Custom property IDs for storing CSS class names and element mode on text formats
 static constexpr int CssClassProperty = QTextFormat::Property::UserProperty + 1;
+static constexpr int CssElementModeProperty = QTextFormat::Property::UserProperty + 2;
 
-static void applyClassFormatToCharFormat(QTextCharFormat &fmt, const QStringList &classes, const QString &customCss, bool isDark)
+static void applySpanFormatToCharFormat(QTextCharFormat &fmt, const QStringList &classes, const QString &customCss, bool isDark)
 {
     if (classes.isEmpty()) {
         fmt.setProperty(CssClassProperty, QVariant());
+        fmt.setProperty(CssElementModeProperty, QVariant());
         fmt.setBackground(Qt::NoBrush);
         fmt.setForeground(Qt::NoBrush);
         fmt.setUnderlineStyle(QTextCharFormat::NoUnderline);
@@ -56,6 +60,7 @@ static void applyClassFormatToCharFormat(QTextCharFormat &fmt, const QStringList
     }
 
     fmt.setProperty(CssClassProperty, classes.join(QLatin1Char(' ')));
+    fmt.setProperty(CssElementModeProperty, QStringLiteral("span"));
 
     QColor classColor;
     for (const QString &cls : classes) {
@@ -67,25 +72,83 @@ static void applyClassFormatToCharFormat(QTextCharFormat &fmt, const QStringList
     }
 
     if (isDark) {
-        fmt.setBackground(QColor(30, 41, 59, 200)); // Soft slate background
+        // Warm glowing amber highlighter on dark
+        fmt.setBackground(QColor(245, 158, 11, 45));
         if (classColor.isValid()) {
             fmt.setForeground(classColor);
             fmt.setUnderlineColor(classColor);
         } else {
-            fmt.setForeground(QColor(125, 211, 252)); // Light sky text
-            fmt.setUnderlineColor(QColor(56, 189, 248)); // Sky dash
+            fmt.setForeground(QColor(252, 211, 77)); // Warm bright amber
+            fmt.setUnderlineColor(QColor(245, 158, 11)); // Amber dot
         }
     } else {
-        fmt.setBackground(QColor(224, 242, 254)); // Soft light sky tint
+        // Warm sunny yellow highlighter
+        fmt.setBackground(QColor(254, 240, 138, 200));
         if (classColor.isValid()) {
             fmt.setForeground(classColor);
             fmt.setUnderlineColor(classColor);
         } else {
-            fmt.setForeground(QColor(3, 105, 161)); // Readable deep blue
-            fmt.setUnderlineColor(QColor(2, 132, 199)); // Blue dash
+            fmt.setForeground(QColor(161, 98, 7)); // Deep amber brown text for readability
+            fmt.setUnderlineColor(QColor(217, 119, 6)); // Amber dot
         }
     }
-    fmt.setUnderlineStyle(QTextCharFormat::DashUnderline);
+    fmt.setUnderlineStyle(QTextCharFormat::DotLine);
+}
+
+static void applyDivFormatToCharFormat(QTextCharFormat &fmt, const QStringList &classes, const QString &customCss, bool isDark)
+{
+    if (classes.isEmpty()) {
+        fmt.setProperty(CssClassProperty, QVariant());
+        fmt.setProperty(CssElementModeProperty, QVariant());
+        fmt.setBackground(Qt::NoBrush);
+        fmt.setForeground(Qt::NoBrush);
+        fmt.setUnderlineStyle(QTextCharFormat::NoUnderline);
+        return;
+    }
+
+    fmt.setProperty(CssClassProperty, classes.join(QLatin1Char(' ')));
+    fmt.setProperty(CssElementModeProperty, QStringLiteral("div"));
+
+    QColor classColor;
+    for (const QString &cls : classes) {
+        QColor col = DiffUtil::extractCssColor(customCss, cls);
+        if (col.isValid()) {
+            classColor = col;
+            break;
+        }
+    }
+
+    if (isDark) {
+        // Cool deep indigo card container
+        fmt.setBackground(QColor(49, 46, 129, 75));
+        if (classColor.isValid()) {
+            fmt.setForeground(classColor);
+            fmt.setUnderlineColor(classColor);
+        } else {
+            fmt.setForeground(QColor(165, 180, 252)); // Light indigo
+            fmt.setUnderlineColor(QColor(129, 140, 248)); // Solid indigo line
+        }
+    } else {
+        // Soft lavender / indigo card container
+        fmt.setBackground(QColor(238, 242, 255, 230));
+        if (classColor.isValid()) {
+            fmt.setForeground(classColor);
+            fmt.setUnderlineColor(classColor);
+        } else {
+            fmt.setForeground(QColor(67, 56, 202)); // Deep indigo
+            fmt.setUnderlineColor(QColor(99, 102, 241)); // Solid indigo line
+        }
+    }
+    fmt.setUnderlineStyle(QTextCharFormat::SingleUnderline);
+}
+
+static void applyClassFormatToCharFormat(QTextCharFormat &fmt, const QStringList &classes, const QString &customCss, bool isDark, const QString &mode = QStringLiteral("span"))
+{
+    if (mode == QStringLiteral("div")) {
+        applyDivFormatToCharFormat(fmt, classes, customCss, isDark);
+    } else {
+        applySpanFormatToCharFormat(fmt, classes, customCss, isDark);
+    }
 }
 
 EditorPane::EditorPane(QWidget *parent)
@@ -226,6 +289,26 @@ void EditorPane::setupToolbar()
     m_codeAction->setToolTip(QStringLiteral("Code Block (<pre><code>)"));
     m_codeAction->setCheckable(true);
 
+    m_toolbar->addSeparator();
+
+    auto *modeLabel = new QLabel(QStringLiteral("Style:"), m_toolbar);
+    modeLabel->setStyleSheet(QStringLiteral("font-size: 11px; margin-left: 4px; margin-right: 4px; font-weight: bold;"));
+    m_toolbar->addWidget(modeLabel);
+
+    m_styleModeSelector = new QComboBox(m_toolbar);
+    m_styleModeSelector->setObjectName(QStringLiteral("styleModeSelector"));
+    m_styleModeSelector->addItem(QStringLiteral("🏷️ Span (Highlight)"), QStringLiteral("span"));
+    m_styleModeSelector->addItem(QStringLiteral("📦 Div (Card)"), QStringLiteral("div"));
+    m_styleModeSelector->setToolTip(QStringLiteral(
+        "Style Target Mode:\n"
+        "• 🏷️ Span: Applies as inline text highlighter (<span class=\"...\">) for words/phrases\n"
+        "• 📦 Div: Applies as card/block container (<div class=\"...\">) for containers and layouts"
+    ));
+    connect(m_styleModeSelector, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        m_styleMode = (index == 1) ? StyleTargetMode::Div : StyleTargetMode::Span;
+    });
+    m_toolbar->addWidget(m_styleModeSelector);
+
     updateToolbarIcons();
 }
 
@@ -332,10 +415,61 @@ void EditorPane::focusEditor()
     m_editor->setFocus();
 }
 
+void EditorPane::setStyleMode(StyleTargetMode mode)
+{
+    m_styleMode = mode;
+    if (m_styleModeSelector) {
+        m_styleModeSelector->setCurrentIndex(mode == StyleTargetMode::Div ? 1 : 0);
+    }
+}
+
+void EditorPane::refreshClassHighlights()
+{
+    if (!m_editor || !m_editor->document())
+        return;
+
+    const bool isDark = ThemeManager::instance().isDarkMode();
+    for (QTextBlock block = m_editor->document()->begin(); block.isValid(); block = block.next()) {
+        const QVariant bClassProp = block.blockFormat().property(CssClassProperty);
+        const QVariant bModeProp = block.blockFormat().property(CssElementModeProperty);
+        if (bModeProp.toString() == QStringLiteral("div") && bClassProp.isValid()) {
+            QTextBlockFormat bFmt = block.blockFormat();
+            bFmt.setLeftMargin(20);
+            bFmt.setRightMargin(20);
+            bFmt.setTopMargin(4);
+            bFmt.setBottomMargin(4);
+            QTextCursor bCursor(block);
+            bCursor.setBlockFormat(bFmt);
+        }
+
+        for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
+            const QTextFragment frag = it.fragment();
+            if (!frag.isValid())
+                continue;
+
+            const QTextCharFormat charFmt = frag.charFormat();
+            const QVariant classProp = charFmt.property(CssClassProperty);
+            if (classProp.isValid() && !classProp.toString().isEmpty()) {
+                const QString modeStr = charFmt.property(CssElementModeProperty).toString();
+                const QStringList classes = classProp.toString().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+
+                QTextCursor cur(m_editor->document());
+                cur.setPosition(frag.position());
+                cur.setPosition(frag.position() + frag.length(), QTextCursor::KeepAnchor);
+
+                QTextCharFormat newFmt = charFmt;
+                applyClassFormatToCharFormat(newFmt, classes, m_customCss, isDark, modeStr);
+                cur.mergeCharFormat(newFmt);
+            }
+        }
+    }
+}
+
 void EditorPane::setCustomCss(const QString &css)
 {
     m_customCss = css;
     m_editor->document()->setDefaultStyleSheet(css);
+    refreshClassHighlights();
     if (m_editor->document())
         m_editor->document()->markContentsDirty(0, m_editor->document()->characterCount());
     if (m_editor->viewport())
@@ -709,19 +843,53 @@ void EditorPane::runSpellAndGrammarChecks()
 
 void EditorPane::onApplyCssClass(const QString &className)
 {
-    QTextCursor cursor = m_editor->textCursor();
-    if (!cursor.hasSelection())
-        cursor.select(QTextCursor::WordUnderCursor);
+    onApplyCssClassWithMode(className, m_styleMode);
+}
 
-    QTextCharFormat fmt = cursor.charFormat();
-    QString existingStr = fmt.property(CssClassProperty).toString();
-    QStringList classes = existingStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-    if (!classes.contains(className))
-        classes.append(className);
+void EditorPane::onApplyCssClassWithMode(const QString &className, StyleTargetMode mode)
+{
+    const bool isDark = ThemeManager::instance().isDarkMode();
 
-    applyClassFormatToCharFormat(fmt, classes, m_customCss, ThemeManager::instance().isDarkMode());
-    cursor.mergeCharFormat(fmt);
-    m_editor->setTextCursor(cursor);
+    if (mode == StyleTargetMode::Div) {
+        // Block Container / Card layout mode
+        QTextCursor cursor = m_editor->textCursor();
+        QTextBlockFormat bFmt = cursor.blockFormat();
+        QString existingStr = bFmt.property(CssClassProperty).toString();
+        QStringList classes = existingStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        if (!classes.contains(className))
+            classes.append(className);
+
+        bFmt.setProperty(CssClassProperty, classes.join(QLatin1Char(' ')));
+        bFmt.setProperty(CssElementModeProperty, QStringLiteral("div"));
+        bFmt.setLeftMargin(20);
+        bFmt.setRightMargin(20);
+        bFmt.setTopMargin(4);
+        bFmt.setBottomMargin(4);
+        cursor.setBlockFormat(bFmt);
+
+        if (!cursor.hasSelection()) {
+            cursor.select(QTextCursor::BlockUnderCursor);
+        }
+        QTextCharFormat charFmt = cursor.charFormat();
+        applyDivFormatToCharFormat(charFmt, classes, m_customCss, isDark);
+        cursor.mergeCharFormat(charFmt);
+        m_editor->setTextCursor(cursor);
+    } else {
+        // Inline Text Highlighter mode
+        QTextCursor cursor = m_editor->textCursor();
+        if (!cursor.hasSelection())
+            cursor.select(QTextCursor::WordUnderCursor);
+
+        QTextCharFormat fmt = cursor.charFormat();
+        QString existingStr = fmt.property(CssClassProperty).toString();
+        QStringList classes = existingStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        if (!classes.contains(className))
+            classes.append(className);
+
+        applySpanFormatToCharFormat(fmt, classes, m_customCss, isDark);
+        cursor.mergeCharFormat(fmt);
+        m_editor->setTextCursor(cursor);
+    }
 }
 
 void EditorPane::showEditorContextMenu(const QPoint &pos)
@@ -741,105 +909,101 @@ void EditorPane::showEditorContextMenu(const QPoint &pos)
         QString currentClassesStr = prop.isValid() ? prop.toString() : QString();
         QStringList activeClasses = currentClassesStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
 
+        // Header showing current target mode
+        QAction *modeHeader = stylesMenu->addAction(
+            m_styleMode == StyleTargetMode::Span
+                ? QStringLiteral("Active Mode: 🏷️ Span (Text Highlighter)")
+                : QStringLiteral("Active Mode: 📦 Div (Card Container)")
+        );
+        modeHeader->setEnabled(false);
+
         // "Clear All Styles" action
         QAction *clearAction = stylesMenu->addAction(QStringLiteral("Clear All Styles"));
         connect(clearAction, &QAction::triggered, this, [this]() {
             QTextCursor cursor = m_editor->textCursor();
             if (!cursor.hasSelection())
                 cursor.select(QTextCursor::WordUnderCursor);
+
             QTextCharFormat fmt;
             fmt.setProperty(CssClassProperty, QVariant());
+            fmt.setProperty(CssElementModeProperty, QVariant());
             fmt.setBackground(Qt::NoBrush);
             fmt.setForeground(Qt::NoBrush);
             fmt.setUnderlineStyle(QTextCharFormat::NoUnderline);
             cursor.mergeCharFormat(fmt);
+
+            // Also clear block card format if set
+            QTextBlockFormat bFmt = cursor.blockFormat();
+            if (bFmt.property(CssElementModeProperty).toString() == QStringLiteral("div") ||
+                bFmt.property(CssClassProperty).isValid()) {
+                bFmt.setProperty(CssClassProperty, QVariant());
+                bFmt.setProperty(CssElementModeProperty, QVariant());
+                bFmt.setLeftMargin(0);
+                bFmt.setRightMargin(0);
+                bFmt.setTopMargin(0);
+                bFmt.setBottomMargin(0);
+                cursor.setBlockFormat(bFmt);
+            }
             m_editor->setTextCursor(cursor);
         });
 
         stylesMenu->addSeparator();
 
-        // Helper lambda to add a class action to any target QMenu
-        auto addClassAction = [this, &activeClasses](QMenu *targetMenu, const QString &className) {
+        // Submenus allowing explicit selection between Span Mode and Div Mode:
+        QMenu *spanSubmenu = stylesMenu->addMenu(QStringLiteral("🏷️ Apply as Span (Inline Highlighter)…"));
+        QMenu *divSubmenu = stylesMenu->addMenu(QStringLiteral("📦 Apply as Div (Card / Block Container)…"));
+        stylesMenu->addSeparator();
+
+        auto addClassAction = [this, &activeClasses](QMenu *targetMenu, const QString &className, StyleTargetMode targetMode) {
             QAction *action = targetMenu->addAction(className);
             action->setCheckable(true);
             bool isApplied = activeClasses.contains(className);
             action->setChecked(isApplied);
 
-            connect(action, &QAction::triggered, this, [this, className, isApplied]() {
-                QTextCursor cursor = m_editor->textCursor();
-                if (!cursor.hasSelection())
-                    cursor.select(QTextCursor::WordUnderCursor);
-
-                QTextCharFormat charFmt = cursor.charFormat();
-                QString existingStr = charFmt.property(CssClassProperty).toString();
-                QStringList classes = existingStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-
+            connect(action, &QAction::triggered, this, [this, className, isApplied, targetMode]() {
                 if (isApplied) {
+                    QTextCursor cursor = m_editor->textCursor();
+                    if (!cursor.hasSelection())
+                        cursor.select(QTextCursor::WordUnderCursor);
+
+                    QTextCharFormat charFmt = cursor.charFormat();
+                    QString existingStr = charFmt.property(CssClassProperty).toString();
+                    QStringList classes = existingStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
                     classes.removeAll(className);
+
+                    const bool isDark = ThemeManager::instance().isDarkMode();
+                    const QString modeStr = charFmt.property(CssElementModeProperty).toString();
+                    applyClassFormatToCharFormat(charFmt, classes, m_customCss, isDark, modeStr);
+                    cursor.mergeCharFormat(charFmt);
+
+                    if (targetMode == StyleTargetMode::Div) {
+                        QTextBlockFormat bFmt = cursor.blockFormat();
+                        QString bStr = bFmt.property(CssClassProperty).toString();
+                        QStringList bClasses = bStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+                        bClasses.removeAll(className);
+                        if (bClasses.isEmpty()) {
+                            bFmt.setProperty(CssClassProperty, QVariant());
+                            bFmt.setProperty(CssElementModeProperty, QVariant());
+                            bFmt.setLeftMargin(0);
+                            bFmt.setRightMargin(0);
+                            bFmt.setTopMargin(0);
+                            bFmt.setBottomMargin(0);
+                        } else {
+                            bFmt.setProperty(CssClassProperty, bClasses.join(QLatin1Char(' ')));
+                        }
+                        cursor.setBlockFormat(bFmt);
+                    }
+                    m_editor->setTextCursor(cursor);
                 } else {
-                    if (!classes.contains(className))
-                        classes.append(className);
+                    onApplyCssClassWithMode(className, targetMode);
                 }
-
-                QTextCharFormat newFmt;
-                applyClassFormatToCharFormat(newFmt, classes, m_customCss, ThemeManager::instance().isDarkMode());
-
-                cursor.mergeCharFormat(newFmt);
-                m_editor->setTextCursor(cursor);
             });
         };
 
-        // If there are many classes (> 12), organize into prefix submenus (e.g. hsr-, doc-, news-)
-        if (m_availableCssClasses.size() > 12) {
-            QMap<QString, QStringList> prefixMap;
-            QStringList standaloneClasses;
-
-            for (const QString &className : m_availableCssClasses) {
-                int dashIdx = className.indexOf(QLatin1Char('-'));
-                int underscoreIdx = className.indexOf(QLatin1Char('_'));
-                int splitIdx = -1;
-                if (dashIdx != -1 && underscoreIdx != -1)
-                    splitIdx = qMin(dashIdx, underscoreIdx);
-                else if (dashIdx != -1)
-                    splitIdx = dashIdx;
-                else if (underscoreIdx != -1)
-                    splitIdx = underscoreIdx;
-
-                if (splitIdx > 0) {
-                    const QString prefix = className.left(splitIdx);
-                    prefixMap[prefix].append(className);
-                } else {
-                    standaloneClasses.append(className);
-                }
-            }
-
-            QMap<QString, QMenu *> categoryMenus;
-            for (auto it = prefixMap.constBegin(); it != prefixMap.constEnd(); ++it) {
-                if (it.value().size() >= 2) {
-                    QMenu *catMenu = stylesMenu->addMenu(QStringLiteral("%1...").arg(it.key()));
-                    catMenu->setStyleSheet(QStringLiteral("QMenu { max-height: 420px; }"));
-                    categoryMenus[it.key()] = catMenu;
-                    for (const QString &cls : it.value()) {
-                        addClassAction(catMenu, cls);
-                    }
-                } else {
-                    for (const QString &cls : it.value()) {
-                        standaloneClasses.append(cls);
-                    }
-                }
-            }
-
-            if (!categoryMenus.isEmpty() && !standaloneClasses.isEmpty()) {
-                stylesMenu->addSeparator();
-            }
-
-            for (const QString &className : standaloneClasses) {
-                addClassAction(stylesMenu, className);
-            }
-        } else {
-            for (const QString &className : m_availableCssClasses) {
-                addClassAction(stylesMenu, className);
-            }
+        for (const QString &className : m_availableCssClasses) {
+            addClassAction(spanSubmenu, className, StyleTargetMode::Span);
+            addClassAction(divSubmenu, className, StyleTargetMode::Div);
+            addClassAction(stylesMenu, className, m_styleMode);
         }
     }
 
@@ -860,6 +1024,7 @@ void EditorPane::updateTheme()
     if (m_editor) {
         m_editor->setStyleSheet(ThemeManager::instance().getEditorPaneStyleSheet());
     }
+    refreshClassHighlights();
     updateToolbarIcons();
     updateToolbarActiveStates();
 }
@@ -959,13 +1124,19 @@ void EditorPane::handleEditorTooltip(QHelpEvent *helpEvent)
     }
 
     QStringList appliedClasses;
-    // 2. CSS class attribute
+    // 2. CSS class attribute and tag mode
     QVariant cssProp = charFmt.property(CssClassProperty);
+    QVariant modeProp = charFmt.property(CssElementModeProperty);
     QString classStr = cssProp.isValid() ? cssProp.toString().trimmed() : QString();
+    QString modeStr = modeProp.isValid() ? modeProp.toString() : QStringLiteral("span");
     if (!classStr.isEmpty()) {
         appliedClasses = classStr.split(QLatin1Char(' '), Qt::SkipEmptyParts);
         for (const QString &cls : appliedClasses) {
-            elements.append(QStringLiteral("<span class=\"%1\">").arg(cls));
+            if (modeStr == QStringLiteral("div")) {
+                elements.append(QStringLiteral("<div class=\"%1\"> (Card Layout)").arg(cls));
+            } else {
+                elements.append(QStringLiteral("<span class=\"%1\"> (Text Highlight)").arg(cls));
+            }
             if (!m_availableCssClasses.contains(cls)) {
                 issues.append(QStringLiteral("Undefined CSS class \".%1\" — not declared in Work Skin CSS.")
                                   .arg(cls));
@@ -1046,14 +1217,26 @@ void EditorPane::handleEditorTooltip(QHelpEvent *helpEvent)
 
         if (!appliedClasses.isEmpty()) {
             QString styleRulesHtml;
+            const bool isDiv = (modeStr == QStringLiteral("div"));
+            styleRulesHtml += QStringLiteral(
+                "<div style='margin-bottom: 6px; font-size: 11px; padding: 3px 6px; border-radius: 3px; background: %1; color: %2;'>"
+                "%3"
+                "</div>"
+            ).arg(
+                isDiv ? QStringLiteral("rgba(99, 102, 241, 0.2)") : QStringLiteral("rgba(245, 158, 11, 0.2)"),
+                isDiv ? QStringLiteral("#c7d2fe") : QStringLiteral("#fde68a"),
+                isDiv ? QStringLiteral("📦 <b>Div Mode (Card / Container):</b> Block container for card layouts.")
+                      : QStringLiteral("🏷️ <b>Span Mode (Text Highlighter):</b> Inline text highlighter. Tip: Do not use for cards.")
+            );
+
             for (const QString &cls : appliedClasses) {
                 const QString decls = DiffUtil::extractCssClassDeclarations(m_customCss, cls);
                 if (!decls.isEmpty()) {
                     styleRulesHtml += QStringLiteral(
-                        "<div style='margin-top: 4px; font-family: monospace; font-size: 11px; background: rgba(56, 189, 248, 0.12); border-left: 3px solid #38bdf8; padding: 3px 6px; border-radius: 2px;'>"
-                        "<b style='color: #67e8f9;'>.%1</b> { <span style='color: #86efac;'>%2</span> }"
+                        "<div style='margin-top: 4px; font-family: monospace; font-size: 11px; background: rgba(56, 189, 248, 0.12); border-left: 3px solid %1; padding: 3px 6px; border-radius: 2px;'>"
+                        "<b style='color: #67e8f9;'>.%2</b> { <span style='color: #86efac;'>%3</span> }"
                         "</div>"
-                    ).arg(cls.toHtmlEscaped(), decls.toHtmlEscaped());
+                    ).arg(isDiv ? QStringLiteral("#6366f1") : QStringLiteral("#f59e0b"), cls.toHtmlEscaped(), decls.toHtmlEscaped());
                 } else {
                     styleRulesHtml += QStringLiteral(
                         "<div style='margin-top: 4px; font-family: monospace; font-size: 11px; background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; padding: 3px 6px; border-radius: 2px; color: #fca5a5;'>"

@@ -62,7 +62,7 @@ inline QJsonArray getMcpAllToolDefinitions()
     {
         QJsonObject t;
         t[QStringLiteral("name")] = QStringLiteral("update_chapter_html");
-        t[QStringLiteral("description")] = QStringLiteral("Updates the HTML content of a chapter. NOTE: <span> tags are strictly PROHIBITED; even though AO3 accepts <span>, it breaks rich text styling and editing in Ensemble. Use semantic tags (<b>, <em>, <strong>, <i>, <blockquote>, <p>, <div>, etc.) instead. Submissions containing <span> will be rejected. The HTML is automatically sanitized against the AO3 whitelist and the live preview/editors are refreshed immediately.");
+        t[QStringLiteral("description")] = QStringLiteral("Updates the HTML content of a chapter. The HTML is automatically sanitized against the AO3 whitelist and the live preview/editors are refreshed immediately. NOTE: <span> tags are supported ONLY as inline text highlighters (colors, inline emphasis). Do NOT use <span> for card layouts or block containers as that will break the layout; use <div> instead when creating card/block layouts.");
         QJsonObject schema;
         schema[QStringLiteral("type")] = QStringLiteral("object");
         QJsonObject props;
@@ -76,7 +76,7 @@ inline QJsonArray getMcpAllToolDefinitions()
         props[QStringLiteral("chapterNumber")] = chNumProp;
         QJsonObject htmlProp;
         htmlProp[QStringLiteral("type")] = QStringLiteral("string");
-        htmlProp[QStringLiteral("description")] = QStringLiteral("The new HTML content for the chapter. Must NOT contain <span> tags.");
+        htmlProp[QStringLiteral("description")] = QStringLiteral("The new HTML content for the chapter. Note: <span> tags are permitted for inline text highlighting only; use <div> for card or block container layouts.");
         props[QStringLiteral("html")] = htmlProp;
         QJsonObject modelProp;
         modelProp[QStringLiteral("type")] = QStringLiteral("string");
