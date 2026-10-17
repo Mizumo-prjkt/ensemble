@@ -25,6 +25,7 @@
 #include <QRadioButton>
 #include <QScrollArea>
 #include <QSettings>
+#include <QStandardItemModel>
 #include <QTabWidget>
 #include <QTextEdit>
 #include <QVBoxLayout>
@@ -54,10 +55,23 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     updateTheme();
     updateMcpStatusDisplay();
 
-    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this](AppTheme) {
+    connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this](AppTheme theme) {
+        if (m_themeDarkRadio) m_themeDarkRadio->setChecked(theme == AppTheme::Dark);
+        if (m_themeDarkerRadio) m_themeDarkerRadio->setChecked(theme == AppTheme::Darker);
+        if (m_themeLightRadio) m_themeLightRadio->setChecked(theme == AppTheme::Light);
+        if (m_themeReversiRadio) m_themeReversiRadio->setChecked(theme == AppTheme::Ao3Reversi);
         updateTheme();
     });
-    connect(&ThemeManager::instance(), &ThemeManager::skinFlavorChanged, this, [this](SkinFlavor) {
+    connect(&ThemeManager::instance(), &ThemeManager::skinFlavorChanged, this, [this](SkinFlavor flavor) {
+        if (m_skinFlavorCombo) {
+            for (int i = 0; i < m_skinFlavorCombo->count(); ++i) {
+                if (m_skinFlavorCombo->itemData(i).toInt() == static_cast<int>(flavor)) {
+                    const QSignalBlocker blocker(m_skinFlavorCombo);
+                    m_skinFlavorCombo->setCurrentIndex(i);
+                    break;
+                }
+            }
+        }
         updateTheme();
     });
 }
@@ -213,6 +227,12 @@ QWidget *SettingsDialog::createGeneralTab()
             this, &SettingsDialog::onSkinFlavorSelectionChanged);
     flavorLayout->addWidget(m_skinFlavorCombo);
 
+    m_themeConflictNotice = new QLabel(flavorGroup);
+    m_themeConflictNotice->setWordWrap(true);
+    m_themeConflictNotice->setStyleSheet(QStringLiteral("font-size: 11px; color: #e5c07b; font-weight: 500; padding: 2px 0px;"));
+    m_themeConflictNotice->setVisible(false);
+    flavorLayout->addWidget(m_themeConflictNotice);
+
     // Material You dynamic details card
     m_materialYouCard = new QFrame(flavorGroup);
     m_materialYouCard->setObjectName(QStringLiteral("materialYouCard"));
@@ -263,6 +283,8 @@ QWidget *SettingsDialog::createGeneralTab()
 
     layout->addWidget(flavorGroup);
     layout->addStretch(1);
+
+    updateThemeAndSkinCompatibility();
 
     return createScrollableContainer(container, this);
 }
@@ -770,7 +792,78 @@ QWidget *SettingsDialog::createPluginsTab()
 void SettingsDialog::updateTheme()
 {
     setStyleSheet(ThemeManager::instance().getDialogStyleSheet());
+    updateThemeAndSkinCompatibility();
     updateWallpaperColorPreview();
+}
+
+void SettingsDialog::updateThemeAndSkinCompatibility()
+{
+    if (!m_skinFlavorCombo || !m_themeReversiRadio) return;
+
+    int myIndex = -1;
+    for (int i = 0; i < m_skinFlavorCombo->count(); ++i) {
+        if (m_skinFlavorCombo->itemData(i).toInt() == static_cast<int>(SkinFlavor::MaterialYou)) {
+            myIndex = i;
+            break;
+        }
+    }
+
+    const bool isMaterialYou = (m_skinFlavorCombo->currentIndex() == myIndex);
+
+    // 1. If Material You is active: AO3 Reversi theme is disabled
+    if (isMaterialYou) {
+        m_themeReversiRadio->setEnabled(false);
+        m_themeReversiRadio->setToolTip(QStringLiteral("AO3 Reversi theme cannot be selected when Android Material You styling is active due to styling conflicts."));
+        if (m_themeReversiRadio->isChecked()) {
+            if (m_themeDarkRadio) {
+                const QSignalBlocker blocker(m_themeDarkRadio);
+                m_themeDarkRadio->setChecked(true);
+            }
+            ThemeManager::instance().setTheme(AppTheme::Dark);
+        }
+    } else {
+        m_themeReversiRadio->setEnabled(true);
+        m_themeReversiRadio->setToolTip(QString());
+    }
+
+    // 2. If Reversi is active: Android Material You styling item is disabled
+    const bool isReversi = (m_themeReversiRadio && m_themeReversiRadio->isChecked());
+    if (auto *model = qobject_cast<QStandardItemModel*>(m_skinFlavorCombo->model())) {
+        if (myIndex >= 0) {
+            if (auto *item = model->item(myIndex)) {
+                item->setEnabled(!isReversi);
+                if (isReversi) {
+                    item->setToolTip(QStringLiteral("Android Material You is disabled in AO3 Reversi mode due to styling conflicts."));
+                } else {
+                    item->setToolTip(QString());
+                }
+            }
+        }
+    }
+
+    if (isReversi && m_skinFlavorCombo->currentIndex() == myIndex) {
+        for (int i = 0; i < m_skinFlavorCombo->count(); ++i) {
+            if (m_skinFlavorCombo->itemData(i).toInt() == static_cast<int>(SkinFlavor::StandardEnsemble)) {
+                const QSignalBlocker blocker(m_skinFlavorCombo);
+                m_skinFlavorCombo->setCurrentIndex(i);
+                ThemeManager::instance().setSkinFlavor(SkinFlavor::StandardEnsemble);
+                break;
+            }
+        }
+    }
+
+    // 3. Update conflict notice banner
+    if (m_themeConflictNotice) {
+        if (isReversi) {
+            m_themeConflictNotice->setText(QStringLiteral("ℹ️ Android Material You styling is disabled while AO3 Reversi theme is active."));
+            m_themeConflictNotice->setVisible(true);
+        } else if (m_skinFlavorCombo->currentIndex() == myIndex) {
+            m_themeConflictNotice->setText(QStringLiteral("ℹ️ AO3 Reversi theme is disabled while Android Material You styling is active."));
+            m_themeConflictNotice->setVisible(true);
+        } else {
+            m_themeConflictNotice->setVisible(false);
+        }
+    }
 }
 
 void SettingsDialog::updateWallpaperColorPreview()
@@ -805,6 +898,7 @@ void SettingsDialog::updateWallpaperColorPreview()
 
 void SettingsDialog::onThemeSelectionChanged()
 {
+    updateThemeAndSkinCompatibility();
     if (m_themeDarkRadio && m_themeDarkRadio->isChecked()) {
         ThemeManager::instance().setTheme(AppTheme::Dark);
     } else if (m_themeDarkerRadio && m_themeDarkerRadio->isChecked()) {
@@ -820,6 +914,7 @@ void SettingsDialog::onSkinFlavorSelectionChanged(int index)
 {
     if (!m_skinFlavorCombo) return;
 
+    updateThemeAndSkinCompatibility();
     const auto flavor = static_cast<SkinFlavor>(m_skinFlavorCombo->itemData(index).toInt());
     ThemeManager::instance().setSkinFlavor(flavor);
 

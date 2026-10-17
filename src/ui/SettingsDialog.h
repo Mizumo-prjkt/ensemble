@@ -57,6 +57,7 @@ private:
     QWidget *createPluginsTab();
 
     void updateWallpaperColorPreview();
+    void updateThemeAndSkinCompatibility();
 
     QTabWidget *m_tabWidget = nullptr;
 
@@ -68,6 +69,7 @@ private:
     QButtonGroup *m_themeGroup = nullptr;
 
     QComboBox *m_skinFlavorCombo = nullptr;
+    QLabel *m_themeConflictNotice = nullptr;
     QFrame *m_materialYouCard = nullptr;
     QLabel *m_wallpaperColorPreview = nullptr;
     QLabel *m_wallpaperHexLabel = nullptr;

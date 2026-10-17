@@ -340,6 +340,11 @@ void ThemeManager::loadSettings()
         m_skinFlavor = SkinFlavor::StandardEnsemble;
     }
 
+    // Reversi and Material You conflict with each other; fall back to Standard Ensemble
+    if (m_currentTheme == AppTheme::Ao3Reversi && m_skinFlavor == SkinFlavor::MaterialYou) {
+        m_skinFlavor = SkinFlavor::StandardEnsemble;
+    }
+
     rescanWallpaperColor();
 }
 
@@ -394,14 +399,31 @@ void ThemeManager::applyCurrentThemeAndSkin()
 
 void ThemeManager::setTheme(AppTheme theme)
 {
+    bool flavorChanged = false;
+    if (theme == AppTheme::Ao3Reversi && m_skinFlavor == SkinFlavor::MaterialYou) {
+        // Material You conflicts with Reversi; auto-switch skin flavor to StandardEnsemble
+        m_skinFlavor = SkinFlavor::StandardEnsemble;
+        flavorChanged = true;
+    }
+
     m_currentTheme = theme;
     saveSettings();
     applyCurrentThemeAndSkin();
+    if (flavorChanged) {
+        emit skinFlavorChanged(m_skinFlavor);
+    }
     emit themeChanged(m_currentTheme);
 }
 
 void ThemeManager::setSkinFlavor(SkinFlavor flavor)
 {
+    bool themeWasChanged = false;
+    if (flavor == SkinFlavor::MaterialYou && m_currentTheme == AppTheme::Ao3Reversi) {
+        // Reversi conflicts with Material You; auto-switch theme to Dark
+        m_currentTheme = AppTheme::Dark;
+        themeWasChanged = true;
+    }
+
     m_skinFlavor = flavor;
     if (flavor == SkinFlavor::MaterialYou) {
         rescanWallpaperColor();
@@ -409,15 +431,22 @@ void ThemeManager::setSkinFlavor(SkinFlavor flavor)
     saveSettings();
     applyCurrentThemeAndSkin();
     emit skinFlavorChanged(m_skinFlavor);
-    emit themeChanged(m_currentTheme);
+    if (themeWasChanged) {
+        emit themeChanged(m_currentTheme);
+    }
 }
 
 void ThemeManager::toggleTheme()
 {
+    const bool isMaterialYou = (m_skinFlavor == SkinFlavor::MaterialYou);
     if (m_currentTheme == AppTheme::Light) {
         setTheme(AppTheme::Dark);
     } else if (m_currentTheme == AppTheme::Dark) {
-        setTheme(AppTheme::Ao3Reversi);
+        if (isMaterialYou) {
+            setTheme(AppTheme::Light);
+        } else {
+            setTheme(AppTheme::Ao3Reversi);
+        }
     } else if (m_currentTheme == AppTheme::Ao3Reversi) {
         setTheme(AppTheme::Light);
     } else {

@@ -23,6 +23,7 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QSettings>
+#include <QStandardItemModel>
 #include <QTabWidget>
 #include <QTextBrowser>
 #include <cassert>
@@ -77,16 +78,33 @@ int main(int argc, char *argv[])
     assert(tm.mutedTextColor() == QColor("#334155"));
     std::cout << "✓ Light mode high-contrast primary (#0f172a) and muted (#334155) text verified." << std::endl;
 
-    // Test AO3 Reversi theme
+    // Test AO3 Reversi theme and Material You conflict resolution
     tm.setTheme(AppTheme::Ao3Reversi);
     assert(tm.currentTheme() == AppTheme::Ao3Reversi);
     assert(tm.isDarkMode() == true);
     assert(tm.isAo3Reversi() == true);
     assert(tm.accentColor() == QColor("#990000"));
     assert(tm.windowBgColor() == QColor("#111111"));
-    std::cout << "✓ AO3 Reversi theme verified (#111111 background, #990000 crimson accent)." << std::endl;
+    // Switching to Reversi must disable/switch away from Material You
+    assert(tm.currentSkinFlavor() == SkinFlavor::StandardEnsemble);
+    std::cout << "✓ AO3 Reversi theme verified (#111111 background, #990000 crimson accent) and Material You auto-disabled." << std::endl;
 
-    // Test global theme toggle cycle (Light -> Dark -> Ao3Reversi -> Light)
+    // Selecting Material You must disallow Reversi and switch away from Reversi
+    tm.setSkinFlavor(SkinFlavor::MaterialYou);
+    assert(tm.currentSkinFlavor() == SkinFlavor::MaterialYou);
+    assert(tm.currentTheme() == AppTheme::Dark);
+    std::cout << "✓ Selecting Material You while in Reversi switches theme away from Reversi to Dark." << std::endl;
+
+    // Test toggleTheme() with Material You active (skips Reversi)
+    tm.setTheme(AppTheme::Light);
+    tm.toggleTheme();
+    assert(tm.currentTheme() == AppTheme::Dark);
+    tm.toggleTheme();
+    assert(tm.currentTheme() == AppTheme::Light); // Skipped Ao3Reversi!
+    std::cout << "✓ toggleTheme with Material You active skips AO3 Reversi." << std::endl;
+
+    // Test global theme toggle cycle with StandardEnsemble (Light -> Dark -> Ao3Reversi -> Light)
+    tm.setSkinFlavor(SkinFlavor::StandardEnsemble);
     tm.setTheme(AppTheme::Light);
     tm.toggleTheme();
     assert(tm.currentTheme() == AppTheme::Dark);
@@ -210,6 +228,43 @@ int main(int argc, char *argv[])
     std::cout << "✓ Editor settings checkboxes verified (Element hover, error highlight, error details, auto-format)." << std::endl;
     std::cout << "✓ Local LLMs Beta MCP connector controls, settings persistence, and config snippet verified." << std::endl;
     std::cout << "✓ All requested SettingsDialog checkboxes and TODO items verified." << std::endl;
+
+    // Test SettingsDialog mutual exclusivity between Reversi and Material You
+    QRadioButton *reversiRadio = nullptr;
+    for (auto *rb : dialog.findChildren<QRadioButton *>()) {
+        if (rb->text().contains("AO3 Reversi")) {
+            reversiRadio = rb;
+            break;
+        }
+    }
+    assert(reversiRadio != nullptr);
+    QComboBox *flavorCombo = dialog.findChild<QComboBox *>();
+    assert(flavorCombo != nullptr);
+
+    // 1. Check Reversi in dialog
+    reversiRadio->setChecked(true);
+    assert(reversiRadio->isChecked());
+    // Material You item in flavorCombo must be disabled
+    int myIdx = -1;
+    for (int i = 0; i < flavorCombo->count(); ++i) {
+        if (flavorCombo->itemData(i).toInt() == static_cast<int>(SkinFlavor::MaterialYou)) {
+            myIdx = i;
+            break;
+        }
+    }
+    assert(myIdx >= 0);
+    auto *itemModel = qobject_cast<QStandardItemModel*>(flavorCombo->model());
+    assert(itemModel != nullptr);
+    assert(!itemModel->item(myIdx)->isEnabled());
+    assert(flavorCombo->currentIndex() != myIdx);
+
+    // 2. Select Material You in dialog
+    flavorCombo->setCurrentIndex(myIdx);
+    assert(flavorCombo->currentIndex() == myIdx);
+    // Reversi radio must be disabled and not checked
+    assert(!reversiRadio->isEnabled());
+    assert(!reversiRadio->isChecked());
+    std::cout << "✓ SettingsDialog UI mutual exclusivity between Reversi and Material You verified." << std::endl;
 
     // 4. Test SkinFlavor geometry metrics and styling
     tm.setSkinFlavor(SkinFlavor::MaterialYou);

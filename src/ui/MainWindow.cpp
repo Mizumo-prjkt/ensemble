@@ -1953,7 +1953,16 @@ void MainWindow::onThemeChanged(AppTheme theme) {
   if (m_darkThemeAction) m_darkThemeAction->setChecked(theme == AppTheme::Dark);
   if (m_darkerThemeAction) m_darkerThemeAction->setChecked(theme == AppTheme::Darker);
   if (m_lightThemeAction) m_lightThemeAction->setChecked(theme == AppTheme::Light);
-  if (m_reversiThemeAction) m_reversiThemeAction->setChecked(theme == AppTheme::Ao3Reversi);
+  const bool isMaterialYou = (ThemeManager::instance().currentSkinFlavor() == SkinFlavor::MaterialYou);
+  if (m_reversiThemeAction) {
+    m_reversiThemeAction->setChecked(theme == AppTheme::Ao3Reversi);
+    m_reversiThemeAction->setEnabled(!isMaterialYou);
+    if (isMaterialYou) {
+      m_reversiThemeAction->setToolTip(QStringLiteral("AO3 Reversi mode cannot be used with Android Material You styling."));
+    } else {
+      m_reversiThemeAction->setToolTip(QString());
+    }
+  }
 
   const bool isDark = ThemeManager::instance().isDarkMode();
 
@@ -1979,15 +1988,16 @@ void MainWindow::onThemeChanged(AppTheme theme) {
     ));
   }
   if (m_themeToggleButton) {
+    const QString toggleSeq = isMaterialYou ? QStringLiteral("(Light -> Dark)") : QStringLiteral("(Light -> Dark -> AO3 Reversi)");
     if (theme == AppTheme::Light) {
       m_themeToggleButton->setText(QStringLiteral("☀️ Light"));
-      m_themeToggleButton->setToolTip(QStringLiteral("Current Theme: Light. Click to toggle (Light -> Dark -> AO3 Reversi)"));
+      m_themeToggleButton->setToolTip(QStringLiteral("Current Theme: Light. Click to toggle %1").arg(toggleSeq));
     } else if (theme == AppTheme::Dark) {
       m_themeToggleButton->setText(QStringLiteral("🌙 Dark"));
-      m_themeToggleButton->setToolTip(QStringLiteral("Current Theme: Dark. Click to toggle (Light -> Dark -> AO3 Reversi)"));
+      m_themeToggleButton->setToolTip(QStringLiteral("Current Theme: Dark. Click to toggle %1").arg(toggleSeq));
     } else if (theme == AppTheme::Ao3Reversi) {
       m_themeToggleButton->setText(QStringLiteral("🔴 Reversi"));
-      m_themeToggleButton->setToolTip(QStringLiteral("Current Theme: AO3 Reversi. Click to toggle (Light -> Dark -> AO3 Reversi)"));
+      m_themeToggleButton->setToolTip(QStringLiteral("Current Theme: AO3 Reversi. Click to toggle %1").arg(toggleSeq));
     } else {
       m_themeToggleButton->setText(QStringLiteral("🖤 OLED"));
       m_themeToggleButton->setToolTip(QStringLiteral("Current Theme: Darker (OLED). Click to toggle."));
