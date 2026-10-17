@@ -268,6 +268,20 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     }
   });
 
+  connect(&EnsemblePlugin::PluginManager::instance(), &EnsemblePlugin::PluginManager::insertTextRequested,
+          this, [this](const QString &text) {
+    if (m_editorPane && m_editorPane->editor()) {
+      m_editorPane->editor()->textCursor().insertText(text);
+    }
+  });
+
+  connect(&EnsemblePlugin::PluginManager::instance(), &EnsemblePlugin::PluginManager::setChapterTextRequested,
+          this, [this](const QString &text) {
+    if (m_editorPane && m_editorPane->editor()) {
+      m_editorPane->editor()->setPlainText(text);
+    }
+  });
+
   connect(&EnsemblePlugin::PluginManager::instance(), &EnsemblePlugin::PluginManager::pluginStatusWarn,
           this, [this](const QString &pid, const QString &msg, int line) {
     if (statusBar()) {
@@ -293,6 +307,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
           this, [this](const QString &pid, const QString &msg, int line) {
     if (statusBar()) {
       statusBar()->showMessage(tr("[Plugin %1 FAULTED] 💥 %2 (line %3)").arg(pid, msg).arg(line), 10000);
+    }
+  });
+
+  connect(&EnsemblePlugin::PluginManager::instance(), &EnsemblePlugin::PluginManager::pluginQuarantined,
+          this, [this](const QString &pid, const QString &reason) {
+    QMessageBox::critical(this, tr("SECURITY VIOLATION - PLUGIN QUARANTINED"),
+                          tr("<b>CRITICAL SECURITY VIOLATION</b><br><br>%1").arg(reason));
+    if (statusBar()) {
+      statusBar()->showMessage(tr("[Plugin %1 QUARANTINED] 🚨 %2").arg(pid, reason), 15000);
     }
   });
 
@@ -1220,6 +1243,17 @@ void MainWindow::loadCurrentChapterIntoEditors() {
   if (chapter) {
     EnsemblePlugin::PluginManager::instance().notifyChapterChanged(
         chapter->title(), chapter->html(), m_project.activeChapterIndex());
+
+    QList<QVariantMap> chaps;
+    const auto &projectChaps = m_project.chapters();
+    for (int i = 0; i < projectChaps.size(); ++i) {
+        QVariantMap map;
+        map[QStringLiteral("index")] = i;
+        map[QStringLiteral("title")] = projectChaps.at(i).title();
+        map[QStringLiteral("text")] = projectChaps.at(i).toPlainText();
+        chaps.append(map);
+    }
+    EnsemblePlugin::PluginManager::instance().notifyChaptersUpdated(chaps);
   }
 }
 

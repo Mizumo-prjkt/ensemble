@@ -1,11 +1,16 @@
+#include "plugins/PluginLogger.h"
 #include "plugins/PluginManager.h"
+#include "plugins/PluginPermissions.h"
 #include "plugins/PluginSandbox.h"
 #include "plugins/ResourceGuard.h"
 #include "plugins/ScriptEvaluator.h"
 #include "plugins/ScriptLexer.h"
 #include "plugins/ScriptParser.h"
 #include "plugins/ScriptValue.h"
+#include "utils/AppPaths.h"
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
 #include <cassert>
 #include <iostream>
 #include <string>
@@ -237,6 +242,9 @@ void testHostConnectorsAndDecorators() {
     std::cout << "Running testHostConnectorsAndDecorators..." << std::endl;
 
     PluginSandbox sandbox("test.connectors", "Connectors Test", "1.0");
+    PluginPermissions perms;
+    perms.allowEditorWrite = true;
+    sandbox.setPermissions(perms);
 
     QString editorText = "Chapter 1: The Encounter\n\"Where are you going?\" asked Alice.";
     QString chapterTitle = "Chapter 1";
@@ -307,6 +315,266 @@ void testHostConnectorsAndDecorators() {
     std::cout << "✓ testHostConnectorsAndDecorators passed." << std::endl;
 }
 
+void testPluginScannerAndPermissions() {
+    std::cout << "Running testPluginScannerAndPermissions..." << std::endl;
+
+    QString script =
+        "# ID: scanner.test\n"
+        "# Name: Scanner Test\n"
+        "# Version: 1.0\n"
+        "\n"
+        "def run_check():\n"
+        "    url1 = 'https://api.github.com/repos'\n"
+        "    url2 = 'http://archiveofourown.org/works/123'\n"
+        "    t = editor.get_chapter_text()\n"
+        "    cnt = editor.get_chapter_count()\n"
+        "    editor.replace_selection('hello')\n"
+        "    storage.write('k', 'v')\n"
+        "    win = ui.create_window('Win', 400, 300)\n"
+        "    res = http.get('https://example.com/api')\n";
+
+    PluginPermissions perms;
+    PluginScanner::scan(script, perms);
+
+    assert(perms.detectedEditorRead);
+    assert(perms.detectedEditorWrite);
+    assert(perms.detectedStorage);
+    assert(perms.detectedUi);
+    assert(perms.detectedNetwork);
+
+    assert(perms.detectedDomains.contains("api.github.com"));
+    assert(perms.detectedDomains.contains("archiveofourown.org"));
+    assert(perms.detectedDomains.contains("example.com"));
+
+    // Test permission JSON round-trip
+    perms.allowNetwork = true;
+    perms.allowedDomains = QStringList() << "api.github.com" << "example.com";
+    QJsonObject json = perms.toJson();
+    PluginPermissions restored = PluginPermissions::fromJson(json);
+
+    assert(restored.allowNetwork);
+    assert(restored.isDomainAllowed("api.github.com"));
+    assert(restored.isDomainAllowed("API.GITHUB.COM"));
+    assert(!restored.isDomainAllowed("evil.com"));
+
+    std::cout << "✓ testPluginScannerAndPermissions passed." << std::endl;
+}
+
+void testNetworkPermissionsAndAuditLog() {
+    std::cout << "Running testNetworkPermissionsAndAuditLog..." << std::endl;
+
+    PluginSandbox sandbox("test.net", "Net Test", "1.0");
+
+    // Case 1: Network disabled by default
+    ScriptEvaluator eval1(sandbox);
+    try {
+        eval1.executeScript("res = http.get('https://api.example.com/data')\n");
+        assert(false && "Should have blocked network access when disabled");
+    } catch (const ScriptTrap &e) {
+        std::cout << "  Caught expected network disabled trap: " << e.what() << std::endl;
+    }
+
+    // Case 2: Network enabled, but domain not whitelisted
+    PluginPermissions perms;
+    perms.allowNetwork = true;
+    perms.allowedDomains = QStringList() << "trusted.com";
+    sandbox.setPermissions(perms);
+
+    ScriptEvaluator eval2(sandbox);
+    try {
+        eval2.executeScript("res = http.get('https://untrusted.com/data')\n");
+        assert(false && "Should have blocked untrusted domain");
+    } catch (const ScriptTrap &e) {
+        std::cout << "  Caught expected untrusted domain trap: " << e.what() << std::endl;
+    }
+
+    // Case 3: Insecure non-HTTPS rejected and quarantined
+    try {
+        eval2.executeScript("res = http.get('http://trusted.com/data')\n");
+        assert(false && "Should have blocked insecure non-HTTPS scheme");
+    } catch (const ScriptTrap &e) {
+        std::cout << "  Caught expected non-HTTPS security violation: " << e.what() << std::endl;
+        assert(sandbox.isQuarantined());
+    }
+
+    // Check audit log contains blocked records and security violations
+    QStringList logs = PluginLogger::readRecentLogs(20);
+    assert(!logs.isEmpty());
+    bool foundBlocked = false;
+    bool foundViolation = false;
+    for (const QString &line : logs) {
+        if (line.contains("BLOCKED") && line.contains("test.net")) {
+            foundBlocked = true;
+        }
+        if (line.contains("SECURITY_VIOLATION") && line.contains("test.net")) {
+            foundViolation = true;
+        }
+    }
+    assert(foundBlocked);
+    assert(foundViolation);
+
+    std::cout << "✓ testNetworkPermissionsAndAuditLog passed." << std::endl;
+}
+
+void testDeclarativeUiAndWindowActions() {
+    std::cout << "Running testDeclarativeUiAndWindowActions..." << std::endl;
+
+    PluginSandbox sandbox("test.ui", "UI Test", "1.0");
+    PluginPermissions perms;
+    perms.allowUi = true;
+    sandbox.setPermissions(perms);
+
+    QString createdWinId;
+    QString createdTitle;
+    int createdW = 0, createdH = 0;
+    QStringList addedWidgetTypes;
+
+    UiCallbacks uiCb;
+    uiCb.createWindow = [&](const QString &winId, const QString &title, int w, int h) {
+        createdWinId = winId;
+        createdTitle = title;
+        createdW = w;
+        createdH = h;
+    };
+    uiCb.addWidget = [&](const QString &, const QString &type, const QVariantMap &) {
+        addedWidgetTypes.append(type);
+    };
+    uiCb.showWindow = [&](const QString &) {};
+    uiCb.closeWindow = [&](const QString &) {};
+    sandbox.setUiCallbacks(uiCb);
+
+    ScriptEvaluator eval(sandbox);
+    std::string script =
+        "win = ui.create_window('Dialogue Analysis', 500, 350)\n"
+        "win.add_label('Checking dialog...')\n"
+        "win.add_text('All quotes ok')\n"
+        "win.add_input('type here')\n"
+        "win.add_button('Apply', 'on_apply')\n"
+        "\n"
+        "result_var = ''\n"
+        "def on_apply(data):\n"
+        "    result_var = data['input_0']\n";
+
+    eval.executeScript(script);
+
+    assert(!createdWinId.isEmpty());
+    assert(createdTitle == "Dialogue Analysis");
+    assert(createdW == 500);
+    assert(createdH == 350);
+    assert(addedWidgetTypes.size() == 4);
+    assert(addedWidgetTypes[0] == "label");
+    assert(addedWidgetTypes[1] == "text");
+    assert(addedWidgetTypes[2] == "input");
+    assert(addedWidgetTypes[3] == "button");
+
+    // Case 2: UI disabled
+    perms.allowUi = false;
+    sandbox.setPermissions(perms);
+    ScriptEvaluator evalBlocked(sandbox);
+    try {
+        evalBlocked.executeScript("win = ui.create_window('Bad', 400, 300)\n");
+        assert(false && "Should have blocked UI creation");
+    } catch (const ScriptTrap &e) {
+        std::cout << "  Caught expected UI disabled trap: " << e.what() << std::endl;
+    }
+
+    std::cout << "✓ testDeclarativeUiAndWindowActions passed." << std::endl;
+}
+
+void testExpandedEditorAndPermissions() {
+    std::cout << "Running testExpandedEditorAndPermissions..." << std::endl;
+
+    PluginSandbox sandbox("test.editor", "Editor Test", "1.0");
+    PluginPermissions perms;
+    perms.allowEditorRead = true;
+    perms.allowEditorWrite = false; // Write disabled!
+    sandbox.setPermissions(perms);
+
+    EditorCallbacks edCb;
+    edCb.getChapterText = []() { return QStringLiteral("Once upon a time in a faraway land"); };
+    edCb.getSelection = []() { return QStringLiteral("time"); };
+    edCb.getChapterTitle = []() { return QStringLiteral("Prologue"); };
+    edCb.getChapterCount = []() { return 3; };
+    edCb.getAllChapters = []() {
+        QList<QVariantMap> list;
+        QVariantMap c1, c2;
+        c1["index"] = 0; c1["title"] = "Chapter 1"; c1["text"] = "Text 1";
+        c2["index"] = 1; c2["title"] = "Chapter 2"; c2["text"] = "Text 2";
+        list.append(c1); list.append(c2);
+        return list;
+    };
+    edCb.getWordCount = []() { return 7; };
+    sandbox.setEditorCallbacks(edCb);
+
+    ScriptEvaluator eval(sandbox);
+    eval.executeScript(
+        "cnt = editor.get_chapter_count()\n"
+        "wc = editor.get_word_count()\n"
+        "all_c = editor.get_all_chapters()\n"
+        "first_title = all_c[0]['title']\n"
+    );
+
+    // Try editor write while disabled
+    try {
+        eval.executeScript("editor.replace_selection('test')\n");
+        assert(false && "Should have blocked editor write");
+    } catch (const ScriptTrap &e) {
+        std::cout << "  Caught expected editor write disabled trap: " << e.what() << std::endl;
+    }
+
+    // Enable write
+    perms.allowEditorWrite = true;
+    sandbox.setPermissions(perms);
+    QString written;
+    edCb.replaceSelection = [&](const QString &s) { written = s; };
+    sandbox.setEditorCallbacks(edCb);
+
+    eval.executeScript("editor.replace_selection('new text')\n");
+    assert(written == "new text");
+
+    std::cout << "✓ testExpandedEditorAndPermissions passed." << std::endl;
+}
+
+void testPluginManagerErLoadingAndUninstall() {
+    std::cout << "Running testPluginManagerErLoadingAndUninstall..." << std::endl;
+
+    QString pluginDir = AppPaths::pluginsDir();
+    QDir().mkpath(pluginDir);
+
+    QString erPath = QDir(pluginDir).filePath(QStringLiteral("test_sample_runner.er"));
+    {
+        QFile file(erPath);
+        assert(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        const char *code =
+            "# ID: test.sample-runner\n"
+            "# Name: Sample Runner\n"
+            "# Version: 2.0\n"
+            "\n"
+            "@on_toolbar_click(\"Action Runner\")\n"
+            "def do_run():\n"
+            "    status.notify('Runner executed')\n";
+        file.write(code);
+    }
+
+    // Load .er file
+    QString err;
+    bool loaded = PluginManager::instance().loadPluginFromFile(erPath, &err);
+    assert(loaded);
+    assert(PluginManager::instance().hasPlugin("test.sample-runner"));
+
+    PluginMetadata meta = PluginManager::instance().plugin("test.sample-runner");
+    assert(meta.name == "Sample Runner");
+    assert(meta.version == "2.0");
+
+    // Uninstall
+    bool uninstalled = PluginManager::instance().uninstallPlugin("test.sample-runner", true, &err);
+    assert(uninstalled);
+    assert(!PluginManager::instance().hasPlugin("test.sample-runner"));
+    assert(!QFile::exists(erPath)); // File deleted on disk!
+
+    std::cout << "✓ testPluginManagerErLoadingAndUninstall passed." << std::endl;
+}
+
 int main(int argc, char *argv[]) {
     QCoreApplication app(argc, argv);
 
@@ -322,6 +590,11 @@ int main(int argc, char *argv[]) {
     testResourceGuardRecursionDepth();
     testStorageSandboxingAndPathTraversal();
     testHostConnectorsAndDecorators();
+    testPluginScannerAndPermissions();
+    testNetworkPermissionsAndAuditLog();
+    testDeclarativeUiAndWindowActions();
+    testExpandedEditorAndPermissions();
+    testPluginManagerErLoadingAndUninstall();
 
     std::cout << "========================================" << std::endl;
     std::cout << "All Sandboxed Plugin Engine tests PASSED!" << std::endl;

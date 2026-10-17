@@ -73,11 +73,13 @@ ScriptEvaluator::ScriptEvaluator(PluginSandbox &sandbox, ResourceLimits limits)
 }
 
 void ScriptEvaluator::initGlobals() {
-    // 4 Built-in Immutable Namespaces
+    // Built-in Immutable Namespaces
     m_globals->defineImmutable("editor", m_sandbox.createEditorNamespace(m_guard));
     m_globals->defineImmutable("storage", m_sandbox.createStorageNamespace(m_guard));
     m_globals->defineImmutable("status", m_sandbox.createStatusNamespace(m_guard));
     m_globals->defineImmutable("plugins", m_sandbox.createPluginsNamespace(m_guard));
+    m_globals->defineImmutable("http", m_sandbox.createHttpNamespace(m_guard));
+    m_globals->defineImmutable("ui", m_sandbox.createUiNamespace(m_guard));
 
     // Built-in standard functions
     m_globals->defineImmutable("len", ScriptValue([](const std::vector<ScriptValue> &args, ResourceGuard &, int l, int c) -> ScriptValue {
@@ -299,10 +301,19 @@ ScriptValue ScriptEvaluator::evaluate(const std::shared_ptr<AstNode> &node, std:
             args.push_back(evaluate(argNode, env));
         }
 
-        // Optimization: if callee is MemberExpr, we can call directly
+        // If callee is MemberExpr:
         if (call->callee->type() == AstNodeType::MemberExpr) {
             auto mem = std::static_pointer_cast<MemberExprNode>(call->callee);
             auto target = evaluate(mem->target, env);
+            if (target.isDict()) {
+                auto dict = target.asDict();
+                if (dict) {
+                    auto it = dict->find(mem->member);
+                    if (it != dict->end() && it->second.isCallable()) {
+                        return callFunction(it->second, args, call->line, call->column);
+                    }
+                }
+            }
             return target.callMember(mem->member, args, m_guard, call->line, call->column);
         }
 
@@ -581,6 +592,60 @@ void ScriptEvaluator::dispatchMessage(const QString &senderId, const QString &pa
                 hookArgs.push_back(args.at(i));
             }
             callFunction(ScriptValue(hook.function), hookArgs, -1, -1);
+        } catch (const ReturnSignal &) {
+        }
+    }
+}
+
+void ScriptEvaluator::dispatchWindowAction(const QString &winId, const QString &actionName, const QVariantMap &inputs) {
+    m_guard.resetForHook();
+    std::string act = actionName.toStdString();
+
+    auto inputDict = std::make_shared<ScriptDict>();
+    m_guard.alloc(sizeof(ScriptDict) + inputs.size() * 64, -1, -1);
+    for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+        std::string k = it.key().toStdString();
+        std::string v = it.value().toString().toStdString();
+        m_guard.alloc(k.capacity() + v.capacity() + 32, -1, -1);
+        (*inputDict)[k] = ScriptValue(std::move(v));
+    }
+    ScriptValue inputVal(inputDict);
+
+    // 1. Try toolbar click hooks first
+    for (const auto &hook : m_toolbarClickHooks) {
+        if (hook.argument == act || hook.functionName == act) {
+            try {
+                std::vector<ScriptValue> args;
+                if (!hook.function.parameters.empty()) {
+                    args.push_back(inputVal);
+                }
+                if (hook.function.parameters.size() >= 2) {
+                    args.push_back(ScriptValue(winId.toStdString()));
+                }
+                callFunction(ScriptValue(hook.function), args, -1, -1);
+                return;
+            } catch (const ReturnSignal &) {
+                return;
+            }
+        }
+    }
+
+    // 2. Try global function matching actionName
+    if (m_globals->has(act)) {
+        try {
+            auto fn = m_globals->get(act, -1, -1);
+            if (fn.isCallable()) {
+                std::vector<ScriptValue> args;
+                if (fn.type() == ScriptValue::Type::UserFunc) {
+                    if (!fn.asUserFunc().parameters.empty()) {
+                        args.push_back(inputVal);
+                    }
+                    if (fn.asUserFunc().parameters.size() >= 2) {
+                        args.push_back(ScriptValue(winId.toStdString()));
+                    }
+                }
+                callFunction(fn, args, -1, -1);
+            }
         } catch (const ReturnSignal &) {
         }
     }

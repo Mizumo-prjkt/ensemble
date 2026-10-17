@@ -363,6 +363,19 @@ ScriptValue ScriptValue::getMember(const std::string &memberName, ResourceGuard 
                 return it->second;
             }
         }
+        if (memberName == "get" || memberName == "keys" || memberName == "values" ||
+            memberName == "clear" || memberName == "len") {
+            ScriptValue self = *this;
+            return ScriptValue([self, memberName](const std::vector<ScriptValue> &args, ResourceGuard &g, int l, int c) -> ScriptValue {
+                return self.callMember(memberName, args, g, l, c);
+            }, memberName);
+        }
+    }
+    if (isString() || isList()) {
+        ScriptValue self = *this;
+        return ScriptValue([self, memberName](const std::vector<ScriptValue> &args, ResourceGuard &g, int l, int c) -> ScriptValue {
+            return self.callMember(memberName, args, g, l, c);
+        }, memberName);
     }
     // Return bound method or attribute error handled in callMember
     throw ScriptTrap("AttributeError: '" + typeName() + "' object has no attribute '" + memberName + "'", line, col);
@@ -499,6 +512,15 @@ ScriptValue ScriptValue::callMember(const std::string &methodName, const std::ve
     // Built-in Dict methods
     if (isDict()) {
         auto dict = asDict();
+
+        // If the dictionary contains a callable member, invoke it first
+        auto itCallable = dict->find(methodName);
+        if (itCallable != dict->end() && itCallable->second.isCallable()) {
+            if (itCallable->second.type() == Type::NativeFunc) {
+                return itCallable->second.asNativeFunc()(args, guard, line, col);
+            }
+        }
+
         if (methodName == "get") {
             if (args.empty()) throw ScriptTrap("get() requires at least 1 argument", line, col);
             std::string key = args.at(0).toString();

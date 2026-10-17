@@ -154,6 +154,9 @@ set(SOURCES
     src/plugins/PluginSandbox.cpp
     src/plugins/ScriptEvaluator.cpp
     src/plugins/PluginManager.cpp
+    src/plugins/PluginLogger.cpp
+    src/plugins/PluginScanner.cpp
+    src/ui/PluginHostDialog.cpp
     src/ui/PluginManagerDialog.cpp
 )
 
@@ -223,6 +226,9 @@ set(HEADERS
     src/plugins/PluginSandbox.h
     src/plugins/ScriptEvaluator.h
     src/plugins/PluginManager.h
+    src/plugins/PluginLogger.h
+    src/plugins/PluginPermissions.h
+    src/ui/PluginHostDialog.h
     src/ui/PluginManagerDialog.h
 )
 
@@ -400,6 +406,12 @@ add_executable(test_settings_dialog
     src/plugins/ScriptEvaluator.h
     src/plugins/PluginManager.cpp
     src/plugins/PluginManager.h
+    src/plugins/PluginLogger.cpp
+    src/plugins/PluginLogger.h
+    src/plugins/PluginPermissions.h
+    src/plugins/PluginScanner.cpp
+    src/ui/PluginHostDialog.cpp
+    src/ui/PluginHostDialog.h
     src/ui/PluginManagerDialog.cpp
     src/ui/PluginManagerDialog.h
 )
@@ -528,6 +540,12 @@ add_executable(test_plugin_engine
     src/plugins/ScriptEvaluator.h
     src/plugins/PluginManager.cpp
     src/plugins/PluginManager.h
+    src/plugins/PluginLogger.cpp
+    src/plugins/PluginLogger.h
+    src/plugins/PluginPermissions.h
+    src/plugins/PluginScanner.cpp
+    src/ui/PluginHostDialog.cpp
+    src/ui/PluginHostDialog.h
     src/utils/AppPaths.cpp
 )
 target_include_directories(test_plugin_engine PRIVATE src)
@@ -546,7 +564,7 @@ target_compile_definitions(test_plugin_engine PRIVATE
     ENSEMBLE_LOCALVERSION="${ENSEMBLE_LOCALVERSION}"
     ENSEMBLE_GIT_DIRTY="${ENSEMBLE_GIT_DIRTY}"
 )
-target_link_libraries(test_plugin_engine PRIVATE Qt6::Core Qt6::Gui)
+target_link_libraries(test_plugin_engine PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
 if(WIN32)
     target_link_libraries(test_plugin_engine PRIVATE ws2_32)
 endif()

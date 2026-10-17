@@ -1,5 +1,6 @@
 #pragma once
 
+#include "PluginPermissions.h"
 #include "ResourceGuard.h"
 #include "ScriptValue.h"
 #include <QList>
@@ -15,12 +16,19 @@ struct EditorCallbacks {
     std::function<QString()> getSelection;
     std::function<void(const QString &)> replaceSelection;
     std::function<QString()> getChapterTitle;
+    std::function<int()> getChapterCount;
+    std::function<QList<QVariantMap>()> getAllChapters;
+    std::function<QVariantMap(int index)> getChapter;
+    std::function<void(const QString &)> insertText;
+    std::function<void(const QString &)> setChapterText;
+    std::function<int()> getWordCount;
 };
 
 struct StatusCallbacks {
     std::function<void(const QString &pluginId, const QString &msg, int line)> onWarn;
     std::function<void(const QString &pluginId, const QString &msg, int line)> onError;
     std::function<void(const QString &pluginId, const QString &msg)> onNotify;
+    std::function<void(const QString &pluginId, const QString &reason, int line)> onQuarantine;
 };
 
 struct InterPluginCallbacks {
@@ -29,9 +37,16 @@ struct InterPluginCallbacks {
     std::function<bool(const QString &senderId, const QString &targetId, const QString &payload)> sendMessage;
 };
 
+struct UiCallbacks {
+    std::function<void(const QString &winId, const QString &title, int w, int h)> createWindow;
+    std::function<void(const QString &winId, const QString &type, const QVariantMap &props)> addWidget;
+    std::function<void(const QString &winId)> showWindow;
+    std::function<void(const QString &winId)> closeWindow;
+};
+
 /**
  * @brief Manages plugin identity (public_id vs secret_uidp), storage sandboxing,
- * and binding host connectors to the DSL scripting environment.
+ * permissions enforcement, audit logging, and binding host connectors to DSL.
  */
 class PluginSandbox {
 public:
@@ -47,15 +62,24 @@ public:
     // Strictly internal to C++ host! NEVER exposed to script environment.
     const QString &secretUidp() const noexcept { return m_secretUidp; }
 
+    bool isQuarantined() const noexcept { return m_quarantined; }
+    void setQuarantined(bool q) noexcept { m_quarantined = q; }
+
+    const PluginPermissions &permissions() const noexcept { return m_permissions; }
+    void setPermissions(const PluginPermissions &perms) { m_permissions = perms; }
+
     void setEditorCallbacks(EditorCallbacks callbacks) { m_editorCallbacks = std::move(callbacks); }
     void setStatusCallbacks(StatusCallbacks callbacks) { m_statusCallbacks = std::move(callbacks); }
     void setInterPluginCallbacks(InterPluginCallbacks callbacks) { m_pluginCallbacks = std::move(callbacks); }
+    void setUiCallbacks(UiCallbacks callbacks) { m_uiCallbacks = std::move(callbacks); }
 
     // Host connectors exposed to DSL
     ScriptValue createEditorNamespace(ResourceGuard &guard);
     ScriptValue createStorageNamespace(ResourceGuard &guard);
     ScriptValue createStatusNamespace(ResourceGuard &guard);
     ScriptValue createPluginsNamespace(ResourceGuard &guard);
+    ScriptValue createHttpNamespace(ResourceGuard &guard);
+    ScriptValue createUiNamespace(ResourceGuard &guard);
 
     // Direct storage operations with strict path-traversal & quota checks
     QString storageRead(const QString &key, int line = -1, int col = -1);
@@ -75,9 +99,13 @@ private:
     QString m_version;
     QString m_secretUidp; // Strictly private UUID token
 
+    PluginPermissions m_permissions;
+    bool m_quarantined = false;
+
     EditorCallbacks m_editorCallbacks;
     StatusCallbacks m_statusCallbacks;
     InterPluginCallbacks m_pluginCallbacks;
+    UiCallbacks m_uiCallbacks;
 };
 
 } // namespace EnsemblePlugin

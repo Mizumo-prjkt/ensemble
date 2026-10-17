@@ -54,6 +54,7 @@ public:
     void dispatchChapterChange(const QString &title, const QString &text, int chapterIndex);
     void dispatchToolbarClick(const QString &actionName);
     void dispatchMessage(const QString &senderId, const QString &payload);
+    void dispatchWindowAction(const QString &winId, const QString &actionName, const QVariantMap &inputs = QVariantMap());
 
     bool hasToolbarHook(const QString &actionName) const;
     QStringList registeredToolbarActions() const;

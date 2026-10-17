@@ -852,38 +852,48 @@ void HelpGuideDialog::populateTopics()
         m_topics.append(t);
     }
 
-    // 18. [Beta] Sandboxed Scripting Plugins (DSL)
+    // 18. [Beta] Sandboxed Scripting Plugins (.er)
     {
         HelpTopic t;
         t.id = QStringLiteral("plugins_dsl");
         t.icon = QStringLiteral("🧩");
-        t.title = QStringLiteral("[Beta] Sandboxed Scripting Plugins");
-        t.summary = QStringLiteral("Custom memory-bounded Python-like DSL interpreter running in isolated worker threads");
+        t.title = QStringLiteral("[Beta] Sandboxed Scripting Plugins (.er)");
+        t.summary = QStringLiteral("Memory-bounded DSL (.er) with granular permissions, HTTPS enforcement, anti-diversion quarantine, and UI compositing");
         t.contentHtml = QStringLiteral(
-            "<h2>🧩 [Beta] Sandboxed Scripting Engine</h2>"
-            "<p>Ensemble includes a custom, memory-bounded, Python-like Domain-Specific Language (DSL) and Tree-Walking AST interpreter designed specifically for running third-party plugins safely.</p>"
+            "<h2>🧩 [Beta] Sandboxed Scripting Engine (.er)</h2>"
+            "<p>Ensemble includes a custom, memory-bounded, Python-like Domain-Specific Language (DSL) and Tree-Walking AST interpreter designed for running third-party plugins (<b><code>.er</code></b>, Ensemble Runner scripts) safely without freezing the UI or corrupting user files.</p>"
             "<div class='callout-note'>"
-            "  <b>🔒 Strict Sandboxing &amp; Host Protection:</b>"
+            "  <b>🔒 Strict Sandboxing &amp; Security Architecture:</b>"
             "  <ul>"
-            "    <li><b>No Native Shared Objects:</b> Does not embed CPython, Lua, or dynamic libraries (<code>.so</code> / <code>.dll</code>). Zero risk of native memory corruption.</li>"
-            "    <li><b>Worker Thread Isolation:</b> Every plugin executes in its own dedicated background <code>QThread</code>. The UI thread never blocks or freezes.</li>"
-            "    <li><b>Memory Cap (8 MB):</b> Every string, list, and dictionary allocation is guarded. Exceeding 8 MB immediately traps the plugin before allocation.</li>"
-            "    <li><b>Execution Watchdog:</b> Limits execution to 150,000 AST steps and 250ms per hook, preventing infinite loops.</li>"
-            "    <li><b>Call Stack Depth (64 frames):</b> Strict recursion limit prevents C++ stack overflows.</li>"
-            "    <li><b>Opaque Storage UIDP:</b> Plugins use a strictly host-private UUID token for isolated key-value storage (5 MB quota) with complete path traversal protection.</li>"
+            "    <li><b>Ensemble Runner Scripts (<code>.er</code>):</b> Plugins are authored in clean, Python-syntax <code>.er</code> files placed in <code>~/.local/share/Ensemble/plugins/</code>.</li>"
+            "    <li><b>Worker Thread Isolation:</b> Every plugin executes inside its own dedicated background <code>QThread</code>. Zero GUI pointers or raw memory are shared across threads.</li>"
+            "    <li><b>Resource Quotas:</b> 8 MB memory cap per plugin, 150,000 AST execution steps / 250ms watchdog per hook, and 64-frame call stack depth cap.</li>"
+            "    <li><b>Granular Permissions (Allow/Deny):</b> Control which features a plugin can access: Editor Read, Editor Write, Local Storage, UI Windows, and Network Access.</li>"
+            "    <li><b>Strict HTTPS Enforcement:</b> All outbound plugin communications are mediated by Ensemble and must strictly use <code>https://</code>. Unencrypted HTTP or downgrade attempts are rejected with security violations.</li>"
+            "    <li><b>Anti-Diversion / Redirection Quarantine:</b> Any attempt by a remote website or redirect to redivert plugin traffic triggers immediate forceful shutdown and quarantine with an incident report prompt for Ensemble devs.</li>"
+            "    <li><b>Opaque Storage Tokens:</b> Private UUID storage tokens prevent scripts from escaping their 5 MB key-value directory.</li>"
+            "    <li><b>Complete Audit Logging:</b> All plugin events, network requests, UI window creations, and blocked security attempts are recorded in <code>plugin_activity.log</code>.</li>"
             "  </ul>"
             "</div>"
             "<h3>Exposed Host Namespaces</h3>"
             "<ul>"
             "  <li><code>editor.get_chapter_text()</code>: Returns the active chapter's plain text.</li>"
-            "  <li><code>editor.get_selection()</code>: Returns the currently highlighted text.</li>"
-            "  <li><code>editor.replace_selection(new_text)</code>: Replaces the selection and pushes onto the editor undo stack (<kbd>Ctrl+Z</kbd>).</li>"
-            "  <li><code>editor.get_chapter_title()</code>: Returns the active chapter's title.</li>"
-            "  <li><code>storage.read(key)</code> / <code>storage.write(key, val)</code> / <code>storage.delete(key)</code> / <code>storage.list_keys()</code>: Persistent 5 MB isolated storage.</li>"
-            "  <li><code>status.warn(msg, line)</code> / <code>status.error(msg, line)</code> / <code>status.notify(msg)</code>: Status bar and gutter alerts.</li>"
-            "  <li><code>plugins.list()</code> / <code>plugins.is_active(id)</code> / <code>plugins.send_message(id, payload)</code>: Safe inter-plugin communication.</li>"
+            "  <li><code>editor.get_selection()</code>: Returns currently highlighted text in the editor.</li>"
+            "  <li><code>editor.get_chapter_title()</code>: Returns the current chapter title.</li>"
+            "  <li><code>editor.get_chapter_count()</code>: Returns the total number of chapters in the project.</li>"
+            "  <li><code>editor.get_all_chapters()</code>: Returns a list of dictionaries with <code>index</code>, <code>title</code>, and <code>text</code> for all chapters.</li>"
+            "  <li><code>editor.get_chapter(index)</code>: Returns metadata and text for a specific chapter index.</li>"
+            "  <li><code>editor.get_word_count()</code>: Returns the active chapter word count.</li>"
+            "  <li><code>editor.replace_selection(new_text)</code>: Replaces the selection (requires Editor Write permission, pushes to Undo stack).</li>"
+            "  <li><code>editor.insert_text(text)</code>: Inserts text at the cursor position (requires Editor Write permission).</li>"
+            "  <li><code>editor.set_chapter_text(text)</code>: Replaces the current chapter's entire content.</li>"
+            "  <li><code>http.get(url, headers={})</code> / <code>http.post(url, data=\"\", headers={})</code>: Mediated HTTPS requests subject to domain whitelist policies.</li>"
+            "  <li><code>ui.create_window(title, width=450, height=320)</code>: Creates an isolated declarative dialog window with <code>add_label</code>, <code>add_text</code>, <code>add_input</code>, and <code>add_button</code>.</li>"
+            "  <li><code>storage.read(key)</code> / <code>storage.write(key, val)</code> / <code>storage.delete(key)</code> / <code>storage.list_keys()</code>: Private 5 MB persistent store.</li>"
+            "  <li><code>status.warn(msg, line)</code> / <code>status.error(msg, line)</code> / <code>status.notify(msg)</code>: Status bar notifications.</li>"
+            "  <li><code>plugins.list()</code> / <code>plugins.is_active(id)</code> / <code>plugins.send_message(id, payload)</code>: Safe inter-plugin messaging.</li>"
             "</ul>"
-            "<h3>Supported Decorator Hooks</h3>"
+            "<h3>Declarative UI &amp; Network Example (<code>dialogue_checker.er</code>)</h3>"
             "<pre><code># ID: author.dialogue-checker\n"
             "# Name: Dialogue Checker\n"
             "# Version: 1.0\n\n"
@@ -899,15 +909,17 @@ void HelpGuideDialog::populateTopics()
             "                count += 1\n"
             "        if count % 2 != 0:\n"
             "            unbalanced += 1\n"
-            "    if unbalanced > 0:\n"
-            "        status.warn(\"Dialogue check: found \" + str(unbalanced) + \" lines with unmatched quotes\", 1)\n"
-            "    else:\n"
-            "        status.notify(\"Dialogue check passed!\")\n\n"
+            "    # Create a native sandboxed dialog window\n"
+            "    win = ui.create_window(\"Dialogue Analysis\", 450, 300)\n"
+            "    win.add_label(\"Summary of quotation mark pairs:\")\n"
+            "    win.add_text(\"Lines with unmatched quotes: \" + str(unbalanced))\n"
+            "    win.add_button(\"Close\", \"close_window\")\n"
+            "    win.show()\n\n"
             "@on_chapter_change\n"
             "def on_load(title, text, index):\n"
-            "    status.notify(\"Loaded chapter: \" + title)</code></pre>"
+            "    status.notify(\"Inspecting chapter: \" + title)</code></pre>"
             "<div class='callout-tip'>"
-            "  <b>💡 Accessing the Plugin Manager:</b> Open <i>Tools → 🧩 [Beta] Plugin Manager…</i> (<kbd>Ctrl+Shift+U</kbd>) or Preferences to load scripts, toggle plugins, and run custom actions!"
+            "  <b>💡 Managing Plugins &amp; Permissions:</b> Open <i>Tools → 🧩 [Beta] Plugin Manager…</i> (<kbd>Ctrl+Shift+U</kbd>) to view detected endpoints, allow or deny individual web domains, inspect live audit logs, and uninstall or delete plugins."
             "</div>"
         );
         m_topics.append(t);
