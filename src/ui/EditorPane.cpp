@@ -1,5 +1,6 @@
 #include "EditorPane.h"
 #include "ImageEmbedDialog.h"
+#include "ToolbarIcons.h"
 
 #include "export/Ao3HtmlExporter.h"
 #include "export/Ao3HtmlImporter.h"
@@ -94,6 +95,8 @@ EditorPane::EditorPane(QWidget *parent)
     connect(m_spellTimer, &QTimer::timeout, this, &EditorPane::runSpellAndGrammarChecks);
 
     connect(m_editor->document(), &QTextDocument::contentsChanged, this, &EditorPane::onDocumentChanged);
+    connect(m_editor, &QTextEdit::cursorPositionChanged, this, &EditorPane::updateToolbarActiveStates);
+    connect(m_editor, &QTextEdit::currentCharFormatChanged, this, &EditorPane::updateToolbarActiveStates);
 
     updateTheme();
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this](AppTheme) {
@@ -108,27 +111,154 @@ void EditorPane::setupToolbar()
 {
     m_toolbar = new QToolBar(this);
     m_toolbar->setMovable(false);
+    m_toolbar->setIconSize(QSize(20, 20));
 
-    m_toolbar->addAction(QStringLiteral("B"), this, &EditorPane::onBold)->setShortcut(QKeySequence::Bold);
-    m_toolbar->addAction(QStringLiteral("I"), this, &EditorPane::onItalic)->setShortcut(QKeySequence::Italic);
-    m_toolbar->addAction(QStringLiteral("U"), this, &EditorPane::onUnderline)->setShortcut(QKeySequence::Underline);
-    m_toolbar->addAction(QStringLiteral("S"), this, &EditorPane::onStrikethrough);
+    m_boldAction = m_toolbar->addAction(QStringLiteral(""), this, &EditorPane::onBold);
+    m_boldAction->setToolTip(QStringLiteral("Bold (Ctrl+B)"));
+    m_boldAction->setShortcut(QKeySequence::Bold);
+    m_boldAction->setCheckable(true);
+
+    m_italicAction = m_toolbar->addAction(QStringLiteral(""), this, &EditorPane::onItalic);
+    m_italicAction->setToolTip(QStringLiteral("Italic (Ctrl+I)"));
+    m_italicAction->setShortcut(QKeySequence::Italic);
+    m_italicAction->setCheckable(true);
+
+    m_underlineAction = m_toolbar->addAction(QStringLiteral(""), this, &EditorPane::onUnderline);
+    m_underlineAction->setToolTip(QStringLiteral("Underline (Ctrl+U)"));
+    m_underlineAction->setShortcut(QKeySequence::Underline);
+    m_underlineAction->setCheckable(true);
+
+    m_strikeAction = m_toolbar->addAction(QStringLiteral(""), this, &EditorPane::onStrikethrough);
+    m_strikeAction->setToolTip(QStringLiteral("Strikethrough (<s>)"));
+    m_strikeAction->setCheckable(true);
+
     m_toolbar->addSeparator();
-    m_toolbar->addAction(QStringLiteral("H1"), this, [this]() { onHeading(1); });
-    m_toolbar->addAction(QStringLiteral("H2"), this, [this]() { onHeading(2); });
-    m_toolbar->addAction(QStringLiteral("H3"), this, [this]() { onHeading(3); });
-    m_toolbar->addAction(QStringLiteral("P"), this, &EditorPane::onParagraph);
+
+    m_h1Action = m_toolbar->addAction(QStringLiteral(""), this, [this]() { onHeading(1); });
+    m_h1Action->setToolTip(QStringLiteral("Heading 1 (<h1>)"));
+    m_h1Action->setCheckable(true);
+
+    m_h2Action = m_toolbar->addAction(QStringLiteral(""), this, [this]() { onHeading(2); });
+    m_h2Action->setToolTip(QStringLiteral("Heading 2 (<h2>)"));
+    m_h2Action->setCheckable(true);
+
+    m_h3Action = m_toolbar->addAction(QStringLiteral(""), this, [this]() { onHeading(3); });
+    m_h3Action->setToolTip(QStringLiteral("Heading 3 (<h3>)"));
+    m_h3Action->setCheckable(true);
+
+    m_paragraphAction = m_toolbar->addAction(QStringLiteral(""), this, &EditorPane::onParagraph);
+    m_paragraphAction->setToolTip(QStringLiteral("Paragraph (<p>)"));
+    m_paragraphAction->setCheckable(true);
+
     m_toolbar->addSeparator();
-    m_toolbar->addAction(QStringLiteral("\""), this, &EditorPane::onBlockquote);
-    m_toolbar->addAction(QStringLiteral("•"), this, &EditorPane::onBulletList);
-    m_toolbar->addAction(QStringLiteral("1."), this, &EditorPane::onNumberedList);
+
+    m_blockquoteAction = m_toolbar->addAction(QStringLiteral(""), this, &EditorPane::onBlockquote);
+    m_blockquoteAction->setToolTip(QStringLiteral("Blockquote (<blockquote>)"));
+    m_blockquoteAction->setCheckable(true);
+
+    m_bulletListAction = m_toolbar->addAction(QStringLiteral(""), this, &EditorPane::onBulletList);
+    m_bulletListAction->setToolTip(QStringLiteral("Bullet List (<ul>)"));
+    m_bulletListAction->setCheckable(true);
+
+    m_numberedListAction = m_toolbar->addAction(QStringLiteral(""), this, &EditorPane::onNumberedList);
+    m_numberedListAction->setToolTip(QStringLiteral("Numbered List (<ol>)"));
+    m_numberedListAction->setCheckable(true);
+
     m_toolbar->addSeparator();
-    m_toolbar->addAction(QStringLiteral("Link"), this, &EditorPane::onInsertLink);
-    QAction *imgAction = m_toolbar->addAction(QStringLiteral("🖼️ Image"), this, &EditorPane::onInsertImageEmbed);
-    imgAction->setToolTip(QStringLiteral("Insert Image Embed (AO3 URL Attachment) (Ctrl+Shift+M)"));
-    imgAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+M")));
-    m_toolbar->addAction(QStringLiteral("HR"), this, &EditorPane::onInsertHorizontalRule);
-    m_toolbar->addAction(QStringLiteral("</>"), this, &EditorPane::onCodeBlock);
+
+    m_linkAction = m_toolbar->addAction(QStringLiteral(""), this, &EditorPane::onInsertLink);
+    m_linkAction->setToolTip(QStringLiteral("Insert Link (<a>)"));
+    m_linkAction->setCheckable(true);
+
+    m_imageAction = m_toolbar->addAction(QStringLiteral(""), this, &EditorPane::onInsertImageEmbed);
+    m_imageAction->setToolTip(QStringLiteral("Insert Image Embed (AO3 URL Attachment) (Ctrl+Shift+M)"));
+    m_imageAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+M")));
+
+    m_hrAction = m_toolbar->addAction(QStringLiteral(""), this, &EditorPane::onInsertHorizontalRule);
+    m_hrAction->setToolTip(QStringLiteral("Horizontal Rule (<hr>)"));
+
+    m_codeAction = m_toolbar->addAction(QStringLiteral(""), this, &EditorPane::onCodeBlock);
+    m_codeAction->setToolTip(QStringLiteral("Code Block (<pre><code>)"));
+    m_codeAction->setCheckable(true);
+
+    updateToolbarIcons();
+}
+
+void EditorPane::updateToolbarIcons()
+{
+    const bool isDark = ThemeManager::instance().isDarkMode();
+    const QColor normalColor = isDark ? QColor(QStringLiteral("#cbd5e1")) : QColor(QStringLiteral("#334155"));
+    const QColor activeColor = QColor(QStringLiteral("#ffffff"));
+
+    if (m_boldAction) m_boldAction->setIcon(ToolbarIcons::bold(normalColor, activeColor));
+    if (m_italicAction) m_italicAction->setIcon(ToolbarIcons::italic(normalColor, activeColor));
+    if (m_underlineAction) m_underlineAction->setIcon(ToolbarIcons::underline(normalColor, activeColor));
+    if (m_strikeAction) m_strikeAction->setIcon(ToolbarIcons::strikethrough(normalColor, activeColor));
+
+    if (m_h1Action) m_h1Action->setIcon(ToolbarIcons::heading1(normalColor, activeColor));
+    if (m_h2Action) m_h2Action->setIcon(ToolbarIcons::heading2(normalColor, activeColor));
+    if (m_h3Action) m_h3Action->setIcon(ToolbarIcons::heading3(normalColor, activeColor));
+    if (m_paragraphAction) m_paragraphAction->setIcon(ToolbarIcons::paragraph(normalColor, activeColor));
+
+    if (m_blockquoteAction) m_blockquoteAction->setIcon(ToolbarIcons::blockquote(normalColor, activeColor));
+    if (m_bulletListAction) m_bulletListAction->setIcon(ToolbarIcons::bulletList(normalColor, activeColor));
+    if (m_numberedListAction) m_numberedListAction->setIcon(ToolbarIcons::numberedList(normalColor, activeColor));
+
+    if (m_linkAction) m_linkAction->setIcon(ToolbarIcons::link(normalColor, activeColor));
+    if (m_imageAction) m_imageAction->setIcon(ToolbarIcons::image(normalColor, activeColor));
+    if (m_hrAction) m_hrAction->setIcon(ToolbarIcons::horizontalRule(normalColor, activeColor));
+    if (m_codeAction) m_codeAction->setIcon(ToolbarIcons::code(normalColor, activeColor));
+}
+
+void EditorPane::updateToolbarActiveStates()
+{
+    if (!m_editor) return;
+
+    QTextCursor cursor = m_editor->textCursor();
+    QTextCharFormat charFmt = cursor.charFormat();
+    QTextBlockFormat blockFmt = cursor.blockFormat();
+
+    const bool isBold = (charFmt.fontWeight() == QFont::Bold || m_editor->fontWeight() == QFont::Bold);
+    if (m_boldAction && m_boldAction->isChecked() != isBold)
+        m_boldAction->setChecked(isBold);
+
+    const bool isItalic = (charFmt.fontItalic() || m_editor->fontItalic());
+    if (m_italicAction && m_italicAction->isChecked() != isItalic)
+        m_italicAction->setChecked(isItalic);
+
+    const bool isUnderline = (charFmt.fontUnderline() || m_editor->fontUnderline());
+    if (m_underlineAction && m_underlineAction->isChecked() != isUnderline)
+        m_underlineAction->setChecked(isUnderline);
+
+    const bool isStrike = charFmt.fontStrikeOut();
+    if (m_strikeAction && m_strikeAction->isChecked() != isStrike)
+        m_strikeAction->setChecked(isStrike);
+
+    const int h = blockFmt.headingLevel();
+    if (m_h1Action && m_h1Action->isChecked() != (h == 1))
+        m_h1Action->setChecked(h == 1);
+    if (m_h2Action && m_h2Action->isChecked() != (h == 2))
+        m_h2Action->setChecked(h == 2);
+    if (m_h3Action && m_h3Action->isChecked() != (h == 3))
+        m_h3Action->setChecked(h == 3);
+    if (m_paragraphAction && m_paragraphAction->isChecked() != (h == 0 && blockFmt.property(QTextFormat::BlockQuoteLevel).toInt() == 0))
+        m_paragraphAction->setChecked(h == 0 && blockFmt.property(QTextFormat::BlockQuoteLevel).toInt() == 0);
+
+    const bool isLink = charFmt.isAnchor();
+    if (m_linkAction && m_linkAction->isChecked() != isLink)
+        m_linkAction->setChecked(isLink);
+
+    const bool isQuote = blockFmt.property(QTextFormat::BlockQuoteLevel).toInt() > 0;
+    if (m_blockquoteAction && m_blockquoteAction->isChecked() != isQuote)
+        m_blockquoteAction->setChecked(isQuote);
+
+    QTextList *list = cursor.currentList();
+    const bool isBullet = (list && list->format().style() == QTextListFormat::ListDisc);
+    const bool isNumbered = (list && list->format().style() == QTextListFormat::ListDecimal);
+    if (m_bulletListAction && m_bulletListAction->isChecked() != isBullet)
+        m_bulletListAction->setChecked(isBullet);
+    if (m_numberedListAction && m_numberedListAction->isChecked() != isNumbered)
+        m_numberedListAction->setChecked(isNumbered);
 }
 
 QString EditorPane::currentHtml() const
@@ -194,6 +324,7 @@ void EditorPane::onBold()
     QTextCharFormat fmt;
     fmt.setFontWeight(m_editor->fontWeight() == QFont::Bold ? QFont::Normal : QFont::Bold);
     mergeCharFormat(fmt);
+    updateToolbarActiveStates();
 }
 
 void EditorPane::onItalic()
@@ -201,6 +332,7 @@ void EditorPane::onItalic()
     QTextCharFormat fmt;
     fmt.setFontItalic(!m_editor->fontItalic());
     mergeCharFormat(fmt);
+    updateToolbarActiveStates();
 }
 
 void EditorPane::onUnderline()
@@ -208,6 +340,7 @@ void EditorPane::onUnderline()
     QTextCharFormat fmt;
     fmt.setFontUnderline(!m_editor->fontUnderline());
     mergeCharFormat(fmt);
+    updateToolbarActiveStates();
 }
 
 void EditorPane::onStrikethrough()
@@ -216,13 +349,20 @@ void EditorPane::onStrikethrough()
     QTextCharFormat fmt;
     fmt.setFontStrikeOut(!current.fontStrikeOut());
     mergeCharFormat(fmt);
+    updateToolbarActiveStates();
 }
 
 void EditorPane::onHeading(int level)
 {
+    QTextCursor cursor = m_editor->textCursor();
     QTextBlockFormat fmt;
-    fmt.setHeadingLevel(level);
+    if (cursor.blockFormat().headingLevel() == level) {
+        fmt.setHeadingLevel(0);
+    } else {
+        fmt.setHeadingLevel(level);
+    }
     mergeBlockFormat(fmt);
+    updateToolbarActiveStates();
 }
 
 void EditorPane::onParagraph()
@@ -230,14 +370,24 @@ void EditorPane::onParagraph()
     QTextBlockFormat fmt;
     fmt.setHeadingLevel(0);
     fmt.setIndent(0);
+    fmt.setProperty(QTextFormat::BlockQuoteLevel, 0);
     mergeBlockFormat(fmt);
+    updateToolbarActiveStates();
 }
 
 void EditorPane::onBlockquote()
 {
+    QTextCursor cursor = m_editor->textCursor();
     QTextBlockFormat fmt;
-    fmt.setProperty(QTextFormat::BlockQuoteLevel, 1);
+    if (cursor.blockFormat().property(QTextFormat::BlockQuoteLevel).toInt() > 0) {
+        fmt.setProperty(QTextFormat::BlockQuoteLevel, 0);
+        fmt.setIndent(0);
+    } else {
+        fmt.setProperty(QTextFormat::BlockQuoteLevel, 1);
+        fmt.setIndent(1);
+    }
     mergeBlockFormat(fmt);
+    updateToolbarActiveStates();
 }
 
 void EditorPane::onBulletList()
@@ -246,6 +396,7 @@ void EditorPane::onBulletList()
     QTextListFormat listFmt;
     listFmt.setStyle(QTextListFormat::ListDisc);
     cursor.createList(listFmt);
+    updateToolbarActiveStates();
 }
 
 void EditorPane::onNumberedList()
@@ -254,6 +405,7 @@ void EditorPane::onNumberedList()
     QTextListFormat listFmt;
     listFmt.setStyle(QTextListFormat::ListDecimal);
     cursor.createList(listFmt);
+    updateToolbarActiveStates();
 }
 
 void EditorPane::onInsertLink()
@@ -669,6 +821,8 @@ void EditorPane::updateTheme()
     if (m_editor) {
         m_editor->setStyleSheet(ThemeManager::instance().getEditorPaneStyleSheet());
     }
+    updateToolbarIcons();
+    updateToolbarActiveStates();
 }
 
 void EditorPane::updateSettings()

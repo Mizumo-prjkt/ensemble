@@ -1,4 +1,5 @@
 build/
+CMakeFiles/
 cmake-build-*/
 CMakeUserPresets.json
 *.user

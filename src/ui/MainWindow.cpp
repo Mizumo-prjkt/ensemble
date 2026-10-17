@@ -172,40 +172,50 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // View -> Theme
   viewMenu->addSeparator();
   auto *themeMenu = viewMenu->addMenu(QStringLiteral("&Theme"));
+  m_lightThemeAction = themeMenu->addAction(QStringLiteral("☀️ &Light Mode"));
+  m_lightThemeAction->setCheckable(true);
+  m_lightThemeAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+1")));
+
   m_darkThemeAction = themeMenu->addAction(QStringLiteral("🌙 &Dark Mode"));
   m_darkThemeAction->setCheckable(true);
-  m_darkThemeAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+1")));
+  m_darkThemeAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+2")));
+
+  m_reversiThemeAction = themeMenu->addAction(QStringLiteral("🔴 AO3 &Reversi Mode"));
+  m_reversiThemeAction->setCheckable(true);
+  m_reversiThemeAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+3")));
 
   m_darkerThemeAction = themeMenu->addAction(QStringLiteral("🖤 &Darker Mode (OLED)"));
   m_darkerThemeAction->setCheckable(true);
-  m_darkerThemeAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+2")));
-
-  m_lightThemeAction = themeMenu->addAction(QStringLiteral("☀️ &Light Mode"));
-  m_lightThemeAction->setCheckable(true);
-  m_lightThemeAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+3")));
+  m_darkerThemeAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+4")));
 
   m_themeGroup = new QActionGroup(this);
-  m_themeGroup->addAction(m_darkThemeAction);
-  m_themeGroup->addAction(m_darkerThemeAction);
   m_themeGroup->addAction(m_lightThemeAction);
+  m_themeGroup->addAction(m_darkThemeAction);
+  m_themeGroup->addAction(m_reversiThemeAction);
+  m_themeGroup->addAction(m_darkerThemeAction);
 
   const AppTheme curTheme = ThemeManager::instance().currentTheme();
   if (curTheme == AppTheme::Dark) {
     m_darkThemeAction->setChecked(true);
   } else if (curTheme == AppTheme::Darker) {
     m_darkerThemeAction->setChecked(true);
+  } else if (curTheme == AppTheme::Ao3Reversi) {
+    m_reversiThemeAction->setChecked(true);
   } else {
     m_lightThemeAction->setChecked(true);
   }
 
+  connect(m_lightThemeAction, &QAction::triggered, this, []() {
+    ThemeManager::instance().setTheme(AppTheme::Light);
+  });
   connect(m_darkThemeAction, &QAction::triggered, this, []() {
     ThemeManager::instance().setTheme(AppTheme::Dark);
   });
+  connect(m_reversiThemeAction, &QAction::triggered, this, []() {
+    ThemeManager::instance().setTheme(AppTheme::Ao3Reversi);
+  });
   connect(m_darkerThemeAction, &QAction::triggered, this, []() {
     ThemeManager::instance().setTheme(AppTheme::Darker);
-  });
-  connect(m_lightThemeAction, &QAction::triggered, this, []() {
-    ThemeManager::instance().setTheme(AppTheme::Light);
   });
 
   auto *toggleThemeAction = viewMenu->addAction(QStringLiteral("Toggle &Theme"));
@@ -343,10 +353,16 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   connect(m_chapterSidebar, &ChapterSidebar::chaptersReordered, this,
           &MainWindow::onChaptersReordered);
 
-  if (m_editorPane && m_editorPane->editor())
+  if (m_editorPane && m_editorPane->editor()) {
     connect(m_editorPane->editor(), &QTextEdit::cursorPositionChanged, this, &MainWindow::updateCursorPosition);
-  if (m_htmlPane && m_htmlPane->editor())
+    connect(m_editorPane->editor(), &QTextEdit::selectionChanged, this, &MainWindow::updateStatusBar);
+    connect(m_editorPane->editor(), &QTextEdit::textChanged, this, &MainWindow::updateStatusBar);
+  }
+  if (m_htmlPane && m_htmlPane->editor()) {
     connect(m_htmlPane->editor(), &QPlainTextEdit::cursorPositionChanged, this, &MainWindow::updateCursorPosition);
+    connect(m_htmlPane->editor(), &QPlainTextEdit::selectionChanged, this, &MainWindow::updateStatusBar);
+    connect(m_htmlPane->editor(), &QPlainTextEdit::textChanged, this, &MainWindow::updateStatusBar);
+  }
   if (m_cssPane && m_cssPane->editor())
     connect(m_cssPane->editor(), &QPlainTextEdit::cursorPositionChanged, this, &MainWindow::updateCursorPosition);
 
@@ -1162,13 +1178,89 @@ void MainWindow::debouncedUpdatePreview() {
   }
 }
 
+static int countWordsInPlainText(const QString &text) {
+  if (text.trimmed().isEmpty())
+    return 0;
+  return text.split(QRegularExpression(QStringLiteral("[\\s\\x{2029}]+")), Qt::SkipEmptyParts).size();
+}
+
 void MainWindow::updateStatusBar() {
-  const Chapter *chapter = m_project.activeChapter();
-  const QString html = chapter ? chapter->html() : QString();
-  const int words =
-      html.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts)
-          .size();
-  statusBar()->showMessage(QStringLiteral("Words: ~%1").arg(words));
+  if (!m_wordCountLabel) return;
+
+  if (!m_hasActiveProject || m_project.chapters().isEmpty()) {
+    m_wordCountLabel->setText(QStringLiteral("Words: 0 (Total: 0)"));
+    return;
+  }
+
+  // 1. Calculate active chapter words and current selection words
+  int chapterWords = 0;
+  int selWords = 0;
+
+  if (m_editorTabs && m_editorTabs->currentIndex() == 1 && m_htmlPane && m_htmlPane->editor()) {
+    // Raw HTML editing tab
+    QTextDocument doc;
+    doc.setHtml(m_htmlPane->editor()->toPlainText());
+    chapterWords = countWordsInPlainText(doc.toPlainText());
+
+    QTextCursor cur = m_htmlPane->editor()->textCursor();
+    if (cur.hasSelection()) {
+      QTextDocument selDoc;
+      selDoc.setHtml(cur.selectedText());
+      selWords = countWordsInPlainText(selDoc.toPlainText());
+    }
+  } else if (m_editorPane && m_editorPane->editor()) {
+    // Rich text editor tab
+    const QString plainText = m_editorPane->editor()->toPlainText();
+    chapterWords = countWordsInPlainText(plainText);
+
+    QTextCursor cur = m_editorPane->editor()->textCursor();
+    if (cur.hasSelection()) {
+      selWords = countWordsInPlainText(cur.selectedText());
+    }
+  } else {
+    const Chapter *ch = m_project.activeChapter();
+    if (ch) {
+      QTextDocument doc;
+      doc.setHtml(ch->html());
+      chapterWords = countWordsInPlainText(doc.toPlainText());
+    }
+  }
+
+  // 2. Calculate total work words across all chapters
+  int totalWords = 0;
+  const int activeIdx = m_project.activeChapterIndex();
+  const auto &chapters = m_project.chapters();
+
+  for (int i = 0; i < chapters.size(); ++i) {
+    if (i == activeIdx) {
+      totalWords += chapterWords;
+    } else {
+      QTextDocument doc;
+      doc.setHtml(chapters.at(i).html());
+      totalWords += countWordsInPlainText(doc.toPlainText());
+    }
+  }
+
+  // 3. Format exact word count with locale thousands separator (no tilde)
+  const QLocale locale;
+  QString text;
+  if (selWords > 0) {
+    text = QStringLiteral("Words: %1 selected of %2 (Total: %3)")
+        .arg(locale.toString(selWords),
+             locale.toString(chapterWords),
+             locale.toString(totalWords));
+  } else {
+    text = QStringLiteral("Words: %1 (Total: %2)")
+        .arg(locale.toString(chapterWords),
+             locale.toString(totalWords));
+  }
+
+  m_wordCountLabel->setText(text);
+
+  // Clear obsolete temporary Words: message from status bar if present
+  if (statusBar()->currentMessage().startsWith(QStringLiteral("Words:"))) {
+    statusBar()->clearMessage();
+  }
 }
 
 void MainWindow::updateWindowTitle() {
@@ -1336,6 +1428,10 @@ QWidget *MainWindow::activeTextEditor() const {
 void MainWindow::setupStatusBar() {
   QStatusBar *sb = statusBar();
   sb->setStyleSheet(ThemeManager::instance().getStatusBarStyleSheet());
+
+  m_wordCountLabel = new QLabel(QStringLiteral("Words: 0 (Total: 0)"), this);
+  m_wordCountLabel->setToolTip(QStringLiteral("Exact Chapter Words, Total Work Words, and Selection Count"));
+  sb->addWidget(m_wordCountLabel);
 
   m_statusInfoLabel = new QLabel(QStringLiteral("Ready"), this);
   sb->addWidget(m_statusInfoLabel, 1);
@@ -1731,9 +1827,14 @@ void MainWindow::onThemeChanged(AppTheme theme) {
   if (m_darkThemeAction) m_darkThemeAction->setChecked(theme == AppTheme::Dark);
   if (m_darkerThemeAction) m_darkerThemeAction->setChecked(theme == AppTheme::Darker);
   if (m_lightThemeAction) m_lightThemeAction->setChecked(theme == AppTheme::Light);
+  if (m_reversiThemeAction) m_reversiThemeAction->setChecked(theme == AppTheme::Ao3Reversi);
 
   const bool isDark = ThemeManager::instance().isDarkMode();
 
+  if (m_wordCountLabel) {
+    m_wordCountLabel->setStyleSheet(isDark ? QStringLiteral("color: #f1f5f9; font-size: 11px; font-weight: 600; padding: 2px 6px;")
+                                           : QStringLiteral("color: #0f172a; font-size: 11px; font-weight: 600; padding: 2px 6px;"));
+  }
   if (m_statusInfoLabel) {
     m_statusInfoLabel->setStyleSheet(isDark ? QStringLiteral("color: #aeb3c6; font-size: 11px;")
                                            : QStringLiteral("color: #475569; font-size: 11px;"));
@@ -1752,12 +1853,25 @@ void MainWindow::onThemeChanged(AppTheme theme) {
     ));
   }
   if (m_themeToggleButton) {
-    m_themeToggleButton->setText(isDark ? QStringLiteral("🌙") : QStringLiteral("☀️"));
+    if (theme == AppTheme::Light) {
+      m_themeToggleButton->setText(QStringLiteral("☀️ Light"));
+      m_themeToggleButton->setToolTip(QStringLiteral("Current Theme: Light. Click to toggle (Light -> Dark -> AO3 Reversi)"));
+    } else if (theme == AppTheme::Dark) {
+      m_themeToggleButton->setText(QStringLiteral("🌙 Dark"));
+      m_themeToggleButton->setToolTip(QStringLiteral("Current Theme: Dark. Click to toggle (Light -> Dark -> AO3 Reversi)"));
+    } else if (theme == AppTheme::Ao3Reversi) {
+      m_themeToggleButton->setText(QStringLiteral("🔴 Reversi"));
+      m_themeToggleButton->setToolTip(QStringLiteral("Current Theme: AO3 Reversi. Click to toggle (Light -> Dark -> AO3 Reversi)"));
+    } else {
+      m_themeToggleButton->setText(QStringLiteral("🖤 OLED"));
+      m_themeToggleButton->setToolTip(QStringLiteral("Current Theme: Darker (OLED). Click to toggle."));
+    }
+
     m_themeToggleButton->setStyleSheet(isDark ? QStringLiteral(
-        "QPushButton { color: #f8f8f2; padding: 2px 6px; font-size: 12px; border: none; }"
+        "QPushButton { color: #f8f8f2; padding: 2px 8px; font-size: 11px; font-weight: 600; border: none; }"
         "QPushButton:hover { background-color: #282a36; border-radius: 3px; }"
     ) : QStringLiteral(
-        "QPushButton { color: #0f172a; padding: 2px 6px; font-size: 12px; border: none; }"
+        "QPushButton { color: #0f172a; padding: 2px 8px; font-size: 11px; font-weight: 600; border: none; }"
         "QPushButton:hover { background-color: #e2e8f0; border-radius: 3px; }"
     ));
   }
@@ -1778,6 +1892,12 @@ void MainWindow::onThemeChanged(AppTheme theme) {
   }
   if (m_cssPane) {
     m_cssPane->updateTheme();
+  }
+  if (m_previewPane) {
+    m_previewPane->updateTheme();
+  }
+  if (m_previewPopup) {
+    m_previewPopup->updateTheme();
   }
   if (m_settingsDialog) {
     m_settingsDialog->updateTheme();

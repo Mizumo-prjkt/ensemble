@@ -8,7 +8,8 @@
 enum class AppTheme {
     Dark,
     Darker, // OLED deep black
-    Light
+    Light,
+    Ao3Reversi
 };
 
 enum class SkinFlavor {
@@ -27,8 +28,9 @@ public:
     static ThemeManager &instance();
 
     AppTheme currentTheme() const { return m_currentTheme; }
-    bool isDarkMode() const { return m_currentTheme == AppTheme::Dark || m_currentTheme == AppTheme::Darker; }
+    bool isDarkMode() const { return m_currentTheme == AppTheme::Dark || m_currentTheme == AppTheme::Darker || m_currentTheme == AppTheme::Ao3Reversi; }
     bool isOledMode() const { return m_currentTheme == AppTheme::Darker; }
+    bool isAo3Reversi() const { return m_currentTheme == AppTheme::Ao3Reversi; }
 
     void setTheme(AppTheme theme);
     void toggleTheme();

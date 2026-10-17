@@ -321,6 +321,8 @@ void ThemeManager::loadSettings()
         m_currentTheme = AppTheme::Darker;
     } else if (themeStr == QStringLiteral("light")) {
         m_currentTheme = AppTheme::Light;
+    } else if (themeStr == QStringLiteral("reversi") || themeStr == QStringLiteral("ao3reversi")) {
+        m_currentTheme = AppTheme::Ao3Reversi;
     } else {
         m_currentTheme = AppTheme::Dark;
     }
@@ -348,6 +350,8 @@ void ThemeManager::saveSettings()
         settings.setValue(QStringLiteral("theme"), QStringLiteral("darker"));
     } else if (m_currentTheme == AppTheme::Light) {
         settings.setValue(QStringLiteral("theme"), QStringLiteral("light"));
+    } else if (m_currentTheme == AppTheme::Ao3Reversi) {
+        settings.setValue(QStringLiteral("theme"), QStringLiteral("reversi"));
     } else {
         settings.setValue(QStringLiteral("theme"), QStringLiteral("dark"));
     }
@@ -410,12 +414,14 @@ void ThemeManager::setSkinFlavor(SkinFlavor flavor)
 
 void ThemeManager::toggleTheme()
 {
-    if (m_currentTheme == AppTheme::Dark) {
-        setTheme(AppTheme::Darker);
-    } else if (m_currentTheme == AppTheme::Darker) {
+    if (m_currentTheme == AppTheme::Light) {
+        setTheme(AppTheme::Dark);
+    } else if (m_currentTheme == AppTheme::Dark) {
+        setTheme(AppTheme::Ao3Reversi);
+    } else if (m_currentTheme == AppTheme::Ao3Reversi) {
         setTheme(AppTheme::Light);
     } else {
-        setTheme(AppTheme::Dark);
+        setTheme(AppTheme::Light);
     }
 }
 
@@ -552,6 +558,8 @@ QColor ThemeManager::windowBgColor() const
 {
     if (isOledMode())
         return QColor(QStringLiteral("#000000"));
+    if (isAo3Reversi())
+        return QColor(QStringLiteral("#111111"));
     if (m_skinFlavor == SkinFlavor::KdeUi)
         return isDarkMode() ? QColor(QStringLiteral("#232629")) : QColor(QStringLiteral("#eff0f1"));
     if (m_skinFlavor == SkinFlavor::StandardQt)
@@ -567,6 +575,8 @@ QColor ThemeManager::surfaceBgColor() const
 {
     if (isOledMode())
         return QColor(QStringLiteral("#08080a"));
+    if (isAo3Reversi())
+        return QColor(QStringLiteral("#1e1e1e"));
     if (m_skinFlavor == SkinFlavor::KdeUi)
         return isDarkMode() ? QColor(QStringLiteral("#2a2e32")) : QColor(QStringLiteral("#f7f7f7"));
     if (m_skinFlavor == SkinFlavor::StandardQt)
@@ -582,6 +592,8 @@ QColor ThemeManager::cardBgColor() const
 {
     if (isOledMode())
         return QColor(QStringLiteral("#101014"));
+    if (isAo3Reversi())
+        return QColor(QStringLiteral("#262626"));
     if (m_skinFlavor == SkinFlavor::KdeUi)
         return isDarkMode() ? QColor(QStringLiteral("#31363b")) : QColor(QStringLiteral("#ffffff"));
     if (m_skinFlavor == SkinFlavor::StandardQt)
@@ -597,6 +609,8 @@ QColor ThemeManager::primaryTextColor() const
 {
     if (isOledMode())
         return QColor(QStringLiteral("#ffffff"));
+    if (isAo3Reversi())
+        return QColor(QStringLiteral("#eeeeee"));
     return isDarkMode() ? QColor(QStringLiteral("#f8f8f2")) : QColor(QStringLiteral("#0f172a"));
 }
 
@@ -604,11 +618,15 @@ QColor ThemeManager::mutedTextColor() const
 {
     if (isOledMode())
         return QColor(QStringLiteral("#a1a1aa"));
+    if (isAo3Reversi())
+        return QColor(QStringLiteral("#aaaaaa"));
     return isDarkMode() ? QColor(QStringLiteral("#94a3b8")) : QColor(QStringLiteral("#334155"));
 }
 
 QColor ThemeManager::accentColor() const
 {
+    if (isAo3Reversi())
+        return QColor(QStringLiteral("#990000")); // AO3 signature red
     if (m_skinFlavor == SkinFlavor::MaterialYou && m_materialYouAccentColor.isValid())
         return m_materialYouAccentColor;
     if (m_skinFlavor == SkinFlavor::KdeUi)
@@ -621,6 +639,8 @@ QColor ThemeManager::accentColor() const
 
 QColor ThemeManager::accentHoverColor() const
 {
+    if (isAo3Reversi())
+        return QColor(QStringLiteral("#b30000"));
     if (m_skinFlavor == SkinFlavor::MaterialYou && m_materialYouAccentColor.isValid())
         return isDarkMode() ? m_materialYouAccentColor.lighter(118) : m_materialYouAccentColor.darker(115);
     if (m_skinFlavor == SkinFlavor::KdeUi)
@@ -635,6 +655,8 @@ QColor ThemeManager::borderColor() const
 {
     if (isOledMode())
         return QColor(QStringLiteral("#202026"));
+    if (isAo3Reversi())
+        return QColor(QStringLiteral("#383838"));
     if (m_skinFlavor == SkinFlavor::KdeUi)
         return isDarkMode() ? QColor(QStringLiteral("#31363b")) : QColor(QStringLiteral("#bdc3c7"));
     if (m_skinFlavor == SkinFlavor::StandardQt)
@@ -645,6 +667,8 @@ QColor ThemeManager::borderColor() const
 
 QColor ThemeManager::selectionBgColor() const
 {
+    if (isAo3Reversi())
+        return QColor(QStringLiteral("#591a1a"));
     if (m_skinFlavor == SkinFlavor::MaterialYou && m_materialYouAccentColor.isValid()) {
         QColor sel = m_materialYouAccentColor;
         return isDarkMode() ? sel : (sel.value() > 180 ? sel.darker(120) : sel);
@@ -659,7 +683,7 @@ QColor ThemeManager::selectionBgColor() const
 
 QString ThemeManager::getEditorPaneStyleSheet() const
 {
-    const QString bg = isOledMode() ? QStringLiteral("#050505") : (isDarkMode() ? QStringLiteral("#181920") : QStringLiteral("#ffffff"));
+    const QString bg = isOledMode() ? QStringLiteral("#050505") : (isAo3Reversi() ? QStringLiteral("#181818") : (isDarkMode() ? QStringLiteral("#181920") : QStringLiteral("#ffffff")));
     const QString text = primaryTextColor().name();
     const QString border = borderColor().name();
     const QString selBg = selectionBgCss();
@@ -680,7 +704,7 @@ QString ThemeManager::getEditorPaneStyleSheet() const
 
 QString ThemeManager::getCodeEditorStyleSheet() const
 {
-    const QString bg = isOledMode() ? QStringLiteral("#000000") : (isDarkMode() ? QStringLiteral("#14151a") : QStringLiteral("#ffffff"));
+    const QString bg = isOledMode() ? QStringLiteral("#000000") : (isAo3Reversi() ? QStringLiteral("#141414") : (isDarkMode() ? QStringLiteral("#14151a") : QStringLiteral("#ffffff")));
     const QString text = primaryTextColor().name();
     const QString border = borderColor().name();
     const QString selBg = selectionBgCss();
@@ -702,36 +726,43 @@ QString ThemeManager::getCodeEditorStyleSheet() const
 // Syntax highlighting colors
 QColor ThemeManager::syntaxTagColor() const
 {
+    if (isAo3Reversi()) return QColor(QStringLiteral("#e25f5f"));
     return isDarkMode() ? QColor(QStringLiteral("#569CD6")) : QColor(QStringLiteral("#0969da"));
 }
 
 QColor ThemeManager::syntaxAttributeColor() const
 {
+    if (isAo3Reversi()) return QColor(QStringLiteral("#e5c07b"));
     return isDarkMode() ? QColor(QStringLiteral("#9CDCFE")) : QColor(QStringLiteral("#953800"));
 }
 
 QColor ThemeManager::syntaxValueColor() const
 {
+    if (isAo3Reversi()) return QColor(QStringLiteral("#98c379"));
     return isDarkMode() ? QColor(QStringLiteral("#CE9178")) : QColor(QStringLiteral("#0a3069"));
 }
 
 QColor ThemeManager::syntaxCommentColor() const
 {
+    if (isAo3Reversi()) return QColor(QStringLiteral("#7f848e"));
     return isDarkMode() ? QColor(QStringLiteral("#6A9955")) : QColor(QStringLiteral("#6e7781"));
 }
 
 QColor ThemeManager::syntaxEntityColor() const
 {
+    if (isAo3Reversi()) return QColor(QStringLiteral("#d19a66"));
     return isDarkMode() ? QColor(QStringLiteral("#DCDCAA")) : QColor(QStringLiteral("#8250df"));
 }
 
 QColor ThemeManager::syntaxSelectorColor() const
 {
+    if (isAo3Reversi()) return QColor(QStringLiteral("#e25f5f"));
     return isDarkMode() ? QColor(QStringLiteral("#D7BA7D")) : QColor(QStringLiteral("#116329"));
 }
 
 QColor ThemeManager::syntaxPropertyColor() const
 {
+    if (isAo3Reversi()) return QColor(QStringLiteral("#61afef"));
     return isDarkMode() ? QColor(QStringLiteral("#9CDCFE")) : QColor(QStringLiteral("#0550ae"));
 }
 

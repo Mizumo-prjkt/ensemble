@@ -66,6 +66,9 @@ public:
     void updateLoreGraphUi();
     LoreGraphDialog *loreGraphDialog() const { return m_loreGraphDialog; }
 
+public slots:
+    void updateStatusBar();
+
 protected:
     void closeEvent(QCloseEvent *event) override;
     void dragEnterEvent(QDragEnterEvent *event) override;
@@ -114,7 +117,6 @@ private slots:
 
     void debouncedSyncHtml();
     void debouncedUpdatePreview();
-    void updateStatusBar();
     void updateWindowTitle();
     void schedulePreviewUpdate();
     void onThemeChanged(AppTheme theme);
@@ -153,6 +155,7 @@ private:
     QAction *m_darkThemeAction = nullptr;
     QAction *m_darkerThemeAction = nullptr;
     QAction *m_lightThemeAction = nullptr;
+    QAction *m_reversiThemeAction = nullptr;
     QActionGroup *m_themeGroup = nullptr;
 
     AboutDialog *m_aboutDialog = nullptr;
@@ -176,6 +179,7 @@ private:
 
     QPushButton *m_problemsBadgeButton = nullptr;
     QPushButton *m_themeToggleButton = nullptr;
+    QLabel *m_wordCountLabel = nullptr;
     QLabel *m_statusInfoLabel = nullptr;
     QLabel *m_lineColLabel = nullptr;
     QPushButton *m_insertModeButton = nullptr;

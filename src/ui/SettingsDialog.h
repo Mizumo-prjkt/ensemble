@@ -60,6 +60,7 @@ private:
     QRadioButton *m_themeDarkRadio = nullptr;
     QRadioButton *m_themeDarkerRadio = nullptr; // OLED mode
     QRadioButton *m_themeLightRadio = nullptr;
+    QRadioButton *m_themeReversiRadio = nullptr;
     QButtonGroup *m_themeGroup = nullptr;
 
     QComboBox *m_skinFlavorCombo = nullptr;

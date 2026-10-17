@@ -30,6 +30,8 @@ public slots:
     void runSpellAndGrammarChecks();
     void updateTheme();
     void updateSettings();
+    void updateToolbarActiveStates();
+    void updateToolbarIcons();
 
 signals:
     void contentChanged();
@@ -72,4 +74,20 @@ private:
     QString m_customCss;
     QStringList m_availableCssClasses;
     bool m_blockChanges = false;
+
+    QAction *m_boldAction = nullptr;
+    QAction *m_italicAction = nullptr;
+    QAction *m_underlineAction = nullptr;
+    QAction *m_strikeAction = nullptr;
+    QAction *m_h1Action = nullptr;
+    QAction *m_h2Action = nullptr;
+    QAction *m_h3Action = nullptr;
+    QAction *m_paragraphAction = nullptr;
+    QAction *m_blockquoteAction = nullptr;
+    QAction *m_bulletListAction = nullptr;
+    QAction *m_numberedListAction = nullptr;
+    QAction *m_linkAction = nullptr;
+    QAction *m_imageAction = nullptr;
+    QAction *m_hrAction = nullptr;
+    QAction *m_codeAction = nullptr;
 };

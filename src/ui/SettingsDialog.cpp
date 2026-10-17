@@ -137,17 +137,22 @@ QWidget *SettingsDialog::createGeneralTab()
         QStringLiteral("🖤  Darker (OLED pure black #000000 background)"), themeGroup);
     m_themeLightRadio = new QRadioButton(
         QStringLiteral("☀️  Light (Clean high-contrast bright theme)"), themeGroup);
+    m_themeReversiRadio = new QRadioButton(
+        QStringLiteral("🔴  AO3 Reversi (Official AO3 dark crimson theme)"), themeGroup);
 
     m_themeGroup = new QButtonGroup(this);
     m_themeGroup->addButton(m_themeDarkRadio, static_cast<int>(AppTheme::Dark));
     m_themeGroup->addButton(m_themeDarkerRadio, static_cast<int>(AppTheme::Darker));
     m_themeGroup->addButton(m_themeLightRadio, static_cast<int>(AppTheme::Light));
+    m_themeGroup->addButton(m_themeReversiRadio, static_cast<int>(AppTheme::Ao3Reversi));
 
     AppTheme curTheme = ThemeManager::instance().currentTheme();
     if (curTheme == AppTheme::Dark) {
         m_themeDarkRadio->setChecked(true);
     } else if (curTheme == AppTheme::Darker) {
         m_themeDarkerRadio->setChecked(true);
+    } else if (curTheme == AppTheme::Ao3Reversi) {
+        m_themeReversiRadio->setChecked(true);
     } else {
         m_themeLightRadio->setChecked(true);
     }
@@ -155,10 +160,12 @@ QWidget *SettingsDialog::createGeneralTab()
     connect(m_themeDarkRadio, &QRadioButton::toggled, this, &SettingsDialog::onThemeSelectionChanged);
     connect(m_themeDarkerRadio, &QRadioButton::toggled, this, &SettingsDialog::onThemeSelectionChanged);
     connect(m_themeLightRadio, &QRadioButton::toggled, this, &SettingsDialog::onThemeSelectionChanged);
+    connect(m_themeReversiRadio, &QRadioButton::toggled, this, &SettingsDialog::onThemeSelectionChanged);
 
-    themeLayout->addWidget(m_themeDarkRadio);
-    themeLayout->addWidget(m_themeDarkerRadio);
     themeLayout->addWidget(m_themeLightRadio);
+    themeLayout->addWidget(m_themeDarkRadio);
+    themeLayout->addWidget(m_themeReversiRadio);
+    themeLayout->addWidget(m_themeDarkerRadio);
     layout->addWidget(themeGroup);
 
     // --- Section 2: Skin Flavor ---
@@ -710,6 +717,8 @@ void SettingsDialog::onThemeSelectionChanged()
         ThemeManager::instance().setTheme(AppTheme::Darker);
     } else if (m_themeLightRadio && m_themeLightRadio->isChecked()) {
         ThemeManager::instance().setTheme(AppTheme::Light);
+    } else if (m_themeReversiRadio && m_themeReversiRadio->isChecked()) {
+        ThemeManager::instance().setTheme(AppTheme::Ao3Reversi);
     }
 }
 

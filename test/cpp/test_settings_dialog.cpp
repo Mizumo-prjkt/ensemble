@@ -2,6 +2,7 @@
 #include "ui/SettingsDialog.h"
 #include "ui/HelpGuideDialog.h"
 #include "ui/MainMenuWindow.h"
+#include "ui/ToolbarIcons.h"
 #include "utils/SingleInstanceManager.h"
 #include "mcp/McpServer.h"
 #include "mcp/McpAgentInstaller.h"
@@ -73,6 +74,48 @@ int main(int argc, char *argv[])
     assert(tm.primaryTextColor() == QColor("#0f172a"));
     assert(tm.mutedTextColor() == QColor("#334155"));
     std::cout << "✓ Light mode high-contrast primary (#0f172a) and muted (#334155) text verified." << std::endl;
+
+    // Test AO3 Reversi theme
+    tm.setTheme(AppTheme::Ao3Reversi);
+    assert(tm.currentTheme() == AppTheme::Ao3Reversi);
+    assert(tm.isDarkMode() == true);
+    assert(tm.isAo3Reversi() == true);
+    assert(tm.accentColor() == QColor("#990000"));
+    assert(tm.windowBgColor() == QColor("#111111"));
+    std::cout << "✓ AO3 Reversi theme verified (#111111 background, #990000 crimson accent)." << std::endl;
+
+    // Test global theme toggle cycle (Light -> Dark -> Ao3Reversi -> Light)
+    tm.setTheme(AppTheme::Light);
+    tm.toggleTheme();
+    assert(tm.currentTheme() == AppTheme::Dark);
+    tm.toggleTheme();
+    assert(tm.currentTheme() == AppTheme::Ao3Reversi);
+    tm.toggleTheme();
+    assert(tm.currentTheme() == AppTheme::Light);
+    std::cout << "✓ Global theme toggle cycle verified (Light -> Dark -> AO3 Reversi -> Light)." << std::endl;
+
+    // Test ToolbarIcons vector icon generation
+    {
+        const QColor normalColor("#334155");
+        const QColor activeColor("#ffffff");
+        assert(!ToolbarIcons::bold(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::italic(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::underline(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::strikethrough(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::heading1(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::heading2(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::heading3(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::paragraph(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::link(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::horizontalRule(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::blockquote(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::bulletList(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::numberedList(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::image(normalColor, activeColor).isNull());
+        assert(!ToolbarIcons::code(normalColor, activeColor).isNull());
+        std::cout << "✓ ToolbarIcons vector icon generation verified." << std::endl;
+    }
+
     tm.setTheme(AppTheme::Dark);
 
     // 3. Test SettingsDialog tabs and controls

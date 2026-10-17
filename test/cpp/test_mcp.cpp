@@ -3,10 +3,17 @@
 #include "mcp/McpAgentInstaller.h"
 #include "ui/MainWindow.h"
 #include "ui/AgentThoughtsDialog.h"
+#include "ui/PreviewPane.h"
+#include "ui/EditorPane.h"
 #include "model/Ao3Project.h"
 #include "export/Ao3HtmlSanitizer.h"
 
 #include <QApplication>
+#include <QLabel>
+#include <QStatusBar>
+#include <QToolBar>
+#include <QTextEdit>
+#include <QTextCursor>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -54,6 +61,99 @@ int main(int argc, char *argv[])
     assert(server->isRunning());
     assert(server->port() > 0);
     std::cout << "✓ MCP server running on port " << server->port() << std::endl;
+
+    // 1b. Test Word Count Breakdown on status bar (exact counts, no tilde, selection count)
+    {
+        mainWindow.updateStatusBar();
+        const auto labels = mainWindow.statusBar()->findChildren<QLabel *>();
+        bool foundWordCount = false;
+        for (QLabel *lbl : labels) {
+            if (lbl->text().startsWith(QStringLiteral("Words:"))) {
+                foundWordCount = true;
+                assert(!lbl->text().contains(QStringLiteral("~")));
+                assert(lbl->text().contains(QStringLiteral("Total:")));
+            }
+        }
+        assert(foundWordCount);
+
+        // Test with editor text and selection
+        auto *editorPane = mainWindow.findChild<EditorPane *>();
+        assert(editorPane != nullptr);
+        auto *editor = editorPane->editor();
+        assert(editor != nullptr);
+
+        editor->setPlainText(QStringLiteral("The quick brown fox jumps over the lazy dog."));
+        mainWindow.updateStatusBar();
+
+        bool verifiedWords = false;
+        for (QLabel *lbl : labels) {
+            if (lbl->text().startsWith(QStringLiteral("Words:"))) {
+                assert(lbl->text().contains(QStringLiteral("9")));
+                assert(!lbl->text().contains(QStringLiteral("~")));
+                verifiedWords = true;
+            }
+        }
+        assert(verifiedWords);
+
+        // Highlight 3 words ("The quick brown")
+        QTextCursor cur = editor->textCursor();
+        cur.setPosition(0);
+        cur.setPosition(15, QTextCursor::KeepAnchor);
+        editor->setTextCursor(cur);
+        mainWindow.updateStatusBar();
+
+        bool verifiedSelection = false;
+        for (QLabel *lbl : labels) {
+            if (lbl->text().startsWith(QStringLiteral("Words:"))) {
+                assert(lbl->text().contains(QStringLiteral("3 selected of 9")));
+                assert(!lbl->text().contains(QStringLiteral("~")));
+                verifiedSelection = true;
+            }
+        }
+        assert(verifiedSelection);
+        std::cout << "✓ Bottom-left status bar exact word count & selection breakdown verified." << std::endl;
+    }
+
+    // 1c. Test PreviewPane AO3 Default and AO3 Reversi background toggles
+    {
+        auto *preview = mainWindow.findChild<PreviewPane *>();
+        assert(preview != nullptr);
+        assert(preview->skinMode() == PreviewSkinMode::Ao3Default || preview->skinMode() == PreviewSkinMode::Ao3Reversi);
+
+        preview->setSkinMode(PreviewSkinMode::Ao3Reversi);
+        assert(preview->skinMode() == PreviewSkinMode::Ao3Reversi);
+
+        preview->setSkinMode(PreviewSkinMode::Ao3Default);
+        assert(preview->skinMode() == PreviewSkinMode::Ao3Default);
+        std::cout << "✓ PreviewPane AO3 Default (Light) and Reversi (Dark) skin mode toggles verified." << std::endl;
+    }
+
+    // 1d. Test EditorPane toolbar active states when cursor moves into styled text
+    {
+        auto *editorPane = mainWindow.findChild<EditorPane *>();
+        assert(editorPane != nullptr);
+        auto *editor = editorPane->editor();
+        assert(editor != nullptr);
+
+        editor->setHtml(QStringLiteral("<p>Plain text <b>bold phrase</b> <i>italic phrase</i></p>"));
+
+        // Position 16 is inside "bold phrase"
+        QTextCursor cur = editor->textCursor();
+        cur.setPosition(16);
+        editor->setTextCursor(cur);
+        editorPane->updateToolbarActiveStates();
+
+        auto *tb = editorPane->findChild<QToolBar *>();
+        assert(tb != nullptr);
+        bool foundCheckedBold = false;
+        for (QAction *act : tb->actions()) {
+            if (act->isCheckable() && act->isChecked() && act->toolTip().contains(QStringLiteral("Bold"))) {
+                foundCheckedBold = true;
+            }
+        }
+        assert(foundCheckedBold);
+        std::cout << "✓ EditorPane toolbar active visual state verified for bold text." << std::endl;
+    }
 
     // 2. Connect client WebSocket to test live JSON-RPC roundtrip
     QWebSocket client;
