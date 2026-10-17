@@ -131,6 +131,30 @@ ensemble --mcp-status
 
 ---
 
+## 🐘 The Elephant in the Room: "Wait, Do I Need to Know Git?"
+
+**Short answer: Absolutely not.**
+
+When writers see technical terms like *"Git-like commit ledger"*, *"12-char SHA-1 hashes"*, or *"line-by-line unified diffs"*, the immediate reaction is often panic:
+> *"Do I need to install Git? Do I have to open a black terminal window and type `git rebase`? Do I need a GitHub account? What if I accidentally delete my story with a merge conflict?!"*
+
+Let's clear the air completely:
+
+1. **Zero Git Required:** You do **not** need Git installed on your computer. You never touch a terminal, you never run command-line tools, and you don't need a GitHub account.
+2. **Why We Borrowed the Idea from Git:**
+   Software developers have enjoyed a superpower for decades that creative writers have sorely lacked: **the ability to save checkpoints with commit notes, inspect line-by-line diffs, and never lose a single sentence.**
+   Traditional writers usually end up with a folder full of messy files like:
+   `Chapter_2_draft_v2_final_REALLY_FINAL_comments.docx`.
+3. **How It Works Behind the Scenes in Ensemble:**
+   - Every `.ao3proj` project archive contains its own internal, automatic history ledger (`history.cmt`) and snapshot diffs (`history/`).
+   - Whenever you save or record a milestone, Ensemble creates a lightweight snapshot tracking what changed.
+   - Open **File → Properties → 📜 Revision History** (<kbd>Alt+Enter</kbd>) anytime to browse your revision timeline. You'll see author signatures, dual local/UTC timestamps, and visual line-by-line diffs showing exactly what was added in green (`+`) and removed in red (`-`).
+   - No merge conflicts, no detached HEAD states, and no cryptic terminal errors.
+4. **For Coders & Technical Writers:**
+   If you *are* a developer who loves Git and wants to track your `.ao3proj` files in a real Git repository, you can! Because `.ao3proj` is a deterministic Zstandard archive containing clean text structures, it plays nicely with backup scripts and version control. Furthermore, connected AI agents via MCP can read and record snapshots programmatically using `get_project_history` and `add_history_commit`.
+
+---
+
 ## 📄 Project File Format (`.ao3proj`)
 
 Ensemble saves stories in a unified binary container compressed with **Zstandard (ZSTD)**, with optional **AES-256-GCM** encryption:
