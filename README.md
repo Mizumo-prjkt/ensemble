@@ -6,6 +6,9 @@
   <strong>Next-Generation AO3 Writing Suite, Work Skin Composer & Narrative Studio</strong>
 </p>
 
+[!NOTE]
+A rust implementation of this software is in the works, check [here](https://github.com/Mizumo-prjkt/ensemble/tree/rust-impl).
+
 <p align="left">
   A high-performance Qt 6 & Chromium C++ desktop application for Archive of Our Own (AO3) authors. Features a distraction-free WYSIWYG composer, live AO3 HTML source synchronization, authentic Chromium Work Skin rendering, direct AO3 work/series import, visual lore mapping, sandboxed <code>.er</code> plugins, local/cloud AI co-authoring via MCP, and native ZSTD project archiving with optional AES-256-GCM encryption.
 </p>
