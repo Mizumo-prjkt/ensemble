@@ -1,0 +1,22 @@
+[package]
+name = "ensemble-plugin-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ensemble-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+regex.workspace = true
+parking_lot.workspace = true
+crossbeam-channel.workspace = true
+reqwest.workspace = true
+url.workspace = true
+thiserror.workspace = true
+once_cell.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

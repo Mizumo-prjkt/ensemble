@@ -1,4 +1,4 @@
-<img src="src/icons/icon.png" width="100" height="100" align="left" alt="Ensemble logo">
+<img src="resources/icon.png" width="100" height="100" align="left" alt="Ensemble logo">
 
 # Ensemble
 
@@ -6,29 +6,51 @@
   <strong>Next-Generation AO3 Writing Suite, Work Skin Composer & Narrative Studio</strong>
 </p>
 
+> [!WARNING]
+> **Ensemble v1.3.0 is currently in an UNSTABLE / EXPERIMENTAL PREVIEW state.**
+> The entire codebase has undergone an ambitious, full architectural rewrite from C++ / Qt 6 to **Rust + GTK4 + Libadwaita + WebKitGTK 6.0** across an independent 7-crate Cargo workspace. APIs, UI components, and platform packaging are actively evolving. If you require battle-tested production stability, please stick to v1.1.x / v1.2.x releases for now.
+
 <p align="left">
-  A high-performance Qt 6 & Chromium C++ desktop application for Archive of Our Own (AO3) authors. Features a distraction-free WYSIWYG composer, live AO3 HTML source synchronization, authentic Chromium Work Skin rendering, direct AO3 work/series import, visual lore mapping, sandboxed <code>.er</code> plugins, local/cloud AI co-authoring via MCP, and native ZSTD project archiving with optional AES-256-GCM encryption.
+  A high-performance, memory-safe Rust desktop application built with <strong>GTK4</strong>, <strong>Libadwaita</strong>, and <strong>WebKitGTK 6.0</strong> for Archive of Our Own (AO3) authors. Adheres strictly to GNOME Human Interface Guidelines (HIG) with native transient modal dialogs, system color scheme switches, a distraction-free WYSIWYG composer, live AO3 HTML source synchronization, authentic Work Skin rendering, direct AO3 work/series import, visual lore mapping, sandboxed <code>.er</code> plugins, local/cloud AI co-authoring via MCP, and native ZSTD project archiving.
 </p>
 
 ---
 
 ## ✨ Key Features
 
-- 🎭 **Authentic Chromium Work Skin Preview**: Full Qt 6 `QWebEngineView` rendering supporting 100% of AO3 Work Skin features (`border-radius`, `box-shadow`, custom cards like `.chapter-card` and `.liyue-box`, multi-theme skins, and custom typography).
+- 🎭 **Authentic Work Skin Preview**: Powered by native `WebKitGTK 6.0` (`webkit6`) supporting 100% of AO3 Work Skin features (`border-radius`, `box-shadow`, custom cards like `.chapter-card` and `.liyue-box`, multi-theme skins, and custom typography).
+- 🎨 **GNOME Human Interface Guidelines (HIG) Compliance**: Native Libadwaita widgets (`adw::HeaderBar`, `adw::PreferencesWindow`, `adw::ToastOverlay`), transient modal dialogs, and seamless Wayland / KDE Plasma integration.
+- 🌓 **Native GTK Theme & Color Scheme Switches**: Native light/dark switches via `adw::StyleManager` with zero custom CSS hacks or wallpaper extraction conflicts.
 - ⚡ **Zero-Jump Live Preview**: Real-time DOM mutation engine updates your live preview as you type while preserving your scroll position with 100% precision.
 - 📥 **Direct AO3 Import & Crawler Extraction**: Authenticate with your AO3 account (via Session Cookie or login) to import multi-chapter works, series, co-authored stories, and custom Work Skins. The built-in crawler automatically extracts ratings, archive warnings, relationship tags, character rosters, and summaries.
 - 🎨 **Work Skin Composer & Visual Inspector**: Edit custom CSS with syntax highlighting, auto-detect classes, apply styles via context menus, and sync Work Skins with AO3 via the built-in Skin Diff Tool.
-- 🧩 **Sandboxed Scripting Plugins (`.er`) [Beta]**: Extend Ensemble using a custom Python-like DSL and tree-walking AST interpreter written from scratch in C++. Runs in an isolated worker thread with memory caps (8 MB), execution watchdogs, declarative UI compositing, granular permissions, strict HTTPS enforcement, anti-diversion quarantine, and persistent audit logging.
+- 🧩 **Sandboxed Scripting Plugins (`.er`) [Beta]**: Extend Ensemble using a custom Python-like DSL and tree-walking AST interpreter written in pure Rust (`#![forbid(unsafe_code)]`). Runs in isolated worker threads with memory caps (8 MB), execution watchdogs (150,000 steps / 250ms), declarative UI compositing, granular permissions, strict HTTPS enforcement, anti-diversion quarantine, and persistent audit logging.
 - 🗺️ **Visual Lore Graph & Narrative Mapping (`.grph`)**: Dedicated 2D canvas for mapping out characters, factions, artifacts, and plot conflicts using Ensemble's independent `.grph` DSL language with a strict binary header (`\x89GRPH\x01\r\n`).
 - ⚙️ **Project Properties & AO3 Metadata Hub**: Manage ratings, archive warnings, relationship categories, cast lists, fandoms, freeform tags, preface notes, and postscript end notes in one unified hub serialized into `metadata.xml`.
 - 🖼️ **URL-Based Image Embed Attachments**: Easily embed external images with live aspect-ratio previews, custom alignment, and 1-click HTML snippet generation, with automatic detection during AO3 story import.
 - 📜 **Git-Like Revision History (`history.cmt`)**: Internal commit ledger tracking 12-char SHA-1 commit hashes, author attributions, ISO timestamps, and commit messages inside your project file.
 - 🤖 **Model Context Protocol (MCP) & Local LLM Support**: Embedded loopback WebSocket server (`ws://127.0.0.1:26303`) and Stdio bridge for AI pair-programmers (Google Antigravity, Claude, Cursor) plus beta support for local, privacy-first models (Ollama, llama.cpp, LM Studio, Jan).
-- 🌓 **Dynamic Theme Engine & Design Systems**: Choose between Light, Dark, Darker (OLED pure black #000000), and official AO3 Reversi themes, paired with Android Material You (dynamic wallpaper hue extraction), KDE Breeze, or Standard Qt Fusion widget styling with mutual exclusivity guards.
+- 🌓 **Dynamic Theme Engine & Design Systems**: Choose between Light, Dark, Darker (OLED pure black #000000), and official AO3 Reversi themes, paired with Android Material You (dynamic wallpaper hue extraction), KDE Breeze, or clean Slint widget styling with mutual exclusivity guards.
 - 🗺️ **Proportional Minimap Sidebar**: High-visibility scrollbar minimap offering an instant visual overview of your document structure with color-coded syntax highlights.
 - 🔀 **Split Workspace**: Simultaneous WYSIWYG rich text editor, live AO3 HTML source view, and Work Skin CSS editor with debounced auto-sync.
 - 📑 **Chapter Management & Filter Search**: Add, rename, delete, reorder chapters, and filter long chapter lists instantly with a built-in search bar.
-- 🚀 **Single-Instance Application**: Direct integration with system file managers to open `.ao3proj` files seamlessly without creating duplicate processes.
+- 🚀 **Single-Instance Application**: Direct integration with system file managers to open `.ao3proj` files seamlessly without creating duplicate processes (verified via PID and boot ID).
+
+---
+
+## 🧱 Modular Rust Workspace Architecture
+
+Ensemble v1.3.0 is partitioned into 7 decoupled, thread-safe Cargo crates:
+
+| Crate | Responsibility |
+|---|---|
+| [`ensemble-core`](crates/ensemble-core) | `.ao3proj` Zstandard container, `ProjectSerializer`, Chapter metadata, Lore Graph (`.grph`), Diff engine, and paths |
+| [`ensemble-html`](crates/ensemble-html) | AO3 tag whitelist, HTML sanitizer (`b->strong`, `i->em`), HTML/CSS linter, and spellchecker |
+| [`ensemble-theme`](crates/ensemble-theme) | Light/Dark/OLED/Reversi palettes, Material You wallpaper hue extraction, and mutual exclusivity guards |
+| [`ensemble-plugin-engine`](crates/ensemble-plugin-engine) | `#![forbid(unsafe_code)]` memory-safe `.er` DSL lexer, parser, AST interpreter, sandbox watchdogs, and quarantine |
+| [`ensemble-net`](crates/ensemble-net) | AO3 authenticated web scraper, Cloudflare-compatible session handling, and update checker |
+| [`ensemble-mcp`](crates/ensemble-mcp) | Embedded WebSocket server (`ws://127.0.0.1:26303`), 36 MCP tools, 8 `ensemble://` resources, and stdio bridge |
+| [`ensemble-app`](crates/ensemble-app) | GTK4 + Libadwaita GUI entrypoint, WebKitGTK 6.0 preview, dialogs, single-instance lock, and CLI argument handler |
 
 ---
 
@@ -36,13 +58,13 @@
 
 Ensemble includes a custom, memory-bounded, Python-like scripting engine designed specifically for third-party plugins (<b><code>.er</code></b>, Ensemble Runner scripts) without freezing the UI or risking host stability:
 
-- **No Native Shared Libraries:** Does not load dynamic libraries (`.dll`, `.so`) or embed standard Python/Lua runtimes. Pure C++ lexer, recursive descent parser, and AST interpreter.
-- **Worker Thread Isolation:** All plugin hooks execute inside isolated `QThread` workers. Zero GUI pointers (`QWidget*`) cross threads.
+- **No Native Shared Libraries:** Does not load dynamic libraries (`.dll`, `.so`) or embed standard Python/Lua runtimes. Pure Rust lexer, recursive descent parser, and AST interpreter (`#![forbid(unsafe_code)]`).
+- **Worker Thread Isolation:** All plugin hooks execute inside isolated worker threads. Zero direct GUI pointers cross threads.
 - **Strict Resource Quotas (`ResourceGuard`):** 8 MB memory cap per plugin, 150,000 AST execution steps / 250ms watchdog per hook, and a 64-frame call stack depth cap.
 - **Declarative UI Compositing:** Plugins compose native dialog windows on the GUI thread via `ui.create_window()`, `add_label()`, `add_text()`, `add_input()`, and `add_button()`.
 - **Strict HTTPS & Anti-Diversion Quarantine:**
   - All network traffic mediated by Ensemble strictly requires `https://`. Insecure `http://` or downgrade attempts trigger immediate security quarantine.
-  - Automatic HTTP redirects are forbidden (`QNetworkRequest::ManualRedirectPolicy`). Any attempt to redivert traffic to another website terminates execution and **permanently quarantines the plugin** with an alert to report the incident to developers.
+  - Automatic HTTP redirects are forbidden. Any attempt to redivert traffic to another website terminates execution and **permanently quarantines the plugin** with an alert to report the incident to developers.
 - **Granular Permissions & Audit Logging:** Manage permissions (Editor Read, Editor Write, Storage, UI, Network) with per-domain whitelisting and view live audit trails in `plugin_activity.log`.
 - **Uninstallation Support:** 1-click clean deletion of `.er` scripts, manifest records, and private storage.
 
@@ -94,7 +116,7 @@ ensemble --mcp-status
 - **Skin Flavors & Design Systems:**
   - 🤖 **Android Material You:** Dynamically extracts the dominant accent color from your active desktop wallpaper (GNOME, KDE DBus, Windows Desktop) with authentic Material 3 pill buttons (20px radius).
   - ✨ **Standard Ensemble:** Curated violet modern styling.
-  - 🖥️ **Standard Qt:** Clean native desktop widgets (Fusion).
+  - 🖥️ **Slint Native:** Clean native desktop widgets.
   - 🐧 **KDE UI:** Native Breeze design integration.
 - **Mutual Exclusivity Guard:** Due to contrasting color schemes, AO3 Reversi and Android Material You styling are mutually exclusive. Selecting Reversi disables Material You in the skin settings, and selecting Material You disables Reversi theme options.
 
@@ -116,8 +138,8 @@ ensemble --mcp-status
 | `Ctrl+Shift+M` | Insert Image Embed Attachment | Editor |
 | `Ctrl+Shift+I` | Import Work from AO3… | Global |
 | `Ctrl+Shift+C` | Copy AO3 Clean HTML to Clipboard | Global |
-| `Ctrl+P` | Toggle Side-by-Side WebEngine Preview | Global |
-| `Ctrl+Shift+P` | Pop Out WebEngine Preview Window | Global |
+| `Ctrl+P` | Toggle Side-by-Side Wry Preview | Global |
+| `Ctrl+Shift+P` | Pop Out Preview Window | Global |
 | `Ctrl+F` | Find Text | Editor |
 | `Ctrl+R` | Find and Replace Text | Editor |
 | `Ctrl+B` / `Ctrl+I` / `Ctrl+U` / `Ctrl+Shift+X` | Bold / Italic / Underline / Strikethrough | Editor |
@@ -172,40 +194,45 @@ Ensemble saves stories in a unified binary container compressed with **Zstandard
 
 ### Arch Linux
 ```bash
-sudo pacman -S qt6-base qt6-webengine qt6-websockets cmake gcc ninja zstd vulkan-tools
+sudo pacman -S rust cargo pkgconf webkit2gtk-4.1 gtk3 openssl
 ```
 
-### Debian / Ubuntu (24.04+)
+### Debian / Ubuntu (22.04 / 24.04+)
 ```bash
-sudo apt install qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-webengine-dev \
-    libqt6websockets6-dev cmake g++ ninja-build libzstd-dev ccache vulkan-tools libvulkan1
+sudo apt install cargo rustc pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev
 ```
 
-### Windows (MSVC 2022)
-- Visual Studio 2022 (with Desktop Development with C++)
-- Qt 6.8+ (including `qtwebengine`, `qtwebsockets`, `qtwebchannel`, `qtpositioning`)
-- CMake 3.16+
-- Python 3.9+
-- *(Optional)* [Inno Setup 6](https://jrsoftware.org/isdl.php) (for building the `.exe` Windows installer)
+### Fedora
+```bash
+sudo dnf install cargo rust pkgconfig webkit2gtk4.1-devel gtk3-devel openssl-devel
+```
+
+### Windows (MSVC)
+- Rust 1.80+ (installed via [rustup.rs](https://rustup.rs))
+- Visual Studio C++ Build Tools (MSVC `x86_64-pc-windows-msvc`)
+- Microsoft Edge WebView2 Runtime (installed by default on Windows 10/11)
 
 ---
 
 ## 🚀 Building & Packaging
 
-Ensemble includes a unified Python build orchestrator (`build.py`) with cross-platform wrappers (`build.sh`, `build.ps1`, `build.bat`):
+Ensemble can be built directly with Cargo or orchestrated via the unified `build.py` script:
 
 ```bash
-# Interactive Build Studio GUI
-python3 build.py --gui
+# Build workspace in debug mode
+cargo build --workspace
 
-# Linux Release Build & Unit Tests
-./build.sh release --test
+# Run complete workspace test suite (all 7 crates)
+cargo test --workspace
 
-# Standalone AppImage Package
-./build.sh appimage
+# Run unified build script (Release binary staged to build/ensemble)
+python3 build.py --target linux --build-type Release
 
-# Windows PowerShell (Portable .zip & Installer .exe)
-.\build.ps1 release --installer --test
+# Run automated test suite via build script
+python3 build.py --target linux --test
+
+# Packaging (AppImage bundle)
+python3 build.py --target linux --package AppImage
 ```
 
 ---
@@ -216,11 +243,7 @@ python3 build.py --gui
 - **Code of Conduct**: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - **Security Policy**: [SECURITY.md](SECURITY.md)
 
-### ⚖️ LGPLv3 Compliance & Freedom to Modify Qt
-
-Ensemble's application code is licensed under the **MIT License**. Ensemble dynamically links against the **Qt 6 Framework** (and Qt WebEngine), licensed under the **GNU LGPLv3**. In compliance with the LGPLv3:
-1. **Dynamic Linking**: Qt components are dynamically linked (`.so` on Linux, `.dll` on Windows).
-2. **Freedom to Modify & Replace**: Distributed AppImage packages are standard, unencrypted SquashFS containers. Users can extract the bundle (`./Ensemble-*.AppImage --appimage-extract`), swap any Qt shared libraries in `squashfs-root/usr/lib/`, or inject custom builds using `LD_LIBRARY_PATH`. On Windows, dynamic `.dll` files can be updated directly in the program folder.
+Ensemble is 100% free and open-source software licensed under the permissive MIT License. Unlike earlier C++ / Qt releases, Ensemble v1.3.0 is built natively in Rust utilizing Slint and platform-native webviews via Wry (WebKitGTK on Linux, WebView2 on Windows), requiring zero LGPL runtime bundling.
 
 ## ⚖️ Legal Notice
 

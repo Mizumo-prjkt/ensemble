@@ -1,0 +1,28 @@
+[package]
+name = "ensemble-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ensemble-core.workspace = true
+ensemble-html.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+parking_lot.workspace = true
+base64.workspace = true
+url.workspace = true
+once_cell.workspace = true
+thiserror.workspace = true
+regex.workspace = true
+dirs.workspace = true
+image.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+

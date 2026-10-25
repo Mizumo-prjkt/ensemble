@@ -1,0 +1,33 @@
+[package]
+name = "ensemble-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "ensemble"
+
+[[bin]]
+name = "ensemble"
+path = "src/main.rs"
+
+[dependencies]
+ensemble-core.workspace = true
+ensemble-html.workspace = true
+ensemble-theme.workspace = true
+ensemble-plugin-engine.workspace = true
+ensemble-net.workspace = true
+ensemble-mcp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+clap.workspace = true
+log.workspace = true
+interprocess.workspace = true
+sysinfo.workspace = true
+parking_lot.workspace = true
+crossbeam-channel.workspace = true
+tokio.workspace = true
+libadwaita.workspace = true
+gtk4.workspace = true
+webkit6.workspace = true
+rfd.workspace = true
+arboard.workspace = true

@@ -22,7 +22,7 @@ import urllib.request
 
 REPO_ROOT = Path(__file__).resolve().parent
 
-DEFAULT_VERSION = "1.1.1"
+DEFAULT_VERSION = "1.3.0"
 APPIMAGETOOL_URL = "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
 INNO_SCRIPT = REPO_ROOT / "resources" / "ensemble.iss"
 
@@ -312,100 +312,97 @@ class EnsembleBuilder:
 
     def clean(self) -> int:
         bdir = self.config.resolved_build_dir()
-        self.log(f"[CLEAN] Removing build directory: {bdir}")
+        self.log(f"[CLEAN] Removing build directory: {bdir} and running cargo clean...")
         if bdir.exists():
             shutil.rmtree(bdir, ignore_errors=True)
-        return 0
+        return self.run_cmd(["cargo", "clean"])
+
+    def _is_release_profile(self) -> bool:
+        return self.config.build_type.lower() in ("release", "relwithdebinfo", "minsizerel")
 
     def configure(self) -> int:
         bdir = self.config.resolved_build_dir()
         bdir.mkdir(parents=True, exist_ok=True)
-
-        cmd = ["cmake", "-B", str(bdir), "-S", str(REPO_ROOT)]
-
-        # Generator & build type
-        cmd.append(f"-DCMAKE_BUILD_TYPE={self.config.build_type}")
-
-        # Version overrides
-        if self.config.version_id.strip():
-            cmd.append(f"-DENSEMBLE_VERSION_OVERRIDE={self.config.version_id.strip()}")
-        if self.config.localversion.strip():
-            cmd.append(f"-DENSEMBLE_LOCALVERSION={self.config.localversion.strip()}")
-
-        # Custom output binary directory
         out_dir = self.config.resolved_output_dir()
         out_dir.mkdir(parents=True, exist_ok=True)
-        cmd.append(f"-DENSEMBLE_OUTPUT_DIR={str(out_dir)}")
 
-        # Compiler flags override
-        if self.config.cflags.strip():
-            cmd.append(f"-DENSEMBLE_EXTRA_C_FLAGS={self.config.cflags.strip()}")
-        if self.config.cxxflags.strip():
-            cmd.append(f"-DENSEMBLE_EXTRA_CXX_FLAGS={self.config.cxxflags.strip()}")
-
-        # Target specific settings
-        if self.config.target == "windows":
-            if platform.system() != "Windows":
-                toolchain = REPO_ROOT / "cmake" / "x86_64-w64-mingw32.cmake"
-                if not toolchain.exists():
-                    toolchain.parent.mkdir(parents=True, exist_ok=True)
-                    toolchain.write_text(
-                        "set(CMAKE_SYSTEM_NAME Windows)\n"
-                        "set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc)\n"
-                        "set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++)\n"
-                        "set(CMAKE_RC_COMPILER x86_64-w64-mingw32-windres)\n"
-                    )
-                cmd.append(f"-DCMAKE_TOOLCHAIN_FILE={str(toolchain)}")
-
-        # Extra CMake args from user
-        if self.config.cmake_args.strip():
-            extra = [a.strip() for a in self.config.cmake_args.strip().split() if a.strip()]
-            cmd.extend(extra)
-
-        self.log(f"[CONFIG] Configuring CMake for {self.config.target.upper()} ({self.config.build_type})...")
+        self.log(f"[CONFIG] Verifying Cargo workspace for {self.config.target.upper()} ({self.config.build_type})...")
         self.log(f"[VERSION] Full target version: {self.config.full_version()}")
-        return self.run_cmd(cmd)
+        return self.run_cmd(["cargo", "metadata", "--format-version", "1", "--no-deps"])
 
     def build(self) -> int:
         bdir = self.config.resolved_build_dir()
-        cmd = ["cmake", "--build", str(bdir), "--parallel", str(self.config.jobs)]
-        if platform.system() == "Windows":
-            cmd.extend(["--config", self.config.build_type])
+        out_dir = self.config.resolved_output_dir()
+        bdir.mkdir(parents=True, exist_ok=True)
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-        self.log(f"[BUILD] Compiling target {self.config.target.upper()} with {self.config.jobs} parallel jobs...")
-        return self.run_cmd(cmd)
+        cmd = ["cargo", "build", "--workspace", "--jobs", str(self.config.jobs)]
+        if self._is_release_profile():
+            cmd.append("--release")
+
+        if self.config.target == "windows" and platform.system() != "Windows":
+            cmd.extend(["--target", "x86_64-pc-windows-gnu"])
+
+        self.log(f"[BUILD] Compiling Rust workspace for {self.config.target.upper()} ({self.config.build_type}) with {self.config.jobs} jobs...")
+        ret = self.run_cmd(cmd)
+        if ret != 0:
+            return ret
+
+        profile_dir = "release" if self._is_release_profile() else "debug"
+        exe_name = "ensemble.exe" if (self.config.target == "windows" or platform.system() == "Windows") else "ensemble"
+
+        candidates = [
+            REPO_ROOT / "target" / "x86_64-pc-windows-gnu" / profile_dir / exe_name,
+            REPO_ROOT / "target" / profile_dir / exe_name,
+        ]
+        built_bin = next((p for p in candidates if p.exists()), None)
+        if built_bin:
+            dst1 = bdir / exe_name
+            try:
+                if dst1.exists():
+                    dst1.unlink()
+            except OSError:
+                pass
+            shutil.copy2(built_bin, dst1)
+            if out_dir != bdir:
+                dst2 = out_dir / exe_name
+                try:
+                    if dst2.exists():
+                        dst2.unlink()
+                except OSError:
+                    pass
+                shutil.copy2(built_bin, dst2)
+            self.log(f"[STAGE] Staged compiled binary to {bdir / exe_name}")
+        return 0
 
     def test(self) -> int:
-        bdir = self.config.resolved_build_dir()
-        self.log("[TEST] Running unit tests suite via ctest...")
-        cmd = ["ctest", "--test-dir", str(bdir), "--output-on-failure", "-R", "^test_", "--timeout", "60"]
-        if platform.system() == "Windows":
-            cmd.extend(["-C", self.config.build_type])
-        test_env = dict(os.environ)
-        if not os.environ.get("DISPLAY") or platform.system() == "Windows":
-            test_env["QT_QPA_PLATFORM"] = "offscreen"
-        return self.run_cmd(cmd, env=test_env)
+        self.log("[TEST] Running Rust workspace unit and integration test suites via cargo test...")
+        cmd = ["cargo", "test", "--workspace", "--jobs", str(self.config.jobs)]
+        if self._is_release_profile():
+            cmd.append("--release")
+        return self.run_cmd(cmd)
 
+    def _resolve_icon_png(self) -> Path:
+        for p in (REPO_ROOT / "resources" / "icon.png", REPO_ROOT / "src" / "icons" / "icon.png"):
+            if p.exists():
+                return p
+        return REPO_ROOT / "resources" / "icon.png"
 
     def _ensure_appimagetool(self) -> Optional[Path]:
-        # 1. Custom specified path
         if self.config.appimagetool_path.strip():
             custom = Path(self.config.appimagetool_path.strip()).resolve()
             if custom.exists():
                 return custom
 
-        # 2. In PATH
         tool = shutil.which("appimagetool")
         if tool:
             return Path(tool)
 
-        # 3. In tools directory
         tools_dir = REPO_ROOT / "tools"
         local_tool = tools_dir / "appimagetool"
         if local_tool.exists():
             return local_tool
 
-        # 4. Download if allowed
         if self.config.download_tools:
             self.log("[APPIMAGE] appimagetool not found. Downloading continuous release...")
             tools_dir.mkdir(parents=True, exist_ok=True)
@@ -427,49 +424,47 @@ class EnsembleBuilder:
         self.log(f"[APPIMAGE] Staging AppDir at: {appdir}")
         if appdir.exists():
             shutil.rmtree(appdir, ignore_errors=True)
-        appdir.mkdir(parents=True, exist_ok=True)
+        (appdir / "usr" / "bin").mkdir(parents=True, exist_ok=True)
+        (appdir / "usr" / "share" / "applications").mkdir(parents=True, exist_ok=True)
+        (appdir / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps").mkdir(parents=True, exist_ok=True)
 
-        # 1. Install via cmake into AppDir/usr
-        install_cmd = ["cmake", "--install", str(bdir), "--prefix", str(appdir / "usr")]
-        ret = self.run_cmd(install_cmd)
-        if ret != 0:
-            self.log("[ERROR] CMake install to AppDir failed.")
-            return ret
+        profile_dir = "release" if self._is_release_profile() else "debug"
+        candidates = [
+            bdir / "ensemble",
+            out_dir / "ensemble",
+            REPO_ROOT / "target" / profile_dir / "ensemble",
+        ]
+        exe_src = next((p for p in candidates if p.exists()), None)
+        if not exe_src:
+            self.log("[ERROR] Compiled ensemble binary not found for AppDir staging.")
+            return 1
 
-        # 2. Stage AppDir root metadata & licenses
+        shutil.copy2(exe_src, appdir / "usr" / "bin" / "ensemble")
+
         desktop_src = REPO_ROOT / "resources" / "ensemble.desktop"
-        icon_src = REPO_ROOT / "src" / "icons" / "icon.png"
+        icon_src = self._resolve_icon_png()
 
-        shutil.copy2(desktop_src, appdir / "ensemble.desktop")
-        shutil.copy2(icon_src, appdir / "ensemble.png")
-        shutil.copy2(icon_src, appdir / ".DirIcon")
+        if desktop_src.exists():
+            shutil.copy2(desktop_src, appdir / "ensemble.desktop")
+            shutil.copy2(desktop_src, appdir / "usr" / "share" / "applications" / "ensemble.desktop")
+        if icon_src.exists():
+            shutil.copy2(icon_src, appdir / "ensemble.png")
+            shutil.copy2(icon_src, appdir / ".DirIcon")
+            shutil.copy2(icon_src, appdir / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps" / "ensemble.png")
 
-        # Copy license texts into AppDir root for LGPL compliance & transparency
         for lic_name in ("LICENSE", "LICENSE.LGPLv3", "LICENSE.GPLv3"):
             lic_file = REPO_ROOT / lic_name
             if lic_file.exists():
                 shutil.copy2(lic_file, appdir / lic_name)
 
-        # 3. Create AppRun launcher
         apprun_path = appdir / "AppRun"
         apprun_content = (
             "#!/bin/bash\n"
             "set -e\n"
             'APPDIR="$(dirname "$(readlink -f "${0}")")"\n'
             'export PATH="${APPDIR}/usr/bin:${PATH}"\n'
-            "# LGPLv3 Compliance: Allow runtime user override of dynamic libraries (including Qt).\n"
-            "# If ENSEMBLE_LIBRARY_PATH or a custom LD_LIBRARY_PATH is provided, give it precedence\n"
-            "# so users can freely replace or upgrade Qt libraries at runtime without repackaging.\n"
-            'if [ -n "${ENSEMBLE_LIBRARY_PATH}" ]; then\n'
-            '    export LD_LIBRARY_PATH="${ENSEMBLE_LIBRARY_PATH}:${APPDIR}/usr/lib:${APPDIR}/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"\n'
-            'elif [ -n "${LD_LIBRARY_PATH}" ]; then\n'
-            '    export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${APPDIR}/usr/lib:${APPDIR}/usr/lib/x86_64-linux-gnu"\n'
-            'else\n'
-            '    export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${APPDIR}/usr/lib/x86_64-linux-gnu"\n'
-            'fi\n'
+            'export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${APPDIR}/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"\n'
             'export XDG_DATA_DIRS="${APPDIR}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"\n'
-            'export QT_PLUGIN_PATH="${APPDIR}/usr/lib/qt6/plugins:${APPDIR}/usr/plugins:${QT_PLUGIN_PATH}"\n'
-            'export QML2_IMPORT_PATH="${APPDIR}/usr/qml:${QML2_IMPORT_PATH}"\n'
             'exec "${APPDIR}/usr/bin/ensemble" "$@"\n'
         )
         apprun_path.write_text(apprun_content)
@@ -477,7 +472,6 @@ class EnsembleBuilder:
 
         self.log("[APPIMAGE] AppDir structure staged successfully.")
 
-        # 4. Packaging with appimagetool
         tool = self._ensure_appimagetool()
         variant_suffix = "-debug" if self.config.build_type.lower() == "debug" else ""
         target_filename = f"Ensemble-{self.config.full_version()}{variant_suffix}-x86_64.AppImage"
@@ -486,7 +480,6 @@ class EnsembleBuilder:
         if tool:
             self.log(f"[APPIMAGE] Generating {target_filename} with {tool}...")
             env = {"ARCH": "x86_64"}
-            # If tool is itself an AppImage without FUSE, allow extract-and-run
             cmd = [str(tool)]
             if str(tool).endswith(".AppImage"):
                 cmd.append("--appimage-extract-and-run")
@@ -499,13 +492,7 @@ class EnsembleBuilder:
                 self.log("[ERROR] appimagetool execution failed.")
                 return ret
         else:
-            self.log("[INFO] -----------------------------------------------------------------")
             self.log(f"[INFO] AppDir is fully ready at: {appdir}")
-            self.log("[INFO] 'appimagetool' was not found in PATH or downloaded.")
-            self.log("[INFO] To package the .AppImage bundle, run:")
-            self.log(f"[INFO]   ARCH=x86_64 appimagetool {appdir} {target_file}")
-            self.log("[INFO] Or re-run with --download-tools to auto-fetch appimagetool.")
-            self.log("[INFO] -----------------------------------------------------------------")
             return 0
 
     def package_linux(self) -> int:
@@ -518,9 +505,11 @@ class EnsembleBuilder:
             shutil.rmtree(dist_dir, ignore_errors=True)
         dist_dir.mkdir(parents=True, exist_ok=True)
 
+        profile_dir = "release" if self._is_release_profile() else "debug"
         candidates = [
             bdir / "ensemble",
             out_dir / "ensemble",
+            REPO_ROOT / "target" / profile_dir / "ensemble",
         ]
         exe_src = next((p for p in candidates if p.exists()), None)
         if not exe_src:
@@ -529,7 +518,7 @@ class EnsembleBuilder:
 
         shutil.copy2(exe_src, dist_dir / "ensemble")
         desktop_src = REPO_ROOT / "resources" / "ensemble.desktop"
-        icon_src = REPO_ROOT / "src" / "icons" / "icon.png"
+        icon_src = self._resolve_icon_png()
         if desktop_src.exists():
             shutil.copy2(desktop_src, dist_dir / "ensemble.desktop")
         if icon_src.exists():
@@ -553,10 +542,12 @@ class EnsembleBuilder:
             shutil.rmtree(dist_dir, ignore_errors=True)
         dist_dir.mkdir(parents=True, exist_ok=True)
 
+        profile_dir = "release" if self._is_release_profile() else "debug"
         candidates = [
-            bdir / self.config.build_type / "ensemble.exe",
             bdir / "ensemble.exe",
             out_dir / "ensemble.exe",
+            REPO_ROOT / "target" / profile_dir / "ensemble.exe",
+            REPO_ROOT / "target" / "x86_64-pc-windows-gnu" / profile_dir / "ensemble.exe",
         ]
         exe_src = next((p for p in candidates if p.exists()), None)
         if not exe_src:
@@ -564,15 +555,6 @@ class EnsembleBuilder:
             return 1
 
         shutil.copy2(exe_src, dist_dir / "ensemble.exe")
-
-        windeployqt = shutil.which("windeployqt")
-        if windeployqt:
-            self.log("[WIN-PKG] Running windeployqt...")
-            deploy_cmd = [windeployqt, "--compiler-runtime"]
-            if self.config.build_type.lower() == "debug":
-                deploy_cmd.append("--release")
-            deploy_cmd.append(str(dist_dir / "ensemble.exe"))
-            self.run_cmd(deploy_cmd)
 
         variant_suffix = "-debug" if self.config.build_type.lower() == "debug" else ""
         zip_stem = f"Ensemble-{self.config.full_version()}-windows-x64{variant_suffix}"
