@@ -7,8 +7,8 @@
 </p>
 
 > [!WARNING]
-> **Ensemble v1.3.0 is currently in an UNSTABLE / EXPERIMENTAL PREVIEW state.**
-> The entire codebase has undergone an ambitious, full architectural rewrite from C++ / Qt 6 to **Rust + GTK4 + Libadwaita + WebKitGTK 6.0** across an independent 7-crate Cargo workspace. APIs, UI components, and platform packaging are actively evolving. If you require battle-tested production stability, please stick to v1.1.x / v1.2.x releases for now.
+> **Ensemble - Rust Implementation is currently in an UNSTABLE / EXPERIMENTAL PREVIEW state.**
+> The entire codebase has undergone an ambitious, full architectural rewrite from C++ / Qt 6 to **Rust + GTK4 + Libadwaita + WebKitGTK 6.0** across an independent 7-crate Cargo workspace. APIs, UI components, and platform packaging are actively evolving. If you require battle-tested production stability, please stick to Qt variant for now.
 
 <p align="left">
   A high-performance, memory-safe Rust desktop application built with <strong>GTK4</strong>, <strong>Libadwaita</strong>, and <strong>WebKitGTK 6.0</strong> for Archive of Our Own (AO3) authors. Adheres strictly to GNOME Human Interface Guidelines (HIG) with native transient modal dialogs, system color scheme switches, a distraction-free WYSIWYG composer, live AO3 HTML source synchronization, authentic Work Skin rendering, direct AO3 work/series import, visual lore mapping, sandboxed <code>.er</code> plugins, local/cloud AI co-authoring via MCP, and native ZSTD project archiving.
