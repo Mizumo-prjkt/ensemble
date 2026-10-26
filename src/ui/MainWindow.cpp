@@ -32,6 +32,9 @@
 #include "mcp/McpHandler.h"
 #include "plugins/PluginManager.h"
 #include "ui/PluginManagerDialog.h"
+#include "ui/ResourceManagerDialog.h"
+#include "diagnostics/ProjectDiagnosticsRunner.h"
+#include "diagnostics/MainThreadWatchdog.h"
 
 #include <QPushButton>
 #include <QStackedWidget>
@@ -81,6 +84,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     onThemeChanged(ThemeManager::instance().currentTheme());
   });
 
+  connect(&ProjectDiagnosticsRunner::instance(), &ProjectDiagnosticsRunner::diagnosticsReady,
+          this, &MainWindow::onDiagnosticsReady);
+  connect(&ProjectDiagnosticsRunner::instance(), &ProjectDiagnosticsRunner::componentTerminated,
+          this, &MainWindow::onComponentTerminated);
+
   m_htmlSyncTimer = new QTimer(this);
   m_htmlSyncTimer->setSingleShot(true);
   m_htmlSyncTimer->setInterval(300);
@@ -92,6 +100,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   m_previewTimer->setInterval(400);
   connect(m_previewTimer, &QTimer::timeout, this,
           &MainWindow::debouncedUpdatePreview);
+
+  // Main Thread Hang & Freeze Watchdog
+  MainThreadWatchdog::instance().start(2000, 5000);
+  m_watchdogTimer = new QTimer(this);
+  connect(m_watchdogTimer, &QTimer::timeout, this, []() {
+    MainThreadWatchdog::instance().pingHeartbeat();
+  });
+  m_watchdogTimer->start(250);
 
   // Menu
   auto *fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
@@ -257,6 +273,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   auto *pluginManagerAction = m_toolsMenu->addAction(QStringLiteral("🧩 [Beta] &Plugin Manager…"));
   pluginManagerAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+U")));
   connect(pluginManagerAction, &QAction::triggered, this, &MainWindow::onShowPluginManager);
+
+  auto *resourceManagerAction = m_toolsMenu->addAction(QStringLiteral("📊 &Resource & Task Manager…"));
+  resourceManagerAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+Esc")));
+  connect(resourceManagerAction, &QAction::triggered, this, &MainWindow::onShowResourceManager);
+
   m_toolsMenu->addSeparator();
 
   // Initialize and connect Plugin Subsystem
@@ -509,6 +530,7 @@ MainWindow::~MainWindow() {
 
 void MainWindow::closeEvent(QCloseEvent *event) {
   if (maybeSave(QStringLiteral("closing"), false)) {
+    MainThreadWatchdog::instance().stop();
     if (m_mcpServer) {
       m_mcpServer->stop();
     }
@@ -1239,6 +1261,7 @@ void MainWindow::onChapterSelected(int index) {
   saveCurrentChapterFromEditors();
   m_pendingHtml.clear();
   m_htmlSourceEditing = false;
+  m_project.trimInactiveChaptersMemory(index);
   m_project.setActiveChapterIndex(index);
   loadCurrentChapterIntoEditors();
   debouncedUpdatePreview();
@@ -1252,6 +1275,10 @@ void MainWindow::onChaptersReordered() {
 }
 
 void MainWindow::loadCurrentChapterIntoEditors() {
+  MainThreadWatchdog::ScopedCheckpoint cp(
+      QStringLiteral("MainWindow::loadCurrentChapterIntoEditors"),
+      m_project.activeChapter() ? m_project.activeChapter()->title() : QString());
+
   const Chapter *chapter = m_project.activeChapter();
   const QString html = chapter ? chapter->html() : QStringLiteral("<p></p>");
 
@@ -1274,16 +1301,22 @@ void MainWindow::loadCurrentChapterIntoEditors() {
     EnsemblePlugin::PluginManager::instance().notifyChapterChanged(
         chapter->title(), chapter->html(), m_project.activeChapterIndex());
 
-    QList<QVariantMap> chaps;
-    const auto &projectChaps = m_project.chapters();
-    for (int i = 0; i < projectChaps.size(); ++i) {
-        QVariantMap map;
-        map[QStringLiteral("index")] = i;
-        map[QStringLiteral("title")] = projectChaps.at(i).title();
-        map[QStringLiteral("text")] = projectChaps.at(i).toPlainText();
-        chaps.append(map);
+    if (EnsemblePlugin::PluginManager::instance().hasActivePlugins()) {
+      QList<QVariantMap> chaps;
+      const auto &projectChaps = m_project.chapters();
+      for (int i = 0; i < projectChaps.size(); ++i) {
+          QVariantMap map;
+          map[QStringLiteral("index")] = i;
+          map[QStringLiteral("title")] = projectChaps.at(i).title();
+          if (projectChaps.at(i).isLoaded()) {
+              map[QStringLiteral("text")] = projectChaps.at(i).toPlainText();
+          } else {
+              map[QStringLiteral("text")] = QString();
+          }
+          chaps.append(map);
+      }
+      EnsemblePlugin::PluginManager::instance().notifyChaptersUpdated(chaps);
     }
-    EnsemblePlugin::PluginManager::instance().notifyChaptersUpdated(chaps);
   }
 }
 
@@ -1773,176 +1806,38 @@ void MainWindow::dropEvent(QDropEvent *event) {
 }
 
 void MainWindow::updateProblemsDiagnostics() {
-  m_currentProblems.clear();
-  int errorCount = 0;
-  int warningCount = 0;
-
-  // 1. Check Work Skin CSS syntax & structure
-  const QString cssText = m_project.workSkinCss();
-  QStringList cssErrors;
-  CssEditorPane::validateCss(cssText, &cssErrors);
-  for (const QString &err : cssErrors) {
-    ProblemItem item;
-    item.severity = ProblemItem::Error;
-    item.category = QStringLiteral("Work Skin CSS");
-    item.description = err;
-    item.chapterIndex = -1;
-    item.affectedChapters.clear();
-    m_currentProblems.append(item);
-    errorCount++;
+  if (!m_hasActiveProject) {
+    m_currentProblems.clear();
+    if (m_problemsDialog) {
+      m_problemsDialog->setProblems(m_currentProblems);
+    }
+    if (m_problemsBadgeButton) {
+      m_problemsBadgeButton->setText(QStringLiteral("✔ 0 Problems"));
+    }
+    return;
   }
 
+  QList<DiagnosticsChapterSnapshot> snapshots;
+  const auto &chaps = m_project.chapters();
+  snapshots.reserve(chaps.size());
+  for (int i = 0; i < chaps.size(); ++i) {
+    DiagnosticsChapterSnapshot snap;
+    snap.index = i;
+    snap.title = chaps[i].title();
+    snap.html = chaps[i].html();
+    snapshots.append(std::move(snap));
+  }
+
+  const QString css = m_project.workSkinCss();
   const QStringList cssClasses = m_cssPane ? m_cssPane->cssClassNames() : QStringList();
-  const QSet<QString> cssClassSet(cssClasses.begin(), cssClasses.end());
 
-  // Check duplicate CSS classes
-  QMap<QString, int> classCounts;
-  for (const QString &cls : cssClasses) {
-    classCounts[cls]++;
-  }
+  ProjectDiagnosticsRunner::instance().requestDiagnostics(css, cssClasses, snapshots);
+}
 
-  for (auto iter = classCounts.constBegin(); iter != classCounts.constEnd(); ++iter) {
-    if (iter.value() > 1) {
-      ProblemItem item;
-      item.severity = ProblemItem::Warning;
-      item.category = QStringLiteral("Work Skin CSS");
-      item.description = QStringLiteral("Duplicate CSS class '.%1' defined %2 times in Work Skin.").arg(iter.key()).arg(iter.value());
-      item.chapterIndex = -1;
-      item.affectedChapters.clear();
-      m_currentProblems.append(item);
-      warningCount++;
-    }
-  }
-
-  // 2. Check chapter structural issues & missing CSS classes
-  static const QRegularExpression classAttrRe(R"re(class\s*=\s*"([^"]+)")re", QRegularExpression::CaseInsensitiveOption);
-  static const QRegularExpression tagExtractRe(R"(<\/?([a-zA-Z][\w:-]*))");
-  const QSet<QString> allowedTags = Ao3TagWhitelist::allowedTags();
-  QMap<QString, QList<int>> missingClassChapters;
-
-  int chIdx = 0;
-  for (const Chapter &ch : m_project.chapters()) {
-    const QString html = ch.html();
-    if (ch.title().trimmed().isEmpty()) {
-      ProblemItem item;
-      item.severity = ProblemItem::Warning;
-      item.category = QStringLiteral("Chapter Structure");
-      item.description = QStringLiteral("Chapter %1 has an empty title.").arg(chIdx + 1);
-      item.chapterIndex = chIdx;
-      item.affectedChapters = { chIdx };
-      m_currentProblems.append(item);
-      warningCount++;
-    }
-    if (html.trimmed().isEmpty()) {
-      ProblemItem item;
-      item.severity = ProblemItem::Warning;
-      item.category = QStringLiteral("Chapter Content");
-      item.description = QStringLiteral("Chapter %1 (\"%2\") has no body content.").arg(chIdx + 1).arg(ch.title());
-      item.chapterIndex = chIdx;
-      item.affectedChapters = { chIdx };
-      m_currentProblems.append(item);
-      warningCount++;
-    }
-
-    // Check HTML parse errors via QXmlStreamReader
-    if (!html.trimmed().isEmpty()) {
-      const QString wrapped = QStringLiteral("<root>%1</root>").arg(html);
-      QXmlStreamReader reader(wrapped);
-      while (!reader.atEnd()) {
-        reader.readNext();
-        if (reader.hasError()) {
-          const QString err = reader.errorString();
-          const qint64 line = qMax<qint64>(1, reader.lineNumber() - 1);
-
-          ProblemItem item;
-          item.severity = ProblemItem::Error; // HTML tag mismatch is an Error
-          item.category = QStringLiteral("HTML Syntax");
-          item.description = QStringLiteral("HTML parse error in Chapter %1 (\"%2\") near line %3: %4")
-                                 .arg(chIdx + 1)
-                                 .arg(ch.title())
-                                 .arg(line)
-                                 .arg(err);
-          item.chapterIndex = chIdx;
-          item.affectedChapters = { chIdx };
-          m_currentProblems.append(item);
-          errorCount++;
-          break;
-        }
-      }
-    }
-
-    // Check for inline style= attributes
-    static const QRegularExpression styleAttrRe(R"(\bstyle\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))", QRegularExpression::CaseInsensitiveOption);
-    if (html.contains(styleAttrRe)) {
-      ProblemItem item;
-      item.severity = ProblemItem::Warning;
-      item.category = QStringLiteral("AO3 Compliance");
-      item.description = QStringLiteral("Inline style= attributes detected in Chapter %1 (\"%2\"). AO3 strips inline styles upon posting.").arg(chIdx + 1).arg(ch.title());
-      item.chapterIndex = chIdx;
-      item.affectedChapters = { chIdx };
-      m_currentProblems.append(item);
-      warningCount++;
-    }
-
-    // Scan for disallowed HTML tags according to AO3 whitelist
-    QSet<QString> disallowedInChapter;
-    QRegularExpressionMatchIterator tagIt = tagExtractRe.globalMatch(html);
-    while (tagIt.hasNext()) {
-      const QString tagName = tagIt.next().captured(1).toLower();
-      if (!allowedTags.contains(tagName) && !disallowedInChapter.contains(tagName)) {
-        disallowedInChapter.insert(tagName);
-        ProblemItem item;
-        item.severity = ProblemItem::Warning;
-        item.category = QStringLiteral("AO3 Compliance");
-        item.description = QStringLiteral("Disallowed HTML tag <%1> detected in Chapter %2 (\"%3\"). AO3 will strip this tag upon posting.")
-                               .arg(tagName)
-                               .arg(chIdx + 1)
-                               .arg(ch.title());
-        item.chapterIndex = chIdx;
-        item.affectedChapters = { chIdx };
-        m_currentProblems.append(item);
-        warningCount++;
-      }
-    }
-
-    // Scan chapter HTML for used CSS classes missing from Work Skin CSS
-    QRegularExpressionMatchIterator it = classAttrRe.globalMatch(html);
-    while (it.hasNext()) {
-      QRegularExpressionMatch m = it.next();
-      const QStringList classes = m.captured(1).split(QLatin1Char(' '), Qt::SkipEmptyParts);
-      for (const QString &cls : classes) {
-        if (!cssClassSet.contains(cls)) {
-          if (!missingClassChapters[cls].contains(chIdx)) {
-            missingClassChapters[cls].append(chIdx);
-          }
-        }
-      }
-    }
-
-    chIdx++;
-  }
-
-  // Add missing/removed CSS class warnings
-  for (auto iter = missingClassChapters.constBegin(); iter != missingClassChapters.constEnd(); ++iter) {
-    const QString &cls = iter.key();
-    const QList<int> &chList = iter.value();
-
-    ProblemItem item;
-    item.severity = ProblemItem::Warning;
-    item.category = QStringLiteral("Work Skin CSS");
-    if (chList.size() <= 2) {
-      QStringList chNames;
-      for (int idx : chList) {
-        chNames << QStringLiteral("Chapter %1").arg(idx + 1);
-      }
-      item.description = QStringLiteral("CSS class '.%1' is used in %2, but is missing from Work Skin.").arg(cls, chNames.join(QStringLiteral(", ")));
-    } else {
-      item.description = QStringLiteral("CSS class '.%1' is used across %2 chapters, but is missing from Work Skin.").arg(cls).arg(chList.size());
-    }
-    item.chapterIndex = chList.first();
-    item.affectedChapters = chList;
-    m_currentProblems.append(item);
-    warningCount++;
+void MainWindow::onDiagnosticsReady(const QList<ProblemItem> &problems, int errorCount, int warningCount) {
+  m_currentProblems = problems;
+  if (m_problemsDialog) {
+    m_problemsDialog->setProblems(m_currentProblems);
   }
 
   if (!m_problemsBadgeButton)
@@ -1979,7 +1874,26 @@ void MainWindow::updateProblemsDiagnostics() {
   }
 }
 
+void MainWindow::onComponentTerminated(const QString &componentName, bool isPlugin, const QString &reason) {
+  const QString prefix = isPlugin ? tr("Third-party Plugin") : tr("Core Component");
+  const QString msg = tr("⚠️ %1 '%2' was terminated: %3").arg(prefix, componentName, reason);
+  qCWarning(logApp) << msg;
+  statusBar()->showMessage(msg, 10000);
+
+  QMessageBox::warning(this, tr("Component Terminated — Watchdog Alert"),
+                       tr("<h3>⚠️ %1 Terminated</h3>"
+                          "<p>A component was terminated because it exceeded execution limits or became unresponsive:</p>"
+                          "<p><b>Component:</b> %2<br/>"
+                          "<b>Reason:</b> %3</p>"
+                          "<p>Ensemble has isolated the failure and maintained application stability without locking up your workspace.</p>")
+                           .arg(prefix, componentName.toHtmlEscaped(), reason.toHtmlEscaped()));
+}
+
 void MainWindow::onThemeChanged(AppTheme theme) {
+  MainThreadWatchdog::ScopedCheckpoint cp(
+      QStringLiteral("MainWindow::onThemeChanged"),
+      QStringLiteral("Theme: %1").arg(static_cast<int>(theme)));
+
   if (m_darkThemeAction) m_darkThemeAction->setChecked(theme == AppTheme::Dark);
   if (m_darkerThemeAction) m_darkerThemeAction->setChecked(theme == AppTheme::Darker);
   if (m_lightThemeAction) m_lightThemeAction->setChecked(theme == AppTheme::Light);
@@ -2159,6 +2073,16 @@ void MainWindow::onShowPluginManager() {
   m_pluginManagerDialog->show();
   m_pluginManagerDialog->raise();
   m_pluginManagerDialog->activateWindow();
+}
+
+void MainWindow::onShowResourceManager() {
+  if (!m_resourceManagerDialog) {
+    m_resourceManagerDialog = new ResourceManagerDialog(&m_project, this);
+  }
+  m_resourceManagerDialog->refreshAll();
+  m_resourceManagerDialog->show();
+  m_resourceManagerDialog->raise();
+  m_resourceManagerDialog->activateWindow();
 }
 
 void MainWindow::updatePluginActionsMenu() {

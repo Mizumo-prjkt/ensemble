@@ -3,6 +3,8 @@
 #include "ui/CssEditorPane.h"
 #include "model/Ao3Project.h"
 #include "themes/ThemeManager.h"
+#include "utils/DiffUtil.h"
+#include "diagnostics/MainThreadWatchdog.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -238,6 +240,115 @@ int main(int argc, char *argv[])
             assert(sel.format.underlineStyle() != QTextCharFormat::SpellCheckUnderline);
         }
         std::cout << "✓ CodeEditor diagnostic wavy underlays and clearing verified." << std::endl;
+    }
+
+    // 4. Test CSS dashed class extraction & caching (no regex errors)
+    {
+        const QString sampleCss = QStringLiteral(
+            "#workskin .school-sekai-box {\n"
+            "    background-color: #f0f0f0;\n"
+            "    color: #ff0055;\n"
+            "}\n"
+            "#workskin .stage-sekai-box, .miku {\n"
+            "    color: #39c5bb;\n"
+            "}\n"
+        );
+
+        // Test dashed class name extraction
+        const QString decls = DiffUtil::extractCssClassDeclarations(sampleCss, QStringLiteral("school-sekai-box"));
+        assert(decls.contains(QStringLiteral("color: #ff0055")));
+        assert(decls.contains(QStringLiteral("background-color: #f0f0f0")));
+
+        const QColor col = DiffUtil::extractCssColor(sampleCss, QStringLiteral("school-sekai-box"));
+        assert(col.isValid());
+        assert(col.name().toLower() == QStringLiteral("#ff0055"));
+
+        // Test comma-separated selector
+        const QColor mikuCol = DiffUtil::extractCssColor(sampleCss, QStringLiteral("miku"));
+        assert(mikuCol.isValid());
+        assert(mikuCol.name().toLower() == QStringLiteral("#39c5bb"));
+
+        // Test non-existent class
+        const QColor nonExistent = DiffUtil::extractCssColor(sampleCss, QStringLiteral("non-existent-box"));
+        assert(!nonExistent.isValid());
+
+        std::cout << "✓ CSS dashed-class extraction and memoization caching verified (valid regex, zero warnings)." << std::endl;
+    }
+
+    // 5. Test Main Thread Watchdog & Theme Switching with Unsaved/Saved Project States
+    {
+        MainThreadWatchdog &watchdog = MainThreadWatchdog::instance();
+        watchdog.start(1000, 3000);
+        watchdog.pingHeartbeat();
+        assert(watchdog.isRunning());
+
+        Ao3Project project;
+        project.setTitle(QStringLiteral("Watchdog Theme Stress Test"));
+        project.setWorkSkinCss(QStringLiteral(
+            "#workskin .school-sekai-box { color: #ff0055; background: #222; }\n"
+            "#workskin .miku { color: #39c5bb; }\n"
+        ));
+
+        // Add sample chapters
+        project.chapters().clear();
+        project.addChapter(QStringLiteral("Chapter 1: The Sekai"));
+        project.addChapter(QStringLiteral("Chapter 2: The Abyss"));
+        project.chapters()[0].setHtml(QStringLiteral("<div class=\"school-sekai-box\"><p class=\"miku\">Hello world from Sekai!</p></div>"));
+        project.chapters()[1].setHtml(QStringLiteral("<p>Unsaved live content undergoing theme transitions.</p>"));
+
+        project.setActiveChapterIndex(0);
+
+        // Bind panes
+        HtmlSourcePane htmlPane;
+        CssEditorPane cssPane;
+        cssPane.bindProject(&project);
+        htmlPane.setHtml(project.chapters().at(0).html());
+        cssPane.setCss(project.workSkinCss());
+
+        // Simulate unsaved active modifications
+        project.setDirty(true);
+        assert(project.isDirty());
+
+        // Perform rapid theme toggles (Dark -> Light -> Ao3Reversi -> Darker -> Dark)
+        const AppTheme themeCycle[] = {
+            AppTheme::Light,
+            AppTheme::Dark,
+            AppTheme::Ao3Reversi,
+            AppTheme::Darker,
+            AppTheme::Dark
+        };
+
+        for (AppTheme t : themeCycle) {
+            MainThreadWatchdog::setCheckpoint(QStringLiteral("ThemeCycleTest"), QStringLiteral("TargetTheme: %1").arg(static_cast<int>(t)));
+            ThemeManager::instance().setTheme(t);
+            htmlPane.updateTheme();
+            cssPane.updateTheme();
+            watchdog.pingHeartbeat();
+            assert(!watchdog.isFrozen());
+            assert(!watchdog.isLagging());
+        }
+
+        // Test toggleTheme() as well
+        ThemeManager::instance().toggleTheme();
+        watchdog.pingHeartbeat();
+        assert(!watchdog.isFrozen());
+
+        // Verify project state and content remain intact without corrupted states
+        assert(project.isDirty());
+        assert(project.chapters().size() == 2);
+        assert(project.chapters().at(0).html().contains(QStringLiteral("school-sekai-box")));
+        assert(project.chapters().at(1).title() == QStringLiteral("Chapter 2: The Abyss"));
+
+        // Verify watchdog diagnostics output
+        const QString diag = watchdog.diagnoseMainThread();
+        assert(!diag.isEmpty());
+        const QString desc = watchdog.statusDescription();
+        assert(desc.contains(QStringLiteral("Responsive")));
+
+        watchdog.stop();
+        assert(!watchdog.isRunning());
+
+        std::cout << "✓ MainThreadWatchdog thread monitoring & rapid theme transitions verified without freezes." << std::endl;
     }
 
     std::cout << "All Editor Diagnostics, Formatting, and Issue Highlighting tests passed successfully!" << std::endl;

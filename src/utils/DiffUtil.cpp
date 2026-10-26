@@ -4,6 +4,9 @@
 #include <QTimeZone>
 #include <QSysInfo>
 #include <QRegularExpression>
+#include <QHash>
+#include <QMutex>
+#include <QMutexLocker>
 #include <vector>
 #include <algorithm>
 
@@ -284,49 +287,107 @@ QString createProjectDiff(const QMap<QString, QString> &oldState,
     return diffResult.trimmed() + QLatin1Char('\n');
 }
 
+namespace {
+struct CssLookupCache {
+    QMutex mutex;
+    QHash<QString, QString> declarations;
+    QHash<QString, QColor> colors;
+};
+static CssLookupCache s_cssCache;
+} // namespace
+
 QString extractCssClassDeclarations(const QString &css, const QString &className)
 {
-    if (css.trimmed().isEmpty() || className.trimmed().isEmpty()) {
+    const QString trimmedCls = className.trimmed();
+    if (css.trimmed().isEmpty() || trimmedCls.isEmpty()) {
         return QString();
     }
 
-    // Matches e.g. .haruka { ... } or #workskin .haruka, .haruka:hover { ... }
-    const QString escaped = QRegularExpression::escape(className.trimmed());
-    const QRegularExpression re(QStringLiteral(R"((?:^|\})\s*([^{]*\b\.)") + escaped + QStringLiteral(R"(\b[^{]*\{([^}]+)\})"));
-
-    QStringList allRules;
-    auto it = re.globalMatch(css);
-    while (it.hasNext()) {
-        const auto match = it.next();
-        QString decls = match.captured(2).trimmed();
-        // Clean up multi-line whitespace
-        decls = decls.simplified();
-        if (!decls.isEmpty() && !allRules.contains(decls)) {
-            allRules.append(decls);
+    const QString cacheKey = QString::number(qHash(css)) + QLatin1String("::") + trimmedCls;
+    {
+        QMutexLocker locker(&s_cssCache.mutex);
+        auto it = s_cssCache.declarations.constFind(cacheKey);
+        if (it != s_cssCache.declarations.constEnd()) {
+            return it.value();
         }
     }
 
-    return allRules.join(QStringLiteral(" | "));
+    // Matches e.g. .haruka { ... } or #workskin .haruka, .haruka:hover { ... }
+    const QString escaped = QRegularExpression::escape(trimmedCls);
+    // Pattern: (?:^|\})[^{}]*\.<escaped>(?![a-zA-Z0-9_-])[^{}]*\{([^}]+)\}
+    const QRegularExpression re(QStringLiteral(R"((?:^|\})[^{}]*\.)") + escaped + QStringLiteral(R"((?![a-zA-Z0-9_-])[^{}]*\{([^}]+)\})"));
+
+    QStringList allRules;
+    if (re.isValid()) {
+        auto it = re.globalMatch(css);
+        while (it.hasNext()) {
+            const auto match = it.next();
+            QString decls = match.captured(1).trimmed();
+            // Clean up multi-line whitespace
+            decls = decls.simplified();
+            if (!decls.isEmpty() && !allRules.contains(decls)) {
+                allRules.append(decls);
+            }
+        }
+    }
+
+    const QString result = allRules.join(QStringLiteral(" | "));
+    {
+        QMutexLocker locker(&s_cssCache.mutex);
+        if (s_cssCache.declarations.size() > 4096) {
+            s_cssCache.declarations.clear();
+        }
+        s_cssCache.declarations.insert(cacheKey, result);
+    }
+    return result;
 }
 
 QColor extractCssColor(const QString &css, const QString &className)
 {
-    const QString decls = extractCssClassDeclarations(css, className);
-    if (decls.isEmpty()) {
+    const QString trimmedCls = className.trimmed();
+    if (css.trimmed().isEmpty() || trimmedCls.isEmpty()) {
         return QColor();
     }
 
-    // Match color: <value>;
-    static const QRegularExpression colorRe(QStringLiteral(R"(\bcolor\s*:\s*([^;!\}]+))"), QRegularExpression::CaseInsensitiveOption);
+    const QString cacheKey = QString::number(qHash(css)) + QLatin1String("::") + trimmedCls;
+    {
+        QMutexLocker locker(&s_cssCache.mutex);
+        auto it = s_cssCache.colors.constFind(cacheKey);
+        if (it != s_cssCache.colors.constEnd()) {
+            return it.value();
+        }
+    }
+
+    const QString decls = extractCssClassDeclarations(css, trimmedCls);
+    if (decls.isEmpty()) {
+        QMutexLocker locker(&s_cssCache.mutex);
+        if (s_cssCache.colors.size() > 4096) {
+            s_cssCache.colors.clear();
+        }
+        s_cssCache.colors.insert(cacheKey, QColor());
+        return QColor();
+    }
+
+    // Match foreground color: <value>; (not background-color or border-color)
+    static const QRegularExpression colorRe(QStringLiteral(R"((?<![-\w])color\s*:\s*([^;!\}]+))"), QRegularExpression::CaseInsensitiveOption);
     const auto match = colorRe.match(decls);
+    QColor result;
     if (match.hasMatch()) {
         const QString colorStr = match.captured(1).trimmed();
         QColor col(colorStr);
         if (col.isValid()) {
-            return col;
+            result = col;
         }
     }
-    return QColor();
+
+    {
+        QMutexLocker locker(&s_cssCache.mutex);
+        if (s_cssCache.colors.size() > 4096) {
+            s_cssCache.colors.clear();
+        }
+        s_cssCache.colors.insert(cacheKey, result);
+    }
+    return result;
 }
 
 QString defaultAuthorTag(const QString &customName)

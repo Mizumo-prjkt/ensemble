@@ -58,18 +58,21 @@ void ResourceGuard::tick(int line, int column) {
 void ResourceGuard::alloc(size_t bytes, int line, int column) {
     if (bytes == 0) return;
 
-    if (m_currentMemoryBytes + bytes > m_limits.maxMemoryBytes) {
+    size_t curr = m_currentMemoryBytes.load(std::memory_order_relaxed);
+    if (curr + bytes > m_limits.maxMemoryBytes) {
         throw ScriptTrap("Memory limit exceeded (requested " + std::to_string(bytes) + " bytes, limit is " +
                          std::to_string(m_limits.maxMemoryBytes / (1024 * 1024)) + " MB)", line, column);
     }
-    m_currentMemoryBytes += bytes;
+    m_currentMemoryBytes.fetch_add(bytes, std::memory_order_relaxed);
 }
 
 void ResourceGuard::free(size_t bytes) noexcept {
-    if (bytes >= m_currentMemoryBytes) {
-        m_currentMemoryBytes = 0;
+    if (bytes == 0) return;
+    size_t curr = m_currentMemoryBytes.load(std::memory_order_relaxed);
+    if (bytes >= curr) {
+        m_currentMemoryBytes.store(0, std::memory_order_relaxed);
     } else {
-        m_currentMemoryBytes -= bytes;
+        m_currentMemoryBytes.fetch_sub(bytes, std::memory_order_relaxed);
     }
 }
 

@@ -6,6 +6,7 @@
 #include "export/Ao3HtmlImporter.h"
 #include "debug/debug.hpp"
 #include "themes/ThemeManager.h"
+#include "diagnostics/MainThreadWatchdog.h"
 
 #include <QAbstractTextDocumentLayout>
 #include <QAction>
@@ -48,7 +49,7 @@
 static constexpr int CssClassProperty = QTextFormat::Property::UserProperty + 1;
 static constexpr int CssElementModeProperty = QTextFormat::Property::UserProperty + 2;
 
-static void applySpanFormatToCharFormat(QTextCharFormat &fmt, const QStringList &classes, const QString &customCss, bool isDark)
+static void applySpanFormatToCharFormat(QTextCharFormat &fmt, const QStringList &classes, const QString &customCss, bool isDark, QHash<QString, QColor> *colorCache = nullptr)
 {
     if (classes.isEmpty()) {
         fmt.setProperty(CssClassProperty, QVariant());
@@ -64,7 +65,18 @@ static void applySpanFormatToCharFormat(QTextCharFormat &fmt, const QStringList 
 
     QColor classColor;
     for (const QString &cls : classes) {
-        QColor col = DiffUtil::extractCssColor(customCss, cls);
+        QColor col;
+        if (colorCache) {
+            auto it = colorCache->constFind(cls);
+            if (it != colorCache->constEnd()) {
+                col = it.value();
+            } else {
+                col = DiffUtil::extractCssColor(customCss, cls);
+                colorCache->insert(cls, col);
+            }
+        } else {
+            col = DiffUtil::extractCssColor(customCss, cls);
+        }
         if (col.isValid()) {
             classColor = col;
             break;
@@ -95,7 +107,7 @@ static void applySpanFormatToCharFormat(QTextCharFormat &fmt, const QStringList 
     fmt.setUnderlineStyle(QTextCharFormat::DotLine);
 }
 
-static void applyDivFormatToCharFormat(QTextCharFormat &fmt, const QStringList &classes, const QString &customCss, bool isDark)
+static void applyDivFormatToCharFormat(QTextCharFormat &fmt, const QStringList &classes, const QString &customCss, bool isDark, QHash<QString, QColor> *colorCache = nullptr)
 {
     if (classes.isEmpty()) {
         fmt.setProperty(CssClassProperty, QVariant());
@@ -111,7 +123,18 @@ static void applyDivFormatToCharFormat(QTextCharFormat &fmt, const QStringList &
 
     QColor classColor;
     for (const QString &cls : classes) {
-        QColor col = DiffUtil::extractCssColor(customCss, cls);
+        QColor col;
+        if (colorCache) {
+            auto it = colorCache->constFind(cls);
+            if (it != colorCache->constEnd()) {
+                col = it.value();
+            } else {
+                col = DiffUtil::extractCssColor(customCss, cls);
+                colorCache->insert(cls, col);
+            }
+        } else {
+            col = DiffUtil::extractCssColor(customCss, cls);
+        }
         if (col.isValid()) {
             classColor = col;
             break;
@@ -142,12 +165,12 @@ static void applyDivFormatToCharFormat(QTextCharFormat &fmt, const QStringList &
     fmt.setUnderlineStyle(QTextCharFormat::SingleUnderline);
 }
 
-static void applyClassFormatToCharFormat(QTextCharFormat &fmt, const QStringList &classes, const QString &customCss, bool isDark, const QString &mode = QStringLiteral("span"))
+static void applyClassFormatToCharFormat(QTextCharFormat &fmt, const QStringList &classes, const QString &customCss, bool isDark, const QString &mode = QStringLiteral("span"), QHash<QString, QColor> *colorCache = nullptr)
 {
     if (mode == QStringLiteral("div")) {
-        applyDivFormatToCharFormat(fmt, classes, customCss, isDark);
+        applyDivFormatToCharFormat(fmt, classes, customCss, isDark, colorCache);
     } else {
-        applySpanFormatToCharFormat(fmt, classes, customCss, isDark);
+        applySpanFormatToCharFormat(fmt, classes, customCss, isDark, colorCache);
     }
 }
 
@@ -428,23 +451,47 @@ void EditorPane::refreshClassHighlights()
     if (!m_editor || !m_editor->document())
         return;
 
+    MainThreadWatchdog::ScopedCheckpoint cp(QStringLiteral("EditorPane::refreshClassHighlights"));
+    const bool wasBlocked = m_blockChanges;
+    m_blockChanges = true;
+
+    struct BlockFormatUpdate {
+        int position;
+        QTextBlockFormat format;
+    };
+
+    struct CharFormatUpdate {
+        int position;
+        int length;
+        QTextCharFormat format;
+    };
+
+    QVector<BlockFormatUpdate> blockUpdates;
+    QVector<CharFormatUpdate> charUpdates;
+    QHash<QString, QColor> colorCache;
+
     const bool isDark = ThemeManager::instance().isDarkMode();
+
+    // Phase 1: Pure read-only traversal to collect necessary format updates.
+    // We never modify QTextDocument during iteration to prevent iterator invalidation and exponential fragment fragmentation!
     for (QTextBlock block = m_editor->document()->begin(); block.isValid(); block = block.next()) {
         const QVariant bClassProp = block.blockFormat().property(CssClassProperty);
         const QVariant bModeProp = block.blockFormat().property(CssElementModeProperty);
         if (bModeProp.toString() == QStringLiteral("div") && bClassProp.isValid()) {
             QTextBlockFormat bFmt = block.blockFormat();
-            bFmt.setLeftMargin(20);
-            bFmt.setRightMargin(20);
-            bFmt.setTopMargin(4);
-            bFmt.setBottomMargin(4);
-            QTextCursor bCursor(block);
-            bCursor.setBlockFormat(bFmt);
+            if (bFmt.leftMargin() != 20 || bFmt.rightMargin() != 20 ||
+                bFmt.topMargin() != 4 || bFmt.bottomMargin() != 4) {
+                bFmt.setLeftMargin(20);
+                bFmt.setRightMargin(20);
+                bFmt.setTopMargin(4);
+                bFmt.setBottomMargin(4);
+                blockUpdates.append({block.position(), bFmt});
+            }
         }
 
         for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
             const QTextFragment frag = it.fragment();
-            if (!frag.isValid())
+            if (!frag.isValid() || frag.length() <= 0)
                 continue;
 
             const QTextCharFormat charFmt = frag.charFormat();
@@ -453,16 +500,42 @@ void EditorPane::refreshClassHighlights()
                 const QString modeStr = charFmt.property(CssElementModeProperty).toString();
                 const QStringList classes = classProp.toString().split(QLatin1Char(' '), Qt::SkipEmptyParts);
 
-                QTextCursor cur(m_editor->document());
-                cur.setPosition(frag.position());
-                cur.setPosition(frag.position() + frag.length(), QTextCursor::KeepAnchor);
-
                 QTextCharFormat newFmt = charFmt;
-                applyClassFormatToCharFormat(newFmt, classes, m_customCss, isDark, modeStr);
-                cur.mergeCharFormat(newFmt);
+                applyClassFormatToCharFormat(newFmt, classes, m_customCss, isDark, modeStr, &colorCache);
+
+                // Skip if visual formatting is already identical
+                if (charFmt.background() == newFmt.background() &&
+                    charFmt.foreground() == newFmt.foreground() &&
+                    charFmt.underlineColor() == newFmt.underlineColor() &&
+                    charFmt.underlineStyle() == newFmt.underlineStyle()) {
+                    continue;
+                }
+
+                charUpdates.append({frag.position(), frag.length(), newFmt});
             }
         }
     }
+
+    // Phase 2: Batch apply updates inside an edit block to avoid redundant layouts and event spam
+    if (!blockUpdates.isEmpty() || !charUpdates.isEmpty()) {
+        QTextCursor editCursor(m_editor->document());
+        editCursor.beginEditBlock();
+
+        for (const auto &bUp : blockUpdates) {
+            editCursor.setPosition(bUp.position);
+            editCursor.setBlockFormat(bUp.format);
+        }
+
+        for (const auto &cUp : charUpdates) {
+            editCursor.setPosition(cUp.position);
+            editCursor.setPosition(cUp.position + cUp.length, QTextCursor::KeepAnchor);
+            editCursor.mergeCharFormat(cUp.format);
+        }
+
+        editCursor.endEditBlock();
+    }
+
+    m_blockChanges = wasBlocked;
 }
 
 void EditorPane::setCustomCss(const QString &css)

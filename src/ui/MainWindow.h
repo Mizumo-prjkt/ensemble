@@ -31,6 +31,7 @@ class SettingsDialog;
 class HelpGuideDialog;
 class AgentThoughtsDialog;
 class LoreGraphDialog;
+class ResourceManagerDialog;
 class McpServer;
 class McpHandler;
 
@@ -103,9 +104,12 @@ private slots:
     void onShowAgentThoughts();
     void onShowLoreGraph();
     void onShowPluginManager();
+    void onShowResourceManager();
     void updatePluginActionsMenu();
     void onOpenChapterManager();
     void onEditProperties();
+    void onDiagnosticsReady(const QList<ProblemItem> &problems, int errorCount, int warningCount);
+    void onComponentTerminated(const QString &componentName, bool isPlugin, const QString &reason);
     void updateCursorPosition();
     void toggleInsertMode();
     void updateCapsLockState(bool active);
@@ -175,6 +179,7 @@ private:
     HelpGuideDialog *m_helpGuideDialog = nullptr;
     AgentThoughtsDialog *m_agentThoughtsDialog = nullptr;
     LoreGraphDialog *m_loreGraphDialog = nullptr;
+    ResourceManagerDialog *m_resourceManagerDialog = nullptr;
     EnsemblePlugin::PluginManagerDialog *m_pluginManagerDialog = nullptr;
     QMenu *m_toolsMenu = nullptr;
     QList<QAction*> m_pluginToolbarActions;
@@ -206,6 +211,7 @@ private:
     QTimer *m_htmlSyncTimer = nullptr;
     QTimer *m_previewTimer = nullptr;
     QTimer *m_autosaveTimer = nullptr;
+    QTimer *m_watchdogTimer = nullptr;
 
     bool m_hasActiveProject = false;
     bool m_syncInProgress = false;

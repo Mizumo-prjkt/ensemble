@@ -211,3 +211,67 @@ void Ao3Project::resetToNew()
 
     appendHistoryCommit(m_author, QStringLiteral("Initial project creation"));
 }
+
+int Ao3Project::loadedChaptersCount() const
+{
+    int count = 0;
+    for (const Chapter &ch : m_chapters) {
+        if (ch.isLoaded()) count++;
+    }
+    return count;
+}
+
+qint64 Ao3Project::inMemoryHtmlBytes() const
+{
+    qint64 bytes = 0;
+    for (const Chapter &ch : m_chapters) {
+        if (ch.isLoaded()) {
+            bytes += ch.html().toUtf8().size();
+        }
+    }
+    return bytes;
+}
+
+qint64 Ao3Project::totalStoryHtmlBytes() const
+{
+    qint64 bytes = 0;
+    for (const Chapter &ch : m_chapters) {
+        bytes += ch.htmlByteSize();
+    }
+    return bytes;
+}
+
+qint64 Ao3Project::chaptersMemoryBytes() const
+{
+    qint64 bytes = sizeof(QList<Chapter>) + m_chapters.capacity() * sizeof(Chapter);
+    for (const Chapter &ch : m_chapters) {
+        bytes += ch.memoryUsageBytes();
+    }
+    return bytes;
+}
+
+qint64 Ao3Project::workSkinMemoryBytes() const
+{
+    return sizeof(QString) + m_workSkinCss.capacity() * sizeof(QChar);
+}
+
+qint64 Ao3Project::loreMemoryBytes() const
+{
+    return static_cast<qint64>(m_lore.entities().size() * 256 +
+                               m_lore.historyEvents().size() * 128 +
+                               m_lore.conflicts().size() * 128 +
+                               m_lore.plans().size() * 128 +
+                               m_lore.defaultGraph().nodes().size() * 128 +
+                               m_lore.defaultGraph().connectors().size() * 64);
+}
+
+void Ao3Project::trimInactiveChaptersMemory(int preserveIndex)
+{
+    if (preserveIndex < 0) preserveIndex = m_activeChapterIndex;
+    for (int i = 0; i < m_chapters.size(); ++i) {
+        if (i != preserveIndex && m_chapters.at(i).isLoaded()) {
+            m_chapters[i].unloadToSessionCache();
+        }
+    }
+}
+

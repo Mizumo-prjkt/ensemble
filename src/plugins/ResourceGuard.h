@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -30,8 +31,8 @@ private:
  */
 struct ResourceLimits {
     size_t maxMemoryBytes = 8 * 1024 * 1024;       ///< Default: 8 MB memory cap
-    uint64_t maxAstSteps = 150000;                 ///< Default: 150,000 AST steps per hook
-    int64_t maxExecutionTimeMs = 250;              ///< Default: 250 ms wall-clock timeout per hook
+    uint64_t maxAstSteps = 500000;                 ///< Default: 500,000 AST steps per hook
+    int64_t maxExecutionTimeMs = 500;              ///< Default: 500 ms wall-clock timeout per hook
     int maxCallDepth = 64;                         ///< Default: 64 stack frames
     size_t maxDiskStorageBytes = 5 * 1024 * 1024;   ///< Default: 5 MB storage quota
 };
@@ -54,7 +55,7 @@ public:
     void enterFunction(int line = -1, int column = -1);
     void leaveFunction() noexcept;
 
-    size_t currentMemory() const noexcept { return m_currentMemoryBytes; }
+    size_t currentMemory() const noexcept { return m_currentMemoryBytes.load(std::memory_order_relaxed); }
     uint64_t currentSteps() const noexcept { return m_currentAstSteps; }
     int currentCallDepth() const noexcept { return m_currentCallDepth; }
     const ResourceLimits &limits() const noexcept { return m_limits; }
@@ -62,7 +63,7 @@ public:
 
 private:
     ResourceLimits m_limits;
-    size_t m_currentMemoryBytes = 0;
+    std::atomic<size_t> m_currentMemoryBytes{0};
     uint64_t m_currentAstSteps = 0;
     int m_currentCallDepth = 0;
     std::chrono::steady_clock::time_point m_startTime;

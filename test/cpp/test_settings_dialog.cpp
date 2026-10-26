@@ -9,6 +9,8 @@
 #include "utils/SingleInstanceManager.h"
 #include "mcp/McpServer.h"
 #include "mcp/McpAgentInstaller.h"
+#include "ui/PluginHostDialog.h"
+#include "ui/PluginManagerDialog.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -269,13 +271,13 @@ int main(int argc, char *argv[])
 
     // 4. Test SkinFlavor geometry metrics and styling
     tm.setSkinFlavor(SkinFlavor::MaterialYou);
-    assert(tm.buttonRadius() == 20); // Pill button
-    assert(tm.tabRadius() == 18);
-    assert(tm.cardRadius() == 22);
+    assert(tm.buttonRadius() == 8); // Balanced modern button radius to prevent clipping text
+    assert(tm.tabRadius() == 8);
+    assert(tm.cardRadius() == 12);
     assert(!tm.selectionBgCss().isEmpty());
     assert(tm.getEditorPaneStyleSheet().contains("selection-background-color"));
     assert(tm.getCodeEditorStyleSheet().contains("selection-background-color"));
-    std::cout << "✓ Android Material You pill button radius (20px) and selection CSS verified." << std::endl;
+    std::cout << "✓ Android Material You refined button radius (8px) and selection CSS verified." << std::endl;
 
     tm.setSkinFlavor(SkinFlavor::KdeUi);
     assert(tm.buttonRadius() == 3); // Breeze 3px radius
@@ -659,6 +661,67 @@ int main(int argc, char *argv[])
         assert(loadDlg.currentStatus() == QStringLiteral("Ready!"));
 
         std::cout << "✓ ProjectLoadingDialog progress, bounds, theme updates, and finish lifecycle verified." << std::endl;
+    }
+
+    // 13. Test PluginHostDialog & PluginManagerDialog Close / Dismiss Behavior
+    {
+        bool closedEmitted = false;
+        QString closedWinId;
+        auto *hostDlg = new EnsemblePlugin::PluginHostDialog(
+            QStringLiteral("author.dialogue-checker"),
+            QStringLiteral("win_test_close"),
+            QStringLiteral("Dialogue Analysis"),
+            450, 320
+        );
+
+        QObject::connect(hostDlg, &EnsemblePlugin::PluginHostDialog::dialogClosed,
+                         [&](const QString &wid) {
+                             closedEmitted = true;
+                             closedWinId = wid;
+                         });
+
+        hostDlg->addLabel(QStringLiteral("Chapter Dialogue & Quotation Analysis:"));
+        hostDlg->addText(QStringLiteral("Total quotes: 0\nLines with unmatched pairs: 0"));
+        hostDlg->addButton(QStringLiteral("Close"), QStringLiteral("close_window"));
+        hostDlg->show();
+
+        // Find the "Close" button inside the host dialog
+        QList<QPushButton *> buttons = hostDlg->findChildren<QPushButton *>();
+        QPushButton *closeButton = nullptr;
+        for (auto *b : buttons) {
+            if (b->text() == QStringLiteral("Close")) {
+                closeButton = b;
+                break;
+            }
+        }
+        assert(closeButton != nullptr);
+
+        // Click the close button
+        closeButton->click();
+        qApp->processEvents();
+
+        assert(closedEmitted);
+        assert(closedWinId == QStringLiteral("win_test_close"));
+        assert(!hostDlg->isVisible());
+
+        // Test PluginManagerDialog close button
+        auto *pmDlg = new EnsemblePlugin::PluginManagerDialog();
+        pmDlg->show();
+        QList<QPushButton *> pmButtons = pmDlg->findChildren<QPushButton *>();
+        QPushButton *pmCloseBtn = nullptr;
+        for (auto *b : pmButtons) {
+            if (b->text() == QStringLiteral("Close")) {
+                pmCloseBtn = b;
+                break;
+            }
+        }
+        assert(pmCloseBtn != nullptr);
+        pmCloseBtn->click();
+        qApp->processEvents();
+        assert(!pmDlg->isVisible());
+        delete pmDlg;
+
+        std::cout << "✓ PluginHostDialog & PluginManagerDialog Close / Dismiss lifecycle verified." << std::endl;
     }
 
     std::cout << "All Settings, Preferences, Help Guide & Main Menu lifecycle tests passed successfully!" << std::endl;

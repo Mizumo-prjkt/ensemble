@@ -138,6 +138,7 @@ set(SOURCES
     src/ui/ProjectLoadingDialog.cpp
     src/ui/ChapterManagerDialog.cpp
     src/ui/ImageEmbedDialog.cpp
+    src/ui/ResourceManagerDialog.cpp
     src/themes/themes.cpp
     src/debug/debug.cpp
     src/utils/AppPaths.cpp
@@ -159,9 +160,13 @@ set(SOURCES
     src/plugins/PluginScanner.cpp
     src/ui/PluginHostDialog.cpp
     src/ui/PluginManagerDialog.cpp
+    src/diagnostics/ProjectDiagnosticsRunner.cpp
+    src/diagnostics/MainThreadWatchdog.cpp
 )
 
 set(HEADERS
+    src/diagnostics/ProjectDiagnosticsRunner.h
+    src/diagnostics/MainThreadWatchdog.h
     src/utils/DiffUtil.h
     src/ui/MainWindow.h
     src/ui/EditorPane.h
@@ -210,6 +215,7 @@ set(HEADERS
     src/ui/AgentThoughtsDialog.h
     src/ui/LoreGraphDialog.h
     src/ui/ProjectPropertiesDialog.h
+    src/ui/ResourceManagerDialog.h
     src/themes/ThemeManager.h
     src/themes/themes.h
     src/debug/debug.hpp
@@ -388,6 +394,8 @@ add_executable(test_settings_dialog
     src/ui/AppIcon.cpp
     src/themes/themes.cpp
     src/themes/ThemeManager.h
+    src/diagnostics/MainThreadWatchdog.cpp
+    src/diagnostics/MainThreadWatchdog.h
     src/debug/debug.cpp
     src/utils/AppPaths.cpp
     src/utils/SingleInstanceManager.cpp
@@ -473,6 +481,8 @@ add_executable(test_editor_diagnostics
     src/debug/debug.cpp
     src/utils/AppPaths.cpp
     src/utils/DiffUtil.cpp
+    src/diagnostics/MainThreadWatchdog.cpp
+    src/diagnostics/MainThreadWatchdog.h
 )
 target_include_directories(test_editor_diagnostics PRIVATE src)
 target_compile_definitions(test_editor_diagnostics PRIVATE

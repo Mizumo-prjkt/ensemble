@@ -29,6 +29,7 @@ public:
     void addText(const QString &content, bool readOnly = true);
     void addInput(const QString &placeholder, const QString &defaultText = QString());
     void addButton(const QString &label, const QString &actionName);
+    void clearWidgets();
 
 signals:
     void actionTriggered(const QString &publicId,
@@ -36,6 +37,10 @@ signals:
                          const QString &actionName,
                          const QVariantMap &inputs);
     void dialogClosed(const QString &winId);
+
+public slots:
+    void accept() override;
+    void reject() override;
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -45,6 +50,7 @@ private:
     QString m_winId;
     QVBoxLayout *m_contentLayout = nullptr;
     QList<QLineEdit *> m_inputs;
+    bool m_closing = false;
 };
 
 } // namespace EnsemblePlugin

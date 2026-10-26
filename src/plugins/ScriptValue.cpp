@@ -474,6 +474,30 @@ ScriptValue ScriptValue::callMember(const std::string &methodName, const std::ve
             size_t p = s.find(sub);
             return ScriptValue(p == std::string::npos ? -1 : static_cast<int>(p));
         }
+        if (methodName == "count") {
+            if (args.empty()) throw ScriptTrap("count() requires 1 argument", line, col);
+            std::string sub = args.at(0).toString();
+            if (sub.empty()) return ScriptValue(0);
+            int64_t occurrences = 0;
+            size_t pos = 0;
+            while ((pos = s.find(sub, pos)) != std::string::npos) {
+                occurrences++;
+                pos += sub.length();
+            }
+            return ScriptValue(occurrences);
+        }
+        if (methodName == "lower") {
+            std::string res = s;
+            for (char &c : res) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            guard.alloc(res.capacity(), line, col);
+            return ScriptValue(std::move(res));
+        }
+        if (methodName == "upper") {
+            std::string res = s;
+            for (char &c : res) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            guard.alloc(res.capacity(), line, col);
+            return ScriptValue(std::move(res));
+        }
     }
 
     // Built-in List methods

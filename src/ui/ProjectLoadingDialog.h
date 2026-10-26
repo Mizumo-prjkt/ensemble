@@ -16,6 +16,7 @@ public:
     ~ProjectLoadingDialog() override = default;
 
     void setProgress(int percent, const QString &statusMessage);
+    void logDiagnostic(const QString &message, bool isError = false);
     void finish();
 
     void updateTheme();
@@ -30,5 +31,6 @@ private:
     QLabel *m_fileNameLabel = nullptr;
     QProgressBar *m_progressBar = nullptr;
     QLabel *m_statusLabel = nullptr;
+    class QTextEdit *m_detailsLog = nullptr;
     QFrame *m_cardFrame = nullptr;
 };

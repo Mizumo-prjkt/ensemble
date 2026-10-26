@@ -73,6 +73,7 @@ private:
     std::vector<RegisteredHook> m_chapterChangeHooks;
     std::vector<RegisteredHook> m_toolbarClickHooks;
     std::vector<RegisteredHook> m_messageHooks;
+    std::vector<RegisteredHook> m_windowActionHooks;
 };
 
 } // namespace EnsemblePlugin

@@ -463,6 +463,10 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
         }
         for (const ChapterMeta &meta : chapMetas) {
             Chapter ch;
+            if (!meta.idStr.isEmpty()) {
+                const QUuid uid = QUuid::fromString(meta.idStr);
+                if (!uid.isNull()) ch.setId(uid);
+            }
             ch.setTitle(meta.title.isEmpty() ? QStringLiteral("Untitled Chapter") : meta.title);
             ch.setOrder(needsReorder ? fallbackOrder++ : meta.order);
             if (!meta.fileRelPath.isEmpty() && entries.contains(meta.fileRelPath)) {
@@ -482,6 +486,7 @@ ProjectLoadReport ProjectSerializer::loadWithValidation(const QString &path, Ao3
                     project.chapters()[i].setOrder(i);
                 }
             }
+            project.trimInactiveChaptersMemory(project.activeChapterIndex());
         }
 
         if (progress) {
@@ -784,5 +789,7 @@ bool ProjectSerializer::save(const QString &path, const Ao3Project &project, QSt
     project.lore().serializeToArchive(fileEntries);
 
     // 5. Package and compress using ZstdArchive (outputs standard .ao3proj container)
-    return ZstdArchive::compressArchive(path, fileEntries, error);
+    bool ok = ZstdArchive::compressArchive(path, fileEntries, error);
+    const_cast<Ao3Project &>(project).trimInactiveChaptersMemory(project.activeChapterIndex());
+    return ok;
 }

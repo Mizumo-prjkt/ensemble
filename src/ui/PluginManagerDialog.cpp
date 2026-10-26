@@ -20,6 +20,28 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+namespace {
+QString formatBytes(qint64 bytes)
+{
+    if (bytes <= 0) {
+        return QStringLiteral("0 B");
+    }
+    if (bytes < 1024) {
+        return QStringLiteral("%1 B").arg(bytes);
+    }
+    double kb = bytes / 1024.0;
+    if (kb < 1024.0) {
+        return QStringLiteral("%1 KB").arg(QString::number(kb, 'f', 1));
+    }
+    double mb = kb / 1024.0;
+    if (mb < 1024.0) {
+        return QStringLiteral("%1 MB").arg(QString::number(mb, 'f', 2));
+    }
+    double gb = mb / 1024.0;
+    return QStringLiteral("%1 GB").arg(QString::number(gb, 'f', 2));
+}
+} // namespace
+
 namespace EnsemblePlugin {
 
 PluginManagerDialog::PluginManagerDialog(QWidget *parent)
@@ -27,6 +49,9 @@ PluginManagerDialog::PluginManagerDialog(QWidget *parent)
 {
     setWindowTitle(tr("[Beta] Scripting Plugins Manager"));
     resize(840, 560);
+    setModal(false);
+    setWindowModality(Qt::NonModal);
+    setWindowFlags(Qt::Window | Qt::WindowTitleHint | Qt::WindowCloseButtonHint | Qt::WindowMinMaxButtonsHint);
     setupUi();
     refreshPluginList();
     refreshAuditLogs();
@@ -82,11 +107,13 @@ void PluginManagerDialog::setupUi() {
     m_statusBadge = new QLabel(tr("<b>Status:</b> -"), this);
     m_pathLabel = new QLabel(tr("<b>Path:</b> -"), this);
     m_pathLabel->setWordWrap(true);
+    m_resourceUsageLabel = new QLabel(tr("<b>Resource Usage:</b> -"), this);
 
     overviewLayout->addWidget(m_nameLabel);
     overviewLayout->addWidget(m_idLabel);
     overviewLayout->addWidget(m_versionLabel);
     overviewLayout->addWidget(m_statusBadge);
+    overviewLayout->addWidget(m_resourceUsageLabel);
     overviewLayout->addWidget(m_pathLabel);
 
     m_errorBox = new QTextEdit(this);
@@ -163,10 +190,6 @@ void PluginManagerDialog::setupUi() {
     connect(m_allowDetectedBtn, &QPushButton::clicked, this, &PluginManagerDialog::onAllowAllDetectedDomainsClicked);
     domainBtnRow->addWidget(m_allowDetectedBtn);
 
-    m_addDomainBtn = new QPushButton(tr("Add Domain..."), this);
-    connect(m_addDomainBtn, &QPushButton::clicked, this, &PluginManagerDialog::onAddDomainClicked);
-    domainBtnRow->addWidget(m_addDomainBtn);
-
     m_removeDomainBtn = new QPushButton(tr("Remove"), this);
     connect(m_removeDomainBtn, &QPushButton::clicked, this, &PluginManagerDialog::onRemoveDomainClicked);
     domainBtnRow->addWidget(m_removeDomainBtn);
@@ -234,16 +257,18 @@ void PluginManagerDialog::setupUi() {
     btnRow->addStretch();
 
     auto *closeBtn = new QPushButton(tr("Close"), this);
-    connect(closeBtn, &QPushButton::clicked, this, &QDialog::accept);
+    connect(closeBtn, &QPushButton::clicked, this, &QWidget::close);
     btnRow->addWidget(closeBtn);
 
     mainLayout->addLayout(btnRow);
 }
 
 void PluginManagerDialog::refreshPluginList() {
+    QString prevSelected = m_selectedPublicId;
     m_table->setRowCount(0);
     const auto list = PluginManager::instance().plugins();
 
+    int targetRow = -1;
     for (int row = 0; row < list.size(); ++row) {
         const auto &meta = list.at(row);
         m_table->insertRow(row);
@@ -266,10 +291,18 @@ void PluginManagerDialog::refreshPluginList() {
         m_table->setItem(row, 1, idItem);
         m_table->setItem(row, 2, verItem);
         m_table->setItem(row, 3, statusItem);
+
+        if (!prevSelected.isEmpty() && meta.publicId == prevSelected) {
+            targetRow = row;
+        }
     }
 
     if (m_table->rowCount() > 0) {
-        m_table->selectRow(0);
+        if (targetRow >= 0) {
+            m_table->selectRow(targetRow);
+        } else {
+            m_table->selectRow(0);
+        }
     } else {
         updateDetailsPane(QString());
         updatePermissionsPane(QString());
@@ -299,6 +332,7 @@ void PluginManagerDialog::updateDetailsPane(const QString &publicId) {
         m_versionLabel->setText(tr("<b>Version:</b> -"));
         m_statusBadge->setText(tr("<b>Status:</b> -"));
         m_pathLabel->setText(tr("<b>Path:</b> -"));
+        m_resourceUsageLabel->setText(tr("<b>Resource Usage:</b> -"));
         m_errorBox->clear();
         m_actionCombo->clear();
         m_runActionBtn->setEnabled(false);
@@ -312,6 +346,8 @@ void PluginManagerDialog::updateDetailsPane(const QString &publicId) {
     m_idLabel->setText(tr("<b>ID:</b> %1").arg(meta.publicId));
     m_versionLabel->setText(tr("<b>Version:</b> %1").arg(meta.version));
     m_pathLabel->setText(tr("<b>Path:</b> %1").arg(meta.filePath.isEmpty() ? tr("<in-memory>") : meta.filePath));
+    m_resourceUsageLabel->setText(tr("<b>Resource Usage:</b> Heap: %1 / 8.00 MiB | Storage: %2 / 5.00 MiB")
+                                      .arg(formatBytes(meta.memoryUsedBytes), formatBytes(meta.storageUsedBytes)));
     m_uninstallBtn->setEnabled(true);
 
     if (meta.quarantined) {
@@ -321,7 +357,14 @@ void PluginManagerDialog::updateDetailsPane(const QString &publicId) {
         m_toggleActiveBtn->setEnabled(false);
     } else if (meta.faulted) {
         m_statusBadge->setText(tr("<b>Status:</b> <span style='color: red;'>Faulted (Line %1)</span>").arg(meta.faultLine));
-        m_errorBox->setPlainText(meta.faultError);
+        QString errorDisplay = meta.faultError;
+        if (errorDisplay.contains(QStringLiteral("Editor write permission is disabled"), Qt::CaseInsensitive)) {
+            errorDisplay += tr("\n\n💡 Tip: Switch to the 'Permissions' tab, enable 'Editor Write', click 'Save Permissions', and click 'Re-enable Plugin' (or click 'Re-enable Plugin' to grant it automatically).");
+        } else if (errorDisplay.contains(QStringLiteral("Internet access is disabled"), Qt::CaseInsensitive) ||
+                   errorDisplay.contains(QStringLiteral("Domain not whitelisted"), Qt::CaseInsensitive)) {
+            errorDisplay += tr("\n\n💡 Tip: Switch to the 'Permissions' tab, enable 'Allow Internet Access', whitelist the domain, and click 'Save Permissions'.");
+        }
+        m_errorBox->setPlainText(errorDisplay);
         m_toggleActiveBtn->setText(tr("Re-enable Plugin"));
         m_toggleActiveBtn->setEnabled(true);
     } else if (!meta.active) {
@@ -350,12 +393,13 @@ void PluginManagerDialog::updatePermissionsPane(const QString &publicId) {
         m_chkStorage->setChecked(false);
         m_chkUi->setChecked(false);
         m_chkNetwork->setChecked(false);
+        m_chkNetwork->setEnabled(false);
+        m_chkNetwork->setText(tr("Allow Internet Access (External Requests)"));
         m_detectedSummaryLabel->setText(tr("<b>Static Analysis:</b> -"));
         m_detectedDomainsLabel->setText(tr("<b>Detected Endpoints:</b> None"));
         m_allowedDomainsList->clear();
         m_savePermsBtn->setEnabled(false);
         m_allowDetectedBtn->setEnabled(false);
-        m_addDomainBtn->setEnabled(false);
         m_removeDomainBtn->setEnabled(false);
         return;
     }
@@ -367,7 +411,16 @@ void PluginManagerDialog::updatePermissionsPane(const QString &publicId) {
     m_chkEditorWrite->setChecked(perms.allowEditorWrite);
     m_chkStorage->setChecked(perms.allowStorage);
     m_chkUi->setChecked(perms.allowUi);
+
+    bool hasNetworkRequests = perms.detectedNetwork || !perms.detectedDomains.isEmpty();
     m_chkNetwork->setChecked(perms.allowNetwork);
+    if (!hasNetworkRequests) {
+        m_chkNetwork->setEnabled(false);
+        m_chkNetwork->setText(tr("Internet Access (This plugin does not have URL requests)"));
+    } else {
+        m_chkNetwork->setEnabled(true);
+        m_chkNetwork->setText(tr("Allow Internet Access (External Requests)"));
+    }
 
     QStringList detectedList;
     if (perms.detectedEditorRead) detectedList.append(tr("Editor Read"));
@@ -393,8 +446,7 @@ void PluginManagerDialog::updatePermissionsPane(const QString &publicId) {
 
     m_savePermsBtn->setEnabled(true);
     m_allowDetectedBtn->setEnabled(!perms.detectedDomains.isEmpty());
-    m_addDomainBtn->setEnabled(true);
-    m_removeDomainBtn->setEnabled(true);
+    m_removeDomainBtn->setEnabled(m_allowedDomainsList->count() > 0);
 }
 
 void PluginManagerDialog::onLoadPluginClicked() {
@@ -415,14 +467,64 @@ void PluginManagerDialog::onOpenPluginsFolderClicked() {
 
 void PluginManagerDialog::onReloadClicked() {
     PluginManager::instance().scanAndLoadPlugins();
+    refreshPluginList();
+    if (!m_selectedPublicId.isEmpty()) {
+        updateDetailsPane(m_selectedPublicId);
+        updatePermissionsPane(m_selectedPublicId);
+    }
     refreshAuditLogs();
 }
 
 void PluginManagerDialog::onToggleActiveClicked() {
     if (m_selectedPublicId.isEmpty()) return;
     PluginMetadata meta = PluginManager::instance().plugin(m_selectedPublicId);
-    PluginManager::instance().setPluginActive(m_selectedPublicId, !meta.active);
+
+    if (meta.faulted) {
+        // If the plugin faulted due to missing permissions, offer to grant the permission directly
+        if (meta.faultError.contains(QStringLiteral("Editor write permission is disabled"), Qt::CaseInsensitive)) {
+            auto ans = QMessageBox::question(
+                this, tr("Grant Editor Write Permission?"),
+                tr("Plugin '%1' faulted because <b>Editor Write</b> permission is disabled.\n\n"
+                   "Would you like to grant Editor Write permission and re-enable the plugin?")
+                    .arg(meta.name),
+                QMessageBox::Yes | QMessageBox::No
+            );
+            if (ans == QMessageBox::Yes) {
+                auto perms = meta.permissions;
+                perms.allowEditorWrite = true;
+                PluginManager::instance().setPluginPermissions(m_selectedPublicId, perms);
+            }
+        } else if (meta.faultError.contains(QStringLiteral("Internet access is disabled"), Qt::CaseInsensitive) ||
+                   meta.faultError.contains(QStringLiteral("Domain not whitelisted"), Qt::CaseInsensitive)) {
+            auto ans = QMessageBox::question(
+                this, tr("Grant Internet Access Permission?"),
+                tr("Plugin '%1' faulted because <b>Internet Access</b> is disabled or endpoints are not whitelisted.\n\n"
+                   "Would you like to allow Internet Access for detected domains and re-enable the plugin?")
+                    .arg(meta.name),
+                QMessageBox::Yes | QMessageBox::No
+            );
+            if (ans == QMessageBox::Yes) {
+                auto perms = meta.permissions;
+                perms.allowNetwork = true;
+                for (const QString &d : perms.detectedDomains) {
+                    if (!perms.allowedDomains.contains(d, Qt::CaseInsensitive)) {
+                        perms.allowedDomains.append(d);
+                    }
+                }
+                PluginManager::instance().setPluginPermissions(m_selectedPublicId, perms);
+            }
+        }
+
+        // Re-enabling a faulted plugin: reload/re-initialize the plugin cleanly
+        PluginManager::instance().reloadPlugin(m_selectedPublicId);
+    } else {
+        PluginManager::instance().setPluginActive(m_selectedPublicId, !meta.active);
+    }
+
+    refreshPluginList();
     updateDetailsPane(m_selectedPublicId);
+    updatePermissionsPane(m_selectedPublicId);
+    refreshAuditLogs();
 }
 
 void PluginManagerDialog::onUninstallClicked() {
@@ -478,6 +580,12 @@ void PluginManagerDialog::onSavePermissionsClicked() {
     perms.allowedDomains = doms;
 
     PluginManager::instance().setPluginPermissions(m_selectedPublicId, perms);
+    if (meta.faulted) {
+        PluginManager::instance().reloadPlugin(m_selectedPublicId);
+    }
+    refreshPluginList();
+    updateDetailsPane(m_selectedPublicId);
+    updatePermissionsPane(m_selectedPublicId);
     refreshAuditLogs();
 
     QMessageBox::information(this, tr("Permissions Updated"),
@@ -499,17 +607,6 @@ void PluginManagerDialog::onAllowAllDetectedDomainsClicked() {
         if (!exists) {
             m_allowedDomainsList->addItem(d);
         }
-    }
-}
-
-void PluginManagerDialog::onAddDomainClicked() {
-    bool ok = false;
-    QString domain = QInputDialog::getText(this, tr("Add Allowed Domain"),
-                                           tr("Enter domain or hostname (e.g. api.example.com):"),
-                                           QLineEdit::Normal, QString(), &ok);
-    if (ok && !domain.trimmed().isEmpty()) {
-        QString clean = domain.trimmed().toLower();
-        m_allowedDomainsList->addItem(clean);
     }
 }
 
@@ -536,41 +633,215 @@ void PluginManagerDialog::onClearLogsClicked() {
 }
 
 void PluginManagerDialog::onCreateSamplePluginClicked() {
-    QString samplePath = QDir(AppPaths::pluginsDir()).filePath(QStringLiteral("dialogue_checker.er"));
+    struct SampleTemplate {
+        QString name;
+        QString fileName;
+        QString code;
+    };
+
+    QList<SampleTemplate> templates = {
+        {
+            tr("Dialogue Checker"),
+            QStringLiteral("dialogue_checker.er"),
+            QStringLiteral(
+                "# ID: author.dialogue-checker\n"
+                "# Name: Dialogue Checker\n"
+                "# Version: 1.1\n\n"
+                "@on_toolbar_click(\"Check Dialogue\")\n"
+                "def check_dialogue():\n"
+                "    text = editor.get_chapter_text()\n"
+                "    lines = text.split(\"\\n\")\n"
+                "    unbalanced = 0\n"
+                "    total_quotes = 0\n"
+                "    for line in lines:\n"
+                "        c = line.count('\"')\n"
+                "        total_quotes += c\n"
+                "        if c % 2 != 0:\n"
+                "            unbalanced += 1\n"
+                "    win = ui.create_window(\"Dialogue Analysis\", 460, 320)\n"
+                "    win.add_label(\"Chapter Dialogue & Quotation Analysis:\")\n"
+                "    win.add_text(\"Total quotes: \" + str(total_quotes) + \"\\nLines with unmatched pairs: \" + str(unbalanced))\n"
+                "    win.add_button(\"Close\", \"close_window\")\n"
+                "    win.show()\n\n"
+                "@on_chapter_change\n"
+                "def on_load(title, text, index):\n"
+                "    status.notify(\"Inspecting chapter: \" + title)\n"
+            )
+        },
+        {
+            tr("Word & Reading Stats"),
+            QStringLiteral("word_counter.er"),
+            QStringLiteral(
+                "# ID: author.reading-stats\n"
+                "# Name: Word & Reading Stats\n"
+                "# Version: 1.0\n\n"
+                "@on_toolbar_click(\"Reading Stats\")\n"
+                "def show_stats():\n"
+                "    title = editor.get_chapter_title()\n"
+                "    words = editor.get_word_count()\n"
+                "    text = editor.get_chapter_text()\n"
+                "    chars = len(text)\n"
+                "    reading_min = int(words / 225)\n"
+                "    if reading_min == 0:\n"
+                "        reading_min = 1\n"
+                "    win = ui.create_window(\"Reading Statistics\", 460, 340)\n"
+                "    win.add_label(\"Statistics for: \" + title)\n"
+                "    win.add_text(\"Word Count: \" + str(words) + \"\\nCharacter Count: \" + str(chars) + \"\\nEstimated Reading Time: ~\" + str(reading_min) + \" min\")\n"
+                "    win.add_button(\"Close\", \"close_window\")\n"
+                "    win.show()\n"
+            )
+        },
+        {
+            tr("Smart Quotes Formatter"),
+            QStringLiteral("smart_quotes.er"),
+            QStringLiteral(
+                "# ID: author.smart-quotes\n"
+                "# Name: Smart Quotes Formatter\n"
+                "# Version: 1.0\n\n"
+                "@on_toolbar_click(\"Format Smart Quotes\")\n"
+                "def format_quotes():\n"
+                "    sel = editor.get_selection()\n"
+                "    target_text = sel\n"
+                "    is_selection = True\n"
+                "    if len(target_text) == 0:\n"
+                "        target_text = editor.get_chapter_text()\n"
+                "        is_selection = False\n"
+                "        if len(target_text) == 0:\n"
+                "            status.warn(\"No text to format\", 1)\n"
+                "            return\n"
+                "    in_quote = False\n"
+                "    result = \"\"\n"
+                "    for ch in target_text:\n"
+                "        if ch == '\"':\n"
+                "            if in_quote:\n"
+                "                result += chr(8221)\n"
+                "                in_quote = False\n"
+                "            else:\n"
+                "                result += chr(8220)\n"
+                "                in_quote = True\n"
+                "        else:\n"
+                "            result += ch\n"
+                "    if is_selection:\n"
+                "        editor.replace_selection(result)\n"
+                "        status.notify(\"Converted selection to smart quotes\")\n"
+                "    else:\n"
+                "        editor.set_chapter_text(result)\n"
+                "        status.notify(\"Converted chapter to smart quotes\")\n"
+            )
+        },
+        {
+            tr("Chapter Scratchpad"),
+            QStringLiteral("chapter_scratchpad.er"),
+            QStringLiteral(
+                "# ID: author.scratchpad\n"
+                "# Name: Chapter Scratchpad\n"
+                "# Version: 1.0\n\n"
+                "@on_toolbar_click(\"Open Scratchpad\")\n"
+                "def open_scratchpad():\n"
+                "    title = editor.get_chapter_title()\n"
+                "    key = \"note_\" + title\n"
+                "    saved_note = storage.read(key)\n"
+                "    win = ui.create_window(\"Author Notes — \" + title, 480, 360)\n"
+                "    win.add_label(\"Persistent notes for: \" + title)\n"
+                "    win.add_input(\"Enter notes...\", saved_note)\n"
+                "    win.add_button(\"Save Note\", \"on_save\")\n"
+                "    win.add_button(\"Close\", \"close_window\")\n"
+                "    win.show()\n\n"
+                "@on_button_click(\"on_save\")\n"
+                "def handle_save(inputs, wid):\n"
+                "    title = editor.get_chapter_title()\n"
+                "    key = \"note_\" + title\n"
+                "    note_text = inputs.get(\"text\", \"\")\n"
+                "    storage.write(key, note_text)\n"
+                "    status.notify(\"Saved note for: \" + title)\n"
+                "    close_window(wid)\n"
+            )
+        },
+        {
+            tr("Web Dictionary Lookup"),
+            QStringLiteral("web_thesaurus.er"),
+            QStringLiteral(
+                "# ID: author.web-lookup\n"
+                "# Name: Web Dictionary Lookup\n"
+                "# Version: 1.0\n\n"
+                "@on_toolbar_click(\"Lookup Word\")\n"
+                "def lookup_word():\n"
+                "    sel = editor.get_selection().strip()\n"
+                "    if len(sel) == 0:\n"
+                "        status.warn(\"Please select a word in the editor to look up\", 1)\n"
+                "        return\n"
+                "    word = sel.lower()\n"
+                "    url = \"https://api.dictionaryapi.dev/api/v2/entries/en/\" + word\n"
+                "    resp = http.get(url)\n"
+                "    status_code = resp.get(\"status\", 0)\n"
+                "    if status_code == 200:\n"
+                "        body = resp.get(\"body\", \"\")\n"
+                "        win = ui.create_window(\"Definition: \" + word, 500, 380)\n"
+                "        win.add_label(\"Dictionary definition for '\" + word + \"':\")\n"
+                "        win.add_text(body)\n"
+                "        win.add_button(\"Close\", \"close_window\")\n"
+                "        win.show()\n"
+                "    else:\n"
+                "        status.warn(\"Definition lookup failed (HTTP \" + str(status_code) + \")\", 1)\n"
+            )
+        }
+    };
+
+    QStringList names;
+    for (const auto &tmpl : templates) {
+        names.append(tmpl.name);
+    }
+
+    bool ok = false;
+    QString chosen = QInputDialog::getItem(this, tr("Create Sample Plugin"),
+                                          tr("Choose a sample plugin template:"),
+                                          names, 0, false, &ok);
+    if (!ok || chosen.isEmpty()) return;
+
+    const SampleTemplate *selected = nullptr;
+    for (const auto &tmpl : templates) {
+        if (tmpl.name == chosen) {
+            selected = &tmpl;
+            break;
+        }
+    }
+    if (!selected) return;
+
+    QString samplePath = QDir(AppPaths::pluginsDir()).filePath(selected->fileName);
     if (QFile::exists(samplePath)) {
-        QMessageBox::information(this, tr("Sample Plugin Exists"),
-                                 tr("Sample plugin already exists at:\n%1").arg(samplePath));
-        return;
+        auto ans = QMessageBox::question(this, tr("Sample Plugin Exists"),
+                                         tr("Plugin '%1' already exists. Overwrite?").arg(selected->fileName),
+                                         QMessageBox::Yes | QMessageBox::No);
+        if (ans != QMessageBox::Yes) return;
     }
 
     QFile file(samplePath);
     if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        const char *sample =
-            "# ID: author.dialogue-checker\n"
-            "# Name: Dialogue Checker\n"
-            "# Version: 1.0\n"
-            "\n"
-            "@on_toolbar_click(\"Check Dialogue\")\n"
-            "def check_dialogue():\n"
-            "    text = editor.get_chapter_text()\n"
-            "    lines = text.split(\"\\n\")\n"
-            "    unbalanced = 0\n"
-            "    for line in lines:\n"
-            "        count = 0\n"
-            "        for ch in line:\n"
-            "            if ch == '\"':\n"
-            "                count += 1\n"
-            "        if count % 2 != 0:\n"
-            "            unbalanced += 1\n"
-            "    if unbalanced > 0:\n"
-            "        status.warn(\"Dialogue check: found \" + str(unbalanced) + \" lines with unmatched quotes\", 1)\n"
-            "    else:\n"
-            "        status.notify(\"Dialogue check passed! All quotation marks are paired.\")\n";
-        file.write(sample);
+        file.write(selected->code.toUtf8());
         file.close();
-        PluginManager::instance().loadPluginFromFile(samplePath);
+
+        // Pre-configure appropriate permissions for built-in sample plugins so they run immediately
+        PluginPermissions samplePerms;
+        PluginScanner::scan(selected->code, samplePerms);
+        if (samplePerms.detectedEditorWrite) {
+            samplePerms.allowEditorWrite = true;
+        }
+        if (samplePerms.detectedNetwork) {
+            samplePerms.allowNetwork = true;
+            samplePerms.allowedDomains = samplePerms.detectedDomains;
+        }
+
+        QString publicId, name, version;
+        PluginManager::parsePluginHeader(selected->code, publicId, name, version);
+        if (publicId.isEmpty()) publicId = QFileInfo(samplePath).baseName();
+        if (name.isEmpty()) name = publicId;
+
+        PluginManager::instance().loadPluginFromSource(publicId, name, version, selected->code, samplePath, &samplePerms);
+        refreshPluginList();
+        updateDetailsPane(publicId);
+        updatePermissionsPane(publicId);
         QMessageBox::information(this, tr("Sample Plugin Created"),
-                                 tr("Created and loaded dialogue_checker.er"));
+                                 tr("Created and loaded %1").arg(selected->fileName));
     }
 }
 

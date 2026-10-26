@@ -1,5 +1,6 @@
 #include "ThemeManager.h"
 #include "debug/debug.hpp"
+#include "diagnostics/MainThreadWatchdog.h"
 
 #include <QApplication>
 #include <QDir>
@@ -406,6 +407,14 @@ void ThemeManager::setTheme(AppTheme theme)
         flavorChanged = true;
     }
 
+    if (m_currentTheme == theme && !flavorChanged) {
+        return;
+    }
+
+    MainThreadWatchdog::ScopedCheckpoint cp(
+        QStringLiteral("ThemeManager::setTheme"),
+        QStringLiteral("Theme: %1").arg(static_cast<int>(theme)));
+
     m_currentTheme = theme;
     saveSettings();
     applyCurrentThemeAndSkin();
@@ -424,8 +433,16 @@ void ThemeManager::setSkinFlavor(SkinFlavor flavor)
         themeWasChanged = true;
     }
 
+    if (m_skinFlavor == flavor && !themeWasChanged) {
+        return;
+    }
+
+    MainThreadWatchdog::ScopedCheckpoint cp(
+        QStringLiteral("ThemeManager::setSkinFlavor"),
+        QStringLiteral("Flavor: %1").arg(static_cast<int>(flavor)));
+
     m_skinFlavor = flavor;
-    if (flavor == SkinFlavor::MaterialYou) {
+    if (flavor == SkinFlavor::MaterialYou && !m_materialYouAccentColor.isValid()) {
         rescanWallpaperColor();
     }
     saveSettings();
@@ -457,9 +474,9 @@ void ThemeManager::toggleTheme()
 int ThemeManager::buttonRadius() const
 {
     switch (m_skinFlavor) {
-    case SkinFlavor::MaterialYou: return 20; // Authentic Android M3 pill button
-    case SkinFlavor::KdeUi: return 3;       // KDE Breeze subtle 3px radius
-    case SkinFlavor::StandardQt: return 4;   // Qt Fusion 4px radius
+    case SkinFlavor::MaterialYou: return 8;  // Comfortable rounded button without clipping text
+    case SkinFlavor::KdeUi: return 3;        // KDE Breeze subtle 3px radius
+    case SkinFlavor::StandardQt: return 4;    // Qt Fusion 4px radius
     case SkinFlavor::StandardEnsemble: return 6;
     default: return 6;
     }
@@ -468,9 +485,9 @@ int ThemeManager::buttonRadius() const
 int ThemeManager::cardRadius() const
 {
     switch (m_skinFlavor) {
-    case SkinFlavor::MaterialYou: return 22; // Android M3 rounded card
-    case SkinFlavor::KdeUi: return 4;       // KDE Breeze container
-    case SkinFlavor::StandardQt: return 6;   // Qt frame
+    case SkinFlavor::MaterialYou: return 12; // Android M3 balanced rounded card
+    case SkinFlavor::KdeUi: return 4;        // KDE Breeze container
+    case SkinFlavor::StandardQt: return 6;    // Qt frame
     case SkinFlavor::StandardEnsemble: return 12;
     default: return 8;
     }
@@ -479,7 +496,7 @@ int ThemeManager::cardRadius() const
 int ThemeManager::inputRadius() const
 {
     switch (m_skinFlavor) {
-    case SkinFlavor::MaterialYou: return 14; // Android M3 rounded input field
+    case SkinFlavor::MaterialYou: return 6;  // Android M3 balanced rounded input
     case SkinFlavor::KdeUi: return 3;
     case SkinFlavor::StandardQt: return 4;
     case SkinFlavor::StandardEnsemble: return 6;
@@ -490,7 +507,7 @@ int ThemeManager::inputRadius() const
 int ThemeManager::tabRadius() const
 {
     switch (m_skinFlavor) {
-    case SkinFlavor::MaterialYou: return 18; // Android M3 pill chip tab
+    case SkinFlavor::MaterialYou: return 8;  // Clean rounded tab chip
     case SkinFlavor::KdeUi: return 3;
     case SkinFlavor::StandardQt: return 4;
     case SkinFlavor::StandardEnsemble: return 6;
@@ -501,11 +518,11 @@ int ThemeManager::tabRadius() const
 QString ThemeManager::buttonPadding() const
 {
     switch (m_skinFlavor) {
-    case SkinFlavor::MaterialYou: return QStringLiteral("8px 22px");
-    case SkinFlavor::KdeUi: return QStringLiteral("6px 14px");
-    case SkinFlavor::StandardQt: return QStringLiteral("6px 16px");
-    case SkinFlavor::StandardEnsemble: return QStringLiteral("7px 16px");
-    default: return QStringLiteral("7px 16px");
+    case SkinFlavor::MaterialYou: return QStringLiteral("5px 12px");
+    case SkinFlavor::KdeUi: return QStringLiteral("5px 12px");
+    case SkinFlavor::StandardQt: return QStringLiteral("5px 12px");
+    case SkinFlavor::StandardEnsemble: return QStringLiteral("5px 12px");
+    default: return QStringLiteral("5px 12px");
     }
 }
 
@@ -831,10 +848,10 @@ QString ThemeManager::getApplicationStyleSheet() const
             "  color: %4;"
             "  border: none;"
             "  border-radius: %5px;"
-            "  padding: 8px 18px;"
-            "  margin: 3px 4px;"
+            "  padding: 6px 12px;"
+            "  margin: 2px 2px;"
             "  font-weight: 600;"
-            "  font-size: 12px;"
+            "  font-size: 11px;"
             "}"
             "QTabBar::tab:selected {"
             "  background-color: %6;"
@@ -946,9 +963,10 @@ QString ThemeManager::getApplicationStyleSheet() const
         "  color: #ffffff;"
         "  border: none;"
         "  border-radius: %7px;"
-        "  padding: 9px 24px;"
+        "  padding: 6px 16px;"
+        "  min-height: 22px;"
         "  font-weight: bold;"
-        "  font-size: 13px;"
+        "  font-size: 12px;"
         "}"
         "QPushButton:default:hover, QPushButton#closeBtn:hover, QPushButton#startWritingBtn:hover {"
         "  background-color: %12;"
@@ -1294,9 +1312,10 @@ QString ThemeManager::getDialogStyleSheet() const
             "  color: %4;"
             "  border: none;"
             "  border-radius: %5px;"
-            "  padding: 8px 18px;"
-            "  margin: 3px 4px;"
+            "  padding: 6px 12px;"
+            "  margin: 2px 2px;"
             "  font-weight: 600;"
+            "  font-size: 11px;"
             "}"
             "QTabBar::tab:selected {"
             "  background-color: %6;"
@@ -1322,9 +1341,10 @@ QString ThemeManager::getDialogStyleSheet() const
             "  border-bottom: none;"
             "  border-top: 2px solid transparent;"
             "  border-radius: 3px;"
-            "  padding: 6px 14px;"
+            "  padding: 6px 12px;"
             "  margin-right: 2px;"
             "  font-weight: 500;"
+            "  font-size: 11px;"
             "}"
             "QTabBar::tab:selected {"
             "  background-color: %2;"
@@ -1352,9 +1372,10 @@ QString ThemeManager::getDialogStyleSheet() const
             "  border-bottom: none;"
             "  border-top-left-radius: %6px;"
             "  border-top-right-radius: %6px;"
-            "  padding: 8px 16px;"
-            "  margin-right: 4px;"
+            "  padding: 6px 12px;"
+            "  margin-right: 2px;"
             "  font-weight: 500;"
+            "  font-size: 11px;"
             "}"
             "QTabBar::tab:selected {"
             "  background-color: %3;"
@@ -1437,6 +1458,7 @@ QString ThemeManager::getDialogStyleSheet() const
         "  border: 1px solid %5;"
         "  border-radius: %11px;"
         "  padding: %12;"
+        "  min-height: 20px;"
         "  font-weight: 600;"
         "  font-size: 12px;"
         "}"
@@ -1454,15 +1476,16 @@ QString ThemeManager::getDialogStyleSheet() const
         "  border-color: %5;"
         "  background-color: transparent;"
         "}"
-        "/* Close Button - Material You Pill Button */"
+        "/* Close Button */"
         "QPushButton#closeBtn, QPushButton:default {"
         "  background-color: %8;"
         "  color: #ffffff;"
         "  border: none;"
         "  border-radius: %11px;"
-        "  padding: 9px 24px;"
+        "  padding: 6px 16px;"
+        "  min-height: 22px;"
         "  font-weight: bold;"
-        "  font-size: 13px;"
+        "  font-size: 12px;"
         "}"
         "QPushButton#closeBtn:hover, QPushButton:default:hover {"
         "  background-color: %14;"

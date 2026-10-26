@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QRegularExpression>
 #include <cassert>
 
 #if defined(_WIN32)

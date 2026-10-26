@@ -1,0 +1,26 @@
+# ID: author.web-lookup
+# Name: Web Dictionary Lookup
+# Version: 1.0
+# Description: Demonstrates secure HTTPS requests by looking up definitions for selected editor words.
+
+@on_toolbar_click("Lookup Word")
+def lookup_word():
+    sel = editor.get_selection().strip()
+    if len(sel) == 0:
+        status.warn("Please select a single word in the editor to look up", 1)
+        return
+
+    word = sel.lower()
+    url = "https://api.dictionaryapi.dev/api/v2/entries/en/" + word
+    resp = http.get(url)
+
+    status_code = resp.get("status", 0)
+    if status_code == 200:
+        body = resp.get("body", "")
+        win = ui.create_window("Definition: " + word, 500, 380)
+        win.add_label("Dictionary definition for '" + word + "':")
+        win.add_text(body)
+        win.add_button("Close", "close_window")
+        win.show()
+    else:
+        status.warn("Definition lookup failed (HTTP " + str(status_code) + ")", 1)

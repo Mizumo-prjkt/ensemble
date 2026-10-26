@@ -29,6 +29,8 @@ public:
     ~PluginWorker() override;
 
     bool isActive() const noexcept { return m_active; }
+    size_t currentMemoryUsage() const;
+    qint64 currentStorageUsage() const;
 
 public slots:
     void initPlugin(const QString &publicId,
@@ -57,6 +59,8 @@ signals:
     void uiAddWidgetRequested(const QString &winId, const QString &type, const QVariantMap &props);
     void uiShowWindowRequested(const QString &winId);
     void uiCloseWindowRequested(const QString &winId);
+    void uiClearWindowRequested(const QString &winId);
+    void uiShowMessageBoxRequested(const QString &publicId, const QString &title, const QString &text);
 
     void statusWarn(const QString &publicId, const QString &message, int line);
     void statusError(const QString &publicId, const QString &message, int line);
@@ -65,6 +69,7 @@ signals:
     void pluginQuarantined(const QString &publicId, const QString &reason, int line);
     void pluginLoaded(const QString &publicId, const QStringList &toolbarActions);
     void sendMessageRequested(const QString &senderId, const QString &targetId, const QString &payload);
+    void networkActivity(const QString &publicId, qint64 reqDelta, qint64 bytesSent, qint64 bytesRecv, const QString &url, const QString &status);
 
 private:
     QString m_publicId;
@@ -97,6 +102,10 @@ struct PluginMetadata {
     PluginPermissions permissions;
     QThread *thread = nullptr;
     PluginWorker *worker = nullptr;
+    qint64 memoryUsedBytes = 0;
+    qint64 memoryLimitBytes = 8 * 1024 * 1024;
+    qint64 storageUsedBytes = 0;
+    qint64 storageLimitBytes = 5 * 1024 * 1024;
 };
 
 /**
@@ -134,11 +143,18 @@ public:
     QList<PluginMetadata> plugins() const;
     PluginMetadata plugin(const QString &publicId) const;
     bool hasPlugin(const QString &publicId) const;
+    bool hasActivePlugins() const;
 
     QStringList allToolbarActions() const;
 
     // Direct public metadata query (excludes secret_uidp)
     QList<QVariantMap> publicPluginList() const;
+
+    // Network metrics for Resource Manager
+    QList<PluginNetworkStats> allNetworkStats() const;
+    PluginNetworkStats networkStats(const QString &publicId) const;
+
+    static void parsePluginHeader(const QString &source, QString &publicId, QString &name, QString &version);
 
 public slots:
     void notifyChapterChanged(const QString &title, const QString &text, int chapterIndex);
@@ -146,6 +162,7 @@ public slots:
     void notifyChaptersUpdated(const QList<QVariantMap> &chapters);
     void triggerToolbarAction(const QString &actionName);
     void routeMessage(const QString &senderId, const QString &targetId, const QString &payload);
+    void onWorkerPluginFaulted(const QString &publicId, const QString &errorMessage, int line);
 
 signals:
     void pluginListChanged();
@@ -161,26 +178,28 @@ signals:
 
 private slots:
     void onWorkerPluginLoaded(const QString &publicId, const QStringList &toolbarActions);
-    void onWorkerPluginFaulted(const QString &publicId, const QString &errorMessage, int line);
     void onWorkerPluginQuarantined(const QString &publicId, const QString &reason, int line);
+    void onWorkerNetworkActivity(const QString &publicId, qint64 reqDelta, qint64 bytesSent, qint64 bytesRecv, const QString &url, const QString &status);
 
     // Declarative UI hosting slots
     void onUiCreateWindow(const QString &publicId, const QString &winId, const QString &title, int w, int h);
     void onUiAddWidget(const QString &winId, const QString &type, const QVariantMap &props);
     void onUiShowWindow(const QString &winId);
     void onUiCloseWindow(const QString &winId);
+    void onUiClearWindow(const QString &winId);
+    void onUiShowMessageBox(const QString &publicId, const QString &title, const QString &text);
     void onWindowActionTriggered(const QString &publicId, const QString &winId, const QString &actionName, const QVariantMap &inputs);
 
 private:
     void loadManifest();
     void saveManifest();
     QString getOrCreateSecretUidp(const QString &publicId);
-    static void parsePluginHeader(const QString &source, QString &publicId, QString &name, QString &version);
 
     QMap<QString, PluginMetadata> m_plugins;
     QMap<QString, QString> m_secretUidpMap; // publicId -> secretUidp
     QMap<QString, PluginPermissions> m_savedPermissionsMap; // publicId -> saved permissions
     QMap<QString, bool> m_savedActiveMap; // publicId -> active
+    QMap<QString, PluginNetworkStats> m_networkStatsMap; // publicId -> network stats
 
     // Open plugin dialogs in GUI thread
     QMap<QString, PluginHostDialog *> m_openWindows; // winId -> dialog

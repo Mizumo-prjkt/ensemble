@@ -81,6 +81,27 @@ void ScriptEvaluator::initGlobals() {
     m_globals->defineImmutable("http", m_sandbox.createHttpNamespace(m_guard));
     m_globals->defineImmutable("ui", m_sandbox.createUiNamespace(m_guard));
 
+    m_globals->defineImmutable("close_window", ScriptValue([this](const std::vector<ScriptValue> &args, ResourceGuard &, int, int) -> ScriptValue {
+        QString winId;
+        if (!args.empty()) {
+            if (args.at(0).isDict()) {
+                auto dict = args.at(0).asDict();
+                if (dict->find("_win_id") != dict->end()) {
+                    winId = QString::fromStdString((*dict)["_win_id"].toString());
+                }
+            } else if (args.at(0).isString()) {
+                winId = QString::fromStdString(args.at(0).asString());
+            }
+        }
+        if (winId.isEmpty()) {
+            winId = m_sandbox.lastCreatedWindowId();
+        }
+        if (!winId.isEmpty() && m_sandbox.uiCallbacks().closeWindow) {
+            m_sandbox.uiCallbacks().closeWindow(winId);
+        }
+        return ScriptValue();
+    }, "close_window"));
+
     // Built-in standard functions
     m_globals->defineImmutable("len", ScriptValue([](const std::vector<ScriptValue> &args, ResourceGuard &, int l, int c) -> ScriptValue {
         if (args.empty()) throw ScriptTrap("len() takes exactly one argument", l, c);
@@ -107,6 +128,24 @@ void ScriptEvaluator::initGlobals() {
         if (args.empty()) return ScriptValue(0.0);
         return ScriptValue(args.at(0).toNumber(l, c));
     }, "float"));
+
+    m_globals->defineImmutable("chr", ScriptValue([](const std::vector<ScriptValue> &args, ResourceGuard &g, int l, int c) -> ScriptValue {
+        if (args.empty()) throw ScriptTrap("chr() takes exactly one argument", l, c);
+        int64_t code = args.at(0).toInteger(l, c);
+        if (code < 0 || code > 0x10FFFF) throw ScriptTrap("ValueError: chr() arg not in range(0x110000)", l, c);
+        QString qs = QString(QChar(static_cast<char32_t>(code)));
+        std::string s = qs.toUtf8().toStdString();
+        g.alloc(s.capacity() + sizeof(std::string));
+        return ScriptValue(std::move(s));
+    }, "chr"));
+
+    m_globals->defineImmutable("ord", ScriptValue([](const std::vector<ScriptValue> &args, ResourceGuard &, int l, int c) -> ScriptValue {
+        if (args.empty()) throw ScriptTrap("ord() takes exactly one argument", l, c);
+        std::string s = args.at(0).toString();
+        QString qs = QString::fromUtf8(s.data(), static_cast<qsizetype>(s.size()));
+        if (qs.isEmpty()) throw ScriptTrap("TypeError: ord() expected a character, but string of length 0 found", l, c);
+        return ScriptValue(static_cast<int64_t>(qs.at(0).unicode()));
+    }, "ord"));
 
     m_globals->defineImmutable("range", ScriptValue([](const std::vector<ScriptValue> &args, ResourceGuard &g, int l, int c) -> ScriptValue {
         if (args.empty()) throw ScriptTrap("range expected at least 1 argument, got 0", l, c);
@@ -486,6 +525,10 @@ ScriptValue ScriptEvaluator::evaluate(const std::shared_ptr<AstNode> &node, std:
                 m_toolbarClickHooks.push_back(hook);
             } else if (decNode->name == "on_message") {
                 m_messageHooks.push_back(hook);
+            } else if (decNode->name == "on_window_action" ||
+                       decNode->name == "on_button_click" ||
+                       decNode->name == "on_action") {
+                m_windowActionHooks.push_back(hook);
             }
         }
         fn.decorators = decs;
@@ -610,8 +653,34 @@ void ScriptEvaluator::dispatchWindowAction(const QString &winId, const QString &
         (*inputDict)[k] = ScriptValue(std::move(v));
     }
     ScriptValue inputVal(inputDict);
+    ScriptValue winIdVal(winId.toStdString());
+    ScriptValue actionVal(act);
 
-    // 1. Try toolbar click hooks first
+    bool handled = false;
+
+    // 1. Try dedicated window action / button click hooks
+    for (const auto &hook : m_windowActionHooks) {
+        if (hook.argument.empty() || hook.argument == act || hook.functionName == act) {
+            try {
+                std::vector<ScriptValue> args;
+                if (!hook.function.parameters.empty()) {
+                    args.push_back(inputVal);
+                }
+                if (hook.function.parameters.size() >= 2) {
+                    args.push_back(winIdVal);
+                }
+                if (hook.function.parameters.size() >= 3) {
+                    args.push_back(actionVal);
+                }
+                callFunction(ScriptValue(hook.function), args, -1, -1);
+                handled = true;
+            } catch (const ReturnSignal &) {
+                handled = true;
+            }
+        }
+    }
+
+    // 2. Try toolbar click hooks next
     for (const auto &hook : m_toolbarClickHooks) {
         if (hook.argument == act || hook.functionName == act) {
             try {
@@ -620,18 +689,20 @@ void ScriptEvaluator::dispatchWindowAction(const QString &winId, const QString &
                     args.push_back(inputVal);
                 }
                 if (hook.function.parameters.size() >= 2) {
-                    args.push_back(ScriptValue(winId.toStdString()));
+                    args.push_back(winIdVal);
                 }
                 callFunction(ScriptValue(hook.function), args, -1, -1);
-                return;
+                handled = true;
+                break;
             } catch (const ReturnSignal &) {
-                return;
+                handled = true;
+                break;
             }
         }
     }
 
-    // 2. Try global function matching actionName
-    if (m_globals->has(act)) {
+    // 3. Try global function matching actionName (e.g. def close_window() or def on_btn_clicked(wid))
+    if (!handled && m_globals->has(act)) {
         try {
             auto fn = m_globals->get(act, -1, -1);
             if (fn.isCallable()) {
@@ -641,12 +712,43 @@ void ScriptEvaluator::dispatchWindowAction(const QString &winId, const QString &
                         args.push_back(inputVal);
                     }
                     if (fn.asUserFunc().parameters.size() >= 2) {
-                        args.push_back(ScriptValue(winId.toStdString()));
+                        args.push_back(winIdVal);
+                    }
+                    if (fn.asUserFunc().parameters.size() >= 3) {
+                        args.push_back(actionVal);
                     }
                 }
                 callFunction(fn, args, -1, -1);
+                handled = true;
             }
         } catch (const ReturnSignal &) {
+            handled = true;
+        }
+    }
+
+    // 4. Try generic on_window_action(act, inputs, winId) or on_action(act, inputs)
+    if (!handled && m_globals->has("on_window_action")) {
+        try {
+            auto fn = m_globals->get("on_window_action", -1, -1);
+            if (fn.isCallable()) {
+                std::vector<ScriptValue> args = { actionVal, inputVal, winIdVal };
+                callFunction(fn, args, -1, -1);
+                handled = true;
+            }
+        } catch (const ReturnSignal &) {
+            handled = true;
+        }
+    }
+
+    // 5. Fallback: if action indicates window close request, guarantee host window closing
+    QString qAct = actionName.trimmed();
+    if (qAct.compare(QStringLiteral("close_window"), Qt::CaseInsensitive) == 0 ||
+        qAct.compare(QStringLiteral("close"), Qt::CaseInsensitive) == 0 ||
+        qAct.compare(QStringLiteral("dismiss"), Qt::CaseInsensitive) == 0 ||
+        qAct.compare(QStringLiteral("cancel"), Qt::CaseInsensitive) == 0 ||
+        qAct.compare(QStringLiteral("exit"), Qt::CaseInsensitive) == 0) {
+        if (m_sandbox.uiCallbacks().closeWindow) {
+            m_sandbox.uiCallbacks().closeWindow(winId);
         }
     }
 }

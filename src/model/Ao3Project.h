@@ -113,6 +113,15 @@ public:
     void moveChapter(int from, int to);
     void sortChaptersByOrder();
 
+    // Memory and resource management
+    int loadedChaptersCount() const;
+    qint64 inMemoryHtmlBytes() const;
+    qint64 totalStoryHtmlBytes() const;
+    qint64 chaptersMemoryBytes() const;
+    qint64 workSkinMemoryBytes() const;
+    qint64 loreMemoryBytes() const;
+    void trimInactiveChaptersMemory(int preserveIndex = -1);
+
     bool isDirty() const { return m_dirty; }
     void setDirty(bool dirty) { m_dirty = dirty; }
 

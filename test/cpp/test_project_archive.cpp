@@ -733,6 +733,59 @@ int main(int argc, char *argv[]) {
     qDebug() << "✓ Verified ProjectSerializer::loadWithValidation ProgressCallback execution and sequence.";
   }
 
+  // 17. Test Smart Chapter Lazy Loading & RAM Memory Management
+  {
+    Chapter ch(QStringLiteral("Memory Test Chapter"), 0);
+    QString largeText = QStringLiteral("<p>").repeated(50) + QStringLiteral("Hello World from Chapter 1") + QStringLiteral("</p>").repeated(50);
+    ch.setHtml(largeText);
+
+    assert(ch.isLoaded());
+    assert(ch.htmlByteSize() == largeText.toUtf8().size());
+    qint64 ramLoaded = ch.memoryUsageBytes();
+
+    // Unload to session cache
+    ch.unloadToSessionCache();
+    assert(!ch.isLoaded());
+    assert(ch.htmlByteSize() == largeText.toUtf8().size()); // size preserved
+    qint64 ramUnloaded = ch.memoryUsageBytes();
+    assert(ramUnloaded < ramLoaded); // RAM was freed!
+
+    // Ensure access seamlessly restores HTML from cache
+    QString restored = ch.html();
+    assert(ch.isLoaded());
+    assert(restored == largeText);
+
+    // Test in Ao3Project
+    Ao3Project proj;
+    proj.addChapter(QStringLiteral("Chapter 2"));
+    proj.addChapter(QStringLiteral("Chapter 3"));
+    proj.chapters()[0].setHtml(QStringLiteral("<p>C1 text</p>"));
+    proj.chapters()[1].setHtml(QStringLiteral("<p>C2 text</p>"));
+    proj.chapters()[2].setHtml(QStringLiteral("<p>C3 text</p>"));
+
+    // Trim inactive chapters to active chapter 0
+    proj.setActiveChapterIndex(0);
+    proj.trimInactiveChaptersMemory(0);
+
+    assert(proj.loadedChaptersCount() == 1);
+    assert(proj.chapters()[0].isLoaded());
+    assert(!proj.chapters()[1].isLoaded());
+    assert(!proj.chapters()[2].isLoaded());
+
+    // Switch to Chapter 2 (index 1)
+    proj.setActiveChapterIndex(1);
+    proj.chapters()[1].ensureLoaded();
+    proj.trimInactiveChaptersMemory(1);
+
+    assert(proj.loadedChaptersCount() == 1);
+    assert(!proj.chapters()[0].isLoaded());
+    assert(proj.chapters()[1].isLoaded());
+    assert(!proj.chapters()[2].isLoaded());
+    assert(proj.chapters()[1].html() == QStringLiteral("<p>C2 text</p>"));
+
+    qDebug() << "✓ Verified smart chapter lazy loading, session cache unloading, and RAM trimming.";
+  }
+
   qDebug() << "✓ All 3-Stage validation, magic byte verification, structural integrity, "
               "legacy compatibility, .ao3projasve recovery, agentic-datas, and Lore Graph tests passed successfully!";
   return 0;

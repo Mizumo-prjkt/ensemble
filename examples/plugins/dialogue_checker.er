@@ -1,0 +1,26 @@
+# ID: author.dialogue-checker
+# Name: Dialogue Checker
+# Version: 1.1
+# Description: Scans quotation marks across chapter text to identify unmatched quotes and dialogue balance.
+
+@on_toolbar_click("Check Dialogue")
+def check_dialogue():
+    text = editor.get_chapter_text()
+    lines = text.split("\n")
+    unbalanced = 0
+    total_quotes = 0
+    for line in lines:
+        c = line.count('"')
+        total_quotes += c
+        if c % 2 != 0:
+            unbalanced += 1
+
+    win = ui.create_window("Dialogue Analysis", 460, 320)
+    win.add_label("Chapter Dialogue & Quotation Analysis:")
+    win.add_text("Total quotation marks: " + str(total_quotes) + "\nLines with unmatched pairs: " + str(unbalanced))
+    win.add_button("Close", "close_window")
+    win.show()
+
+@on_chapter_change
+def on_load(title, text, index):
+    status.notify("Inspecting chapter: " + title)

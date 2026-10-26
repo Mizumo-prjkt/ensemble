@@ -1,0 +1,22 @@
+# ID: author.reading-stats
+# Name: Word & Reading Stats
+# Version: 1.0
+# Description: Calculates word count, character count, and estimated reading time for the active chapter.
+
+@on_toolbar_click("Reading Stats")
+def show_stats():
+    title = editor.get_chapter_title()
+    words = editor.get_word_count()
+    text = editor.get_chapter_text()
+    chars = len(text)
+
+    # Average adult reading speed: ~225 words per minute
+    reading_min = int(words / 225)
+    if reading_min == 0:
+        reading_min = 1
+
+    win = ui.create_window("Reading Statistics", 460, 340)
+    win.add_label("Statistics for: " + title)
+    win.add_text("Word Count: " + str(words) + "\nCharacter Count: " + str(chars) + "\nEstimated Reading Time: ~" + str(reading_min) + " min")
+    win.add_button("Close", "close_window")
+    win.show()

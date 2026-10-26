@@ -42,6 +42,12 @@ struct UiCallbacks {
     std::function<void(const QString &winId, const QString &type, const QVariantMap &props)> addWidget;
     std::function<void(const QString &winId)> showWindow;
     std::function<void(const QString &winId)> closeWindow;
+    std::function<void(const QString &winId)> clearWindow;
+    std::function<void(const QString &title, const QString &text)> showMessageBox;
+};
+
+struct NetworkCallbacks {
+    std::function<void(const QString &pluginId, qint64 reqDelta, qint64 bytesSent, qint64 bytesRecv, const QString &url, const QString &status)> onActivity;
 };
 
 /**
@@ -72,6 +78,7 @@ public:
     void setStatusCallbacks(StatusCallbacks callbacks) { m_statusCallbacks = std::move(callbacks); }
     void setInterPluginCallbacks(InterPluginCallbacks callbacks) { m_pluginCallbacks = std::move(callbacks); }
     void setUiCallbacks(UiCallbacks callbacks) { m_uiCallbacks = std::move(callbacks); }
+    void setNetworkCallbacks(NetworkCallbacks callbacks) { m_networkCallbacks = std::move(callbacks); }
 
     // Host connectors exposed to DSL
     ScriptValue createEditorNamespace(ResourceGuard &guard);
@@ -90,6 +97,9 @@ public:
     qint64 calculateUsedStorageBytes() const;
     QString storageDirPath() const;
 
+    const UiCallbacks &uiCallbacks() const noexcept { return m_uiCallbacks; }
+    const QString &lastCreatedWindowId() const noexcept { return m_lastCreatedWindowId; }
+
 private:
     void validateKey(const QString &key, int line, int col) const;
     QString resolveKeyPath(const QString &key, int line, int col) const;
@@ -102,10 +112,13 @@ private:
     PluginPermissions m_permissions;
     bool m_quarantined = false;
 
+    QString m_lastCreatedWindowId;
+
     EditorCallbacks m_editorCallbacks;
     StatusCallbacks m_statusCallbacks;
     InterPluginCallbacks m_pluginCallbacks;
     UiCallbacks m_uiCallbacks;
+    NetworkCallbacks m_networkCallbacks;
 };
 
 } // namespace EnsemblePlugin

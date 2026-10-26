@@ -1,0 +1,26 @@
+# ID: author.scratchpad
+# Name: Chapter Scratchpad
+# Version: 1.0
+# Description: Demonstrates local persistent storage by saving per-chapter author scratchpad notes.
+
+@on_toolbar_click("Open Scratchpad")
+def open_scratchpad():
+    title = editor.get_chapter_title()
+    key = "note_" + title
+    saved_note = storage.read(key)
+
+    win = ui.create_window("Author Notes — " + title, 480, 360)
+    win.add_label("Persistent notes for: " + title)
+    win.add_input("Enter notes...", saved_note)
+    win.add_button("Save Note", "on_save")
+    win.add_button("Close", "close_window")
+    win.show()
+
+@on_button_click("on_save")
+def handle_save(inputs, wid):
+    title = editor.get_chapter_title()
+    key = "note_" + title
+    note_text = inputs.get("text", "")
+    storage.write(key, note_text)
+    status.notify("Saved note for: " + title)
+    close_window(wid)

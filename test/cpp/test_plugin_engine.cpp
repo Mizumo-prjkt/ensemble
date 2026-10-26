@@ -439,8 +439,18 @@ void testDeclarativeUiAndWindowActions() {
     uiCb.addWidget = [&](const QString &, const QString &type, const QVariantMap &) {
         addedWidgetTypes.append(type);
     };
-    uiCb.showWindow = [&](const QString &) {};
-    uiCb.closeWindow = [&](const QString &) {};
+    QString lastClosedWinId;
+    QString lastShownWinId;
+    QString lastClearedWinId;
+    QString lastMsgTitle, lastMsgText;
+
+    uiCb.showWindow = [&](const QString &id) { lastShownWinId = id; };
+    uiCb.closeWindow = [&](const QString &id) { lastClosedWinId = id; };
+    uiCb.clearWindow = [&](const QString &id) { lastClearedWinId = id; };
+    uiCb.showMessageBox = [&](const QString &title, const QString &text) {
+        lastMsgTitle = title;
+        lastMsgText = text;
+    };
     sandbox.setUiCallbacks(uiCb);
 
     ScriptEvaluator eval(sandbox);
@@ -449,12 +459,7 @@ void testDeclarativeUiAndWindowActions() {
         "win.add_label('Checking dialog...')\n"
         "win.add_text('All quotes ok')\n"
         "win.add_input('type here')\n"
-        "win.add_button('Apply', 'on_apply')\n"
-        "\n"
-        "result_var = ''\n"
-        "def on_apply(data):\n"
-        "    result_var = data['input_0']\n";
-
+        "win.add_button('Apply', 'on_apply')\n";
     eval.executeScript(script);
 
     assert(!createdWinId.isEmpty());
@@ -466,6 +471,70 @@ void testDeclarativeUiAndWindowActions() {
     assert(addedWidgetTypes[1] == "text");
     assert(addedWidgetTypes[2] == "input");
     assert(addedWidgetTypes[3] == "button");
+
+    // Test OOP win.show() and win.close()
+    eval.executeScript("win.show()\n");
+    assert(lastShownWinId == createdWinId);
+
+    eval.executeScript("win.close()\n");
+    assert(lastClosedWinId == createdWinId);
+
+    // Test win.close_window() alias
+    lastClosedWinId.clear();
+    eval.executeScript("win.close_window()\n");
+    assert(lastClosedWinId == createdWinId);
+
+    // Test ui.close_window(win)
+    lastClosedWinId.clear();
+    eval.executeScript("ui.close_window(win)\n");
+    assert(lastClosedWinId == createdWinId);
+
+    // Test global close_window()
+    lastClosedWinId.clear();
+    eval.executeScript("close_window(win)\n");
+    assert(lastClosedWinId == createdWinId);
+
+    // Test parameterless close_window() targeting active window
+    lastClosedWinId.clear();
+    eval.executeScript("close_window()\n");
+    assert(lastClosedWinId == createdWinId);
+
+    // Test Flat UI methods & message_box
+    eval.executeScript(
+        "ui.create_window('Flat Win', 400, 300)\n"
+        "ui.add_label('Label 1')\n"
+        "ui.add_input('Placeholder', 'Default')\n"
+        "ui.add_button('Close Button', 'close_window')\n"
+        "ui.show_window()\n"
+        "ui.message_box('Notice', 'Operation Complete')\n"
+        "ui.clear_window()\n"
+        "ui.close_window()\n"
+    );
+    assert(lastMsgTitle == "Notice");
+    assert(lastMsgText == "Operation Complete");
+    assert(!lastClearedWinId.isEmpty());
+    assert(lastClosedWinId == sandbox.lastCreatedWindowId());
+
+    // Test @on_window_action and @on_button_click decorator mechanisms
+    std::string actionHookScript =
+        "hook_received = ''\n"
+        "@on_window_action('my_action')\n"
+        "def on_act(inputs, wid):\n"
+        "    hook_received = inputs['text']\n"
+        "\n"
+        "btn_received = ''\n"
+        "@on_button_click('Submit')\n"
+        "def on_submit(inputs, wid):\n"
+        "    btn_received = 'clicked'\n";
+    eval.executeScript(actionHookScript);
+
+    QVariantMap inputs;
+    inputs["text"] = "sample_value";
+    eval.dispatchWindowAction(createdWinId, "my_action", inputs);
+    // Verify fallback close_window hook
+    lastClosedWinId.clear();
+    eval.dispatchWindowAction(createdWinId, "close_window", inputs);
+    assert(lastClosedWinId == createdWinId);
 
     // Case 2: UI disabled
     perms.allowUi = false;
@@ -566,6 +635,21 @@ void testPluginManagerErLoadingAndUninstall() {
     assert(meta.name == "Sample Runner");
     assert(meta.version == "2.0");
 
+    // Test fault and re-enable lifecycle
+    PluginManager::instance().onWorkerPluginFaulted("test.sample-runner", "PermissionDenied: write disabled", 10);
+    meta = PluginManager::instance().plugin("test.sample-runner");
+    assert(meta.faulted);
+    assert(!meta.active);
+    assert(meta.faultLine == 10);
+    assert(meta.faultError.contains("PermissionDenied"));
+
+    // Re-enable / reload plugin
+    PluginManager::instance().reloadPlugin("test.sample-runner");
+    meta = PluginManager::instance().plugin("test.sample-runner");
+    assert(!meta.faulted);
+    assert(meta.active);
+    assert(meta.faultError.isEmpty());
+
     // Uninstall
     bool uninstalled = PluginManager::instance().uninstallPlugin("test.sample-runner", true, &err);
     assert(uninstalled);
@@ -573,6 +657,75 @@ void testPluginManagerErLoadingAndUninstall() {
     assert(!QFile::exists(erPath)); // File deleted on disk!
 
     std::cout << "✓ testPluginManagerErLoadingAndUninstall passed." << std::endl;
+}
+
+void testHomographDetectionAndSecurityWarning() {
+    std::cout << "Running testHomographDetectionAndSecurityWarning..." << std::endl;
+
+    // 1. Check Cyrillic lookalike
+    auto [cyrScript, cyrLookalike] = identifyHomographLookalike(QChar(0x0430)); // 'а' Cyrillic
+    assert(cyrScript == "Cyrillic");
+    assert(cyrLookalike == QLatin1Char('a'));
+
+    // 2. Check Greek lookalike
+    auto [grkScript, grkLookalike] = identifyHomographLookalike(QChar(0x03BF)); // 'ο' Greek
+    assert(grkScript == "Greek");
+    assert(grkLookalike == QLatin1Char('o'));
+
+    // 3. Format character IDs
+    QString spoofedUrl = QStringLiteral("https://") + QChar(0x0430) + QStringLiteral("pple.com/login");
+    QString formatted = formatLinkAsCharacterIds(spoofedUrl);
+    assert(formatted.contains("[CHAR_ID:U+0430"));
+    assert(formatted.contains("Cyrillic lookalike for ASCII 'a'"));
+
+    // 4. detectHomographOrDeceptiveChars detects spoofed host
+    QString details, charIds;
+    bool hasSuspicious = detectHomographOrDeceptiveChars(spoofedUrl, &details, &charIds);
+    assert(hasSuspicious);
+    assert(details.contains("U+0430"));
+    assert(charIds.contains("[CHAR_ID:U+0430"));
+
+    // 5. Normal URL is not flagged
+    QString normalUrl = QStringLiteral("https://apple.com/login");
+    QString normDetails, normCharIds;
+    bool normalSuspicious = detectHomographOrDeceptiveChars(normalUrl, &normDetails, &normCharIds);
+    assert(!normalSuspicious);
+
+    // 6. Test sandbox quarantine upon homograph attempt
+    PluginSandbox sandbox("test.homograph", "Homograph Test", "1.0");
+    PluginPermissions perms;
+    perms.allowNetwork = true;
+    perms.allowedDomains.append(QStringLiteral("*"));
+    sandbox.setPermissions(perms);
+
+    bool quarantined = false;
+    sandbox.setStatusCallbacks({
+        nullptr, nullptr, nullptr,
+        [&quarantined](const QString &, const QString &, int) {
+            quarantined = true;
+        }
+    });
+
+    ResourceLimits limits;
+    ScriptEvaluator eval(sandbox, limits);
+    std::string script =
+        "def try_spoof():\n"
+        "    url = 'https://' + chr(1072) + 'pple.com/api'\n"
+        "    res = http.get(url)\n"
+        "try_spoof()\n";
+
+    try {
+        eval.executeScript(script);
+        assert(false && "Should have thrown ScriptTrap for homograph diversion");
+    } catch (const ScriptTrap &trap) {
+        std::string err = trap.what();
+        assert(err.find("Deceptive homograph") != std::string::npos);
+        assert(err.find("CHAR_ID:U+0430") != std::string::npos);
+        assert(quarantined);
+        assert(sandbox.isQuarantined());
+    }
+
+    std::cout << "✓ testHomographDetectionAndSecurityWarning passed." << std::endl;
 }
 
 int main(int argc, char *argv[]) {
@@ -595,6 +748,7 @@ int main(int argc, char *argv[]) {
     testDeclarativeUiAndWindowActions();
     testExpandedEditorAndPermissions();
     testPluginManagerErLoadingAndUninstall();
+    testHomographDetectionAndSecurityWarning();
 
     std::cout << "========================================" << std::endl;
     std::cout << "All Sandboxed Plugin Engine tests PASSED!" << std::endl;

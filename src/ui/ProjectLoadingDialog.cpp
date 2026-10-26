@@ -8,6 +8,8 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QProgressBar>
+#include <QTextEdit>
+#include <QTime>
 #include <QVBoxLayout>
 
 ProjectLoadingDialog::ProjectLoadingDialog(const QString &filePath, QWidget *parent)
@@ -17,7 +19,7 @@ ProjectLoadingDialog::ProjectLoadingDialog(const QString &filePath, QWidget *par
     setWindowIcon(AppIcon::icon());
     setModal(true);
     setWindowFlags(Qt::Dialog | Qt::CustomizeWindowHint | Qt::WindowTitleHint);
-    setFixedWidth(460);
+    setFixedWidth(520);
 
     auto *mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(16, 16, 16, 16);
@@ -27,7 +29,7 @@ ProjectLoadingDialog::ProjectLoadingDialog(const QString &filePath, QWidget *par
     m_cardFrame->setObjectName(QStringLiteral("loadingCard"));
     auto *cardLayout = new QVBoxLayout(m_cardFrame);
     cardLayout->setContentsMargins(18, 16, 18, 16);
-    cardLayout->setSpacing(12);
+    cardLayout->setSpacing(10);
 
     auto *headerLayout = new QHBoxLayout();
     headerLayout->setSpacing(12);
@@ -65,6 +67,13 @@ ProjectLoadingDialog::ProjectLoadingDialog(const QString &filePath, QWidget *par
     m_statusLabel->setWordWrap(true);
     cardLayout->addWidget(m_statusLabel);
 
+    m_detailsLog = new QTextEdit(this);
+    m_detailsLog->setObjectName(QStringLiteral("loadingDetailsLog"));
+    m_detailsLog->setReadOnly(true);
+    m_detailsLog->setMaximumHeight(85);
+    m_detailsLog->setStyleSheet(QStringLiteral("font-family: monospace; font-size: 10px; border-radius: 4px; padding: 4px;"));
+    cardLayout->addWidget(m_detailsLog);
+
     mainLayout->addWidget(m_cardFrame);
 
     updateTheme();
@@ -85,7 +94,26 @@ void ProjectLoadingDialog::setProgress(int percent, const QString &statusMessage
     if (m_statusLabel) {
         m_statusLabel->setText(statusMessage);
     }
+    if (m_detailsLog && !statusMessage.isEmpty()) {
+        const QString timeStr = QTime::currentTime().toString(QStringLiteral("hh:mm:ss"));
+        bool isIssue = statusMessage.contains(QStringLiteral("warn"), Qt::CaseInsensitive) ||
+                       statusMessage.contains(QStringLiteral("error"), Qt::CaseInsensitive) ||
+                       statusMessage.contains(QStringLiteral("fail"), Qt::CaseInsensitive);
+        QString color = isIssue ? QStringLiteral("#f59e0b") : QStringLiteral("#94a3b8");
+        m_detailsLog->append(QStringLiteral("<span style='color: #64748b;'>[%1]</span> <span style='color: %2;'>%3</span>")
+                                 .arg(timeStr, color, statusMessage.toHtmlEscaped()));
+    }
     // Repaint dialog and pump event loop so the window never freezes
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+}
+
+void ProjectLoadingDialog::logDiagnostic(const QString &message, bool isError) {
+    if (m_detailsLog && !message.isEmpty()) {
+        const QString timeStr = QTime::currentTime().toString(QStringLiteral("hh:mm:ss"));
+        QString color = isError ? QStringLiteral("#ef4444") : QStringLiteral("#38bdf8");
+        m_detailsLog->append(QStringLiteral("<span style='color: #64748b;'>[%1]</span> <span style='color: %2;'>%3</span>")
+                                 .arg(timeStr, color, message.toHtmlEscaped()));
+    }
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 }
 
@@ -95,6 +123,10 @@ void ProjectLoadingDialog::reject() {
 
 void ProjectLoadingDialog::finish() {
     setProgress(100, QStringLiteral("Ready!"));
+    if (m_detailsLog) {
+        const QString timeStr = QTime::currentTime().toString(QStringLiteral("hh:mm:ss"));
+        m_detailsLog->append(QStringLiteral("<span style='color: #64748b;'>[%1]</span> <span style='color: #22c55e;'>Project loaded successfully.</span>").arg(timeStr));
+    }
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     accept();
     close();
@@ -155,5 +187,18 @@ void ProjectLoadingDialog::updateTheme() {
              isDark ? QStringLiteral("#ffffff") : QStringLiteral("#000000"),
              accent,
              QString::number(qMax(0, qMin(rad, 5) - 1))));
+    }
+
+    if (m_detailsLog) {
+        m_detailsLog->setStyleSheet(QStringLiteral(
+            "QTextEdit#loadingDetailsLog {"
+            "  background-color: %1;"
+            "  border: 1px solid %2;"
+            "  border-radius: %3px;"
+            "  color: %4;"
+            "  font-family: monospace;"
+            "  font-size: 10px;"
+            "}"
+        ).arg(surfaceBg, border, QString::number(qMin(rad, 4)), isDark ? QStringLiteral("#cbd5e1") : QStringLiteral("#334155")));
     }
 }

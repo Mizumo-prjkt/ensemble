@@ -47,7 +47,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
 {
     setWindowTitle(QStringLiteral("Preferences"));
     setWindowIcon(AppIcon::icon());
-    setModal(true);
+    setWindowModality(Qt::WindowModal);
     resize(740, 640);
     setMinimumSize(640, 520);
 
@@ -56,11 +56,20 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     updateMcpStatusDisplay();
 
     connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this](AppTheme theme) {
-        if (m_themeDarkRadio) m_themeDarkRadio->setChecked(theme == AppTheme::Dark);
-        if (m_themeDarkerRadio) m_themeDarkerRadio->setChecked(theme == AppTheme::Darker);
-        if (m_themeLightRadio) m_themeLightRadio->setChecked(theme == AppTheme::Light);
-        if (m_themeReversiRadio) m_themeReversiRadio->setChecked(theme == AppTheme::Ao3Reversi);
+        if (m_isUpdatingTheme) return;
+        m_isUpdatingTheme = true;
+        {
+            const QSignalBlocker b1(m_themeDarkRadio);
+            const QSignalBlocker b2(m_themeDarkerRadio);
+            const QSignalBlocker b3(m_themeLightRadio);
+            const QSignalBlocker b4(m_themeReversiRadio);
+            if (m_themeDarkRadio) m_themeDarkRadio->setChecked(theme == AppTheme::Dark);
+            if (m_themeDarkerRadio) m_themeDarkerRadio->setChecked(theme == AppTheme::Darker);
+            if (m_themeLightRadio) m_themeLightRadio->setChecked(theme == AppTheme::Light);
+            if (m_themeReversiRadio) m_themeReversiRadio->setChecked(theme == AppTheme::Ao3Reversi);
+        }
         updateTheme();
+        m_isUpdatingTheme = false;
     });
     connect(&ThemeManager::instance(), &ThemeManager::skinFlavorChanged, this, [this](SkinFlavor flavor) {
         if (m_skinFlavorCombo) {
@@ -898,6 +907,8 @@ void SettingsDialog::updateWallpaperColorPreview()
 
 void SettingsDialog::onThemeSelectionChanged()
 {
+    if (m_isUpdatingTheme) return;
+    m_isUpdatingTheme = true;
     updateThemeAndSkinCompatibility();
     if (m_themeDarkRadio && m_themeDarkRadio->isChecked()) {
         ThemeManager::instance().setTheme(AppTheme::Dark);
@@ -908,11 +919,13 @@ void SettingsDialog::onThemeSelectionChanged()
     } else if (m_themeReversiRadio && m_themeReversiRadio->isChecked()) {
         ThemeManager::instance().setTheme(AppTheme::Ao3Reversi);
     }
+    m_isUpdatingTheme = false;
 }
 
 void SettingsDialog::onSkinFlavorSelectionChanged(int index)
 {
-    if (!m_skinFlavorCombo) return;
+    if (!m_skinFlavorCombo || m_isUpdatingTheme) return;
+    m_isUpdatingTheme = true;
 
     updateThemeAndSkinCompatibility();
     const auto flavor = static_cast<SkinFlavor>(m_skinFlavorCombo->itemData(index).toInt());
@@ -923,6 +936,7 @@ void SettingsDialog::onSkinFlavorSelectionChanged(int index)
     }
     updateWallpaperColorPreview();
     updateTheme();
+    m_isUpdatingTheme = false;
 }
 
 void SettingsDialog::onRescanWallpaperClicked()

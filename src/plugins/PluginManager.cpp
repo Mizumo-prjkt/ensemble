@@ -11,6 +11,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMessageBox>
 #include <QRegularExpression>
 #include <QUuid>
 
@@ -82,6 +83,12 @@ void PluginWorker::initPlugin(const QString &publicId,
     uiCb.closeWindow = [this](const QString &winId) {
         emit uiCloseWindowRequested(winId);
     };
+    uiCb.clearWindow = [this](const QString &winId) {
+        emit uiClearWindowRequested(winId);
+    };
+    uiCb.showMessageBox = [this](const QString &title, const QString &text) {
+        emit uiShowMessageBoxRequested(m_publicId, title, text);
+    };
     m_sandbox->setUiCallbacks(std::move(uiCb));
 
     StatusCallbacks stCb;
@@ -112,6 +119,12 @@ void PluginWorker::initPlugin(const QString &publicId,
         return true;
     };
     m_sandbox->setInterPluginCallbacks(std::move(ipCb));
+
+    NetworkCallbacks netCb;
+    netCb.onActivity = [this](const QString &pid, qint64 reqDelta, qint64 sentBytes, qint64 recvBytes, const QString &url, const QString &status) {
+        emit networkActivity(pid, reqDelta, sentBytes, recvBytes, url, status);
+    };
+    m_sandbox->setNetworkCallbacks(std::move(netCb));
 
     m_evaluator = std::make_unique<ScriptEvaluator>(*m_sandbox, limits);
 
@@ -255,6 +268,20 @@ void PluginWorker::updateChaptersSnapshot(const QList<QVariantMap> &chapters) {
 
 void PluginWorker::setActive(bool active) {
     m_active = active;
+}
+
+size_t PluginWorker::currentMemoryUsage() const {
+    if (m_evaluator) {
+        return m_evaluator->guard().currentMemory();
+    }
+    return 0;
+}
+
+qint64 PluginWorker::currentStorageUsage() const {
+    if (m_sandbox) {
+        return m_sandbox->calculateUsedStorageBytes();
+    }
+    return 0;
 }
 
 // PluginManager implementation
@@ -500,6 +527,8 @@ bool PluginManager::loadPluginFromSource(const QString &publicId,
     connect(worker, &PluginWorker::uiAddWidgetRequested, this, &PluginManager::onUiAddWidget, Qt::QueuedConnection);
     connect(worker, &PluginWorker::uiShowWindowRequested, this, &PluginManager::onUiShowWindow, Qt::QueuedConnection);
     connect(worker, &PluginWorker::uiCloseWindowRequested, this, &PluginManager::onUiCloseWindow, Qt::QueuedConnection);
+    connect(worker, &PluginWorker::uiClearWindowRequested, this, &PluginManager::onUiClearWindow, Qt::QueuedConnection);
+    connect(worker, &PluginWorker::uiShowMessageBoxRequested, this, &PluginManager::onUiShowMessageBox, Qt::QueuedConnection);
 
     connect(worker, &PluginWorker::statusWarn, this, &PluginManager::pluginStatusWarn, Qt::QueuedConnection);
     connect(worker, &PluginWorker::statusError, this, &PluginManager::pluginStatusError, Qt::QueuedConnection);
@@ -508,6 +537,18 @@ bool PluginManager::loadPluginFromSource(const QString &publicId,
     connect(worker, &PluginWorker::pluginFaulted, this, &PluginManager::onWorkerPluginFaulted, Qt::QueuedConnection);
     connect(worker, &PluginWorker::pluginQuarantined, this, &PluginManager::onWorkerPluginQuarantined, Qt::QueuedConnection);
     connect(worker, &PluginWorker::sendMessageRequested, this, &PluginManager::routeMessage, Qt::QueuedConnection);
+    connect(worker, &PluginWorker::networkActivity, this, &PluginManager::onWorkerNetworkActivity, Qt::QueuedConnection);
+
+    // Track network metrics
+    PluginNetworkStats netStats;
+    netStats.publicId = publicId;
+    netStats.pluginName = name;
+    netStats.hasNetworkCapabilities = (effectivePerms.detectedNetwork || effectivePerms.allowNetwork || !effectivePerms.detectedDomains.isEmpty());
+    netStats.allowNetwork = effectivePerms.allowNetwork;
+    netStats.allowedDomains = effectivePerms.allowedDomains;
+    netStats.detectedDomains = effectivePerms.detectedDomains;
+    netStats.lastStatus = effectivePerms.allowNetwork ? QStringLiteral("Network Allowed") : QStringLiteral("Network Disabled");
+    m_networkStatsMap.insert(publicId, netStats);
 
     // Thread cleanup
     connect(thread, &QThread::finished, worker, &QObject::deleteLater);
@@ -571,16 +612,33 @@ void PluginManager::unloadPlugin(const QString &publicId) {
 
 void PluginManager::reloadPlugin(const QString &publicId) {
     if (!m_plugins.contains(publicId)) return;
+    m_plugins[publicId].faulted = false;
+    m_plugins[publicId].faultError.clear();
+    m_plugins[publicId].faultLine = -1;
+    m_plugins[publicId].active = true;
+    m_savedActiveMap[publicId] = true;
+    saveManifest();
+
     QString path = m_plugins[publicId].filePath;
     if (!path.isEmpty() && QFile::exists(path)) {
         loadPluginFromFile(path);
+    } else if (m_plugins[publicId].worker) {
+        QMetaObject::invokeMethod(m_plugins[publicId].worker, "setActive", Qt::QueuedConnection,
+                                  Q_ARG(bool, true));
     }
+    emit pluginListChanged();
+    emit toolbarActionsChanged();
 }
 
 void PluginManager::setPluginActive(const QString &publicId, bool active) {
     if (!m_plugins.contains(publicId)) return;
     m_plugins[publicId].active = active;
     m_savedActiveMap[publicId] = active;
+    if (active) {
+        m_plugins[publicId].faulted = false;
+        m_plugins[publicId].faultError.clear();
+        m_plugins[publicId].faultLine = -1;
+    }
     saveManifest();
 
     if (m_plugins[publicId].worker) {
@@ -588,6 +646,7 @@ void PluginManager::setPluginActive(const QString &publicId, bool active) {
                                   Q_ARG(bool, active));
     }
     emit pluginListChanged();
+    emit toolbarActionsChanged();
 }
 
 void PluginManager::setPluginPermissions(const QString &publicId, const PluginPermissions &permissions) {
@@ -595,6 +654,15 @@ void PluginManager::setPluginPermissions(const QString &publicId, const PluginPe
     m_plugins[publicId].permissions = permissions;
     m_savedPermissionsMap[publicId] = permissions;
     saveManifest();
+
+    if (m_networkStatsMap.contains(publicId)) {
+        m_networkStatsMap[publicId].allowNetwork = permissions.allowNetwork;
+        m_networkStatsMap[publicId].allowedDomains = permissions.allowedDomains;
+        m_networkStatsMap[publicId].hasNetworkCapabilities = (permissions.detectedNetwork || permissions.allowNetwork || !permissions.detectedDomains.isEmpty());
+        if (!permissions.allowNetwork) {
+            m_networkStatsMap[publicId].lastStatus = QStringLiteral("Network Disabled");
+        }
+    }
 
     if (m_plugins[publicId].worker) {
         QMetaObject::invokeMethod(m_plugins[publicId].worker, "setPermissions", Qt::QueuedConnection,
@@ -608,6 +676,7 @@ bool PluginManager::uninstallPlugin(const QString &publicId, bool deleteStorage,
         if (errorMessage) *errorMessage = QStringLiteral("Plugin '%1' not found").arg(publicId);
         return false;
     }
+    m_networkStatsMap.remove(publicId);
 
     PluginMetadata meta = m_plugins[publicId];
     QString filePath = meta.filePath;
@@ -641,11 +710,23 @@ bool PluginManager::uninstallPlugin(const QString &publicId, bool deleteStorage,
 }
 
 QList<PluginMetadata> PluginManager::plugins() const {
-    return m_plugins.values();
+    auto list = m_plugins.values();
+    for (auto &meta : list) {
+        if (meta.worker) {
+            meta.memoryUsedBytes = static_cast<qint64>(meta.worker->currentMemoryUsage());
+            meta.storageUsedBytes = meta.worker->currentStorageUsage();
+        }
+    }
+    return list;
 }
 
 PluginMetadata PluginManager::plugin(const QString &publicId) const {
-    return m_plugins.value(publicId);
+    auto meta = m_plugins.value(publicId);
+    if (meta.worker) {
+        meta.memoryUsedBytes = static_cast<qint64>(meta.worker->currentMemoryUsage());
+        meta.storageUsedBytes = meta.worker->currentStorageUsage();
+    }
+    return meta;
 }
 
 bool PluginManager::hasPlugin(const QString &publicId) const {
@@ -674,6 +755,15 @@ QList<QVariantMap> PluginManager::publicPluginList() const {
         list.append(map);
     }
     return list;
+}
+
+bool PluginManager::hasActivePlugins() const {
+    for (const auto &p : m_plugins) {
+        if (p.active && !p.faulted && p.worker) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void PluginManager::notifyChapterChanged(const QString &title, const QString &text, int chapterIndex) {
@@ -750,6 +840,7 @@ void PluginManager::onWorkerPluginLoaded(const QString &publicId, const QStringL
 void PluginManager::onWorkerPluginFaulted(const QString &publicId, const QString &errorMessage, int line) {
     if (m_plugins.contains(publicId)) {
         m_plugins[publicId].faulted = true;
+        m_plugins[publicId].active = false;
         m_plugins[publicId].faultError = errorMessage;
         m_plugins[publicId].faultLine = line;
         emit pluginFaulted(publicId, errorMessage, line);
@@ -778,6 +869,9 @@ void PluginManager::onWorkerPluginQuarantined(const QString &publicId, const QSt
         }
 
         saveManifest();
+        if (m_networkStatsMap.contains(publicId)) {
+            m_networkStatsMap[publicId].lastStatus = QStringLiteral("Quarantined: ") + reason;
+        }
         emit pluginStatusError(publicId, reason, line);
         emit pluginFaulted(publicId, reason, line);
         emit pluginQuarantined(publicId, reason);
@@ -831,10 +925,20 @@ void PluginManager::onUiCloseWindow(const QString &winId) {
     if (m_openWindows.contains(winId)) {
         auto *dlg = m_openWindows.take(winId);
         if (dlg) {
-            dlg->close();
+            dlg->reject();
             dlg->deleteLater();
         }
     }
+}
+
+void PluginManager::onUiClearWindow(const QString &winId) {
+    if (m_openWindows.contains(winId)) {
+        m_openWindows[winId]->clearWidgets();
+    }
+}
+
+void PluginManager::onUiShowMessageBox(const QString &publicId, const QString &title, const QString &text) {
+    QMessageBox::information(nullptr, QStringLiteral("[%1] %2").arg(publicId, title), text);
 }
 
 void PluginManager::onWindowActionTriggered(const QString &publicId, const QString &winId, const QString &actionName, const QVariantMap &inputs) {
@@ -847,6 +951,36 @@ void PluginManager::onWindowActionTriggered(const QString &publicId, const QStri
                                       Q_ARG(QVariantMap, inputs));
         }
     }
+}
+
+void PluginManager::onWorkerNetworkActivity(const QString &publicId, qint64 reqDelta, qint64 bytesSent, qint64 bytesRecv, const QString &url, const QString &status) {
+    if (!m_networkStatsMap.contains(publicId)) {
+        PluginNetworkStats stats;
+        stats.publicId = publicId;
+        if (m_plugins.contains(publicId)) {
+            stats.pluginName = m_plugins[publicId].name;
+            stats.hasNetworkCapabilities = true;
+            stats.allowedDomains = m_plugins[publicId].permissions.allowedDomains;
+            stats.detectedDomains = m_plugins[publicId].permissions.detectedDomains;
+            stats.allowNetwork = m_plugins[publicId].permissions.allowNetwork;
+        }
+        m_networkStatsMap.insert(publicId, stats);
+    }
+    auto &st = m_networkStatsMap[publicId];
+    st.requestsCount += reqDelta;
+    st.bytesSent += bytesSent;
+    st.bytesReceived += bytesRecv;
+    st.lastRequestTime = QDateTime::currentDateTime();
+    st.lastUrl = url;
+    st.lastStatus = status;
+}
+
+QList<PluginNetworkStats> PluginManager::allNetworkStats() const {
+    return m_networkStatsMap.values();
+}
+
+PluginNetworkStats PluginManager::networkStats(const QString &publicId) const {
+    return m_networkStatsMap.value(publicId);
 }
 
 } // namespace EnsemblePlugin

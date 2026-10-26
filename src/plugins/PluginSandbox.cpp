@@ -482,6 +482,28 @@ ScriptValue PluginSandbox::createHttpNamespace(ResourceGuard &guard) {
             throw ScriptTrap("NetworkError: Invalid URL '" + urlString.toStdString() + "'", l, c);
         }
 
+        // Strict Unicode homograph & lookalike spoofing check
+        QString deceptiveDetails;
+        QString charIds;
+        if (detectHomographOrDeceptiveChars(urlString, &deceptiveDetails, &charIds)) {
+            QString secMsg = QStringLiteral(
+                "Security Violation: Deceptive homograph / lookalike Unicode character detected in URL target ('%1'). "
+                "Ensemble strictly forbids disguised URLs or homograph diversion to protect users from malicious deception. "
+                "Deceptive Character IDs: %2. Details: %3. "
+                "The plugin was forcibly closed and quarantined for a security violation. "
+                "Report this immediately to Ensemble developers regarding this incident.")
+                .arg(urlString, charIds, deceptiveDetails);
+            m_quarantined = true;
+            if (m_networkCallbacks.onActivity) {
+                m_networkCallbacks.onActivity(m_publicId, 1, 0, 0, urlString, QStringLiteral("Quarantined: Homograph lookalike"));
+            }
+            PluginLogger::log(m_publicId, QStringLiteral("SECURITY_VIOLATION"), secMsg, false);
+            if (m_statusCallbacks.onQuarantine) {
+                m_statusCallbacks.onQuarantine(m_publicId, secMsg, l);
+            }
+            throw ScriptTrap(secMsg.toStdString(), l, c);
+        }
+
         // Strict HTTPS enforcement - no insecure HTTP or protocol downgrade allowed
         if (url.scheme().compare(QStringLiteral("https"), Qt::CaseInsensitive) != 0) {
             QString secMsg = QStringLiteral(
@@ -491,6 +513,9 @@ ScriptValue PluginSandbox::createHttpNamespace(ResourceGuard &guard) {
                 "Report this immediately to Ensemble developers regarding this incident.")
                 .arg(url.scheme(), urlString);
             m_quarantined = true;
+            if (m_networkCallbacks.onActivity) {
+                m_networkCallbacks.onActivity(m_publicId, 1, 0, 0, urlString, QStringLiteral("Quarantined: Non-HTTPS"));
+            }
             PluginLogger::log(m_publicId, QStringLiteral("SECURITY_VIOLATION"), secMsg, false);
             if (m_statusCallbacks.onQuarantine) {
                 m_statusCallbacks.onQuarantine(m_publicId, secMsg, l);
@@ -505,12 +530,18 @@ ScriptValue PluginSandbox::createHttpNamespace(ResourceGuard &guard) {
 
         // 1. Permission checks
         if (!m_permissions.allowNetwork) {
+            if (m_networkCallbacks.onActivity) {
+                m_networkCallbacks.onActivity(m_publicId, 1, 0, 0, urlString, QStringLiteral("Blocked: Network Disabled"));
+            }
             PluginLogger::log(m_publicId, QStringLiteral("HTTP_REQUEST"),
                               QStringLiteral("BLOCKED: Network access disabled (URL: %1)").arg(urlString), false);
             throw ScriptTrap("PermissionDenied: Network access is disabled for this plugin", l, c);
         }
 
         if (!m_permissions.isDomainAllowed(host)) {
+            if (m_networkCallbacks.onActivity) {
+                m_networkCallbacks.onActivity(m_publicId, 1, 0, 0, urlString, QStringLiteral("Blocked: Domain Not Allowed"));
+            }
             PluginLogger::log(m_publicId, QStringLiteral("HTTP_REQUEST"),
                               QStringLiteral("BLOCKED: Domain '%1' not in allowed list (URL: %2)").arg(host, urlString), false);
             throw ScriptTrap("PermissionDenied: Access to domain '" + host.toStdString() + "' is not permitted", l, c);
@@ -582,6 +613,9 @@ ScriptValue PluginSandbox::createHttpNamespace(ResourceGuard &guard) {
                 "Report this immediately to Ensemble developers regarding this incident.")
                 .arg(redirectUrl);
             m_quarantined = true;
+            if (m_networkCallbacks.onActivity) {
+                m_networkCallbacks.onActivity(m_publicId, 1, postData.toUtf8().size(), 0, redirectUrl, QStringLiteral("Quarantined: Redirection Attempt"));
+            }
             PluginLogger::log(m_publicId, QStringLiteral("QUARANTINE_VIOLATION"), secWarning, false);
             if (m_statusCallbacks.onQuarantine) {
                 m_statusCallbacks.onQuarantine(m_publicId, secWarning, l);
@@ -594,6 +628,10 @@ ScriptValue PluginSandbox::createHttpNamespace(ResourceGuard &guard) {
         reply->deleteLater();
 
         g.alloc(body.size() + sizeof(ScriptDict) + 128, l, c);
+
+        if (m_networkCallbacks.onActivity) {
+            m_networkCallbacks.onActivity(m_publicId, 1, postData.toUtf8().size(), body.size(), urlString, QString::number(statusCode));
+        }
 
         PluginLogger::log(m_publicId, QStringLiteral("HTTP_RESPONSE"),
                           QStringLiteral("Status: %1, size: %2 bytes").arg(statusCode).arg(body.size()), true);
@@ -639,18 +677,35 @@ ScriptValue PluginSandbox::createHttpNamespace(ResourceGuard &guard) {
 ScriptValue PluginSandbox::createUiNamespace(ResourceGuard &guard) {
     auto dict = std::make_shared<ScriptDict>();
 
+    // Helper to extract winId from arguments or fall back to last created window
+    auto resolveWinId = [this](const std::vector<ScriptValue> &args) -> QString {
+        if (!args.empty()) {
+            if (args.at(0).isDict()) {
+                auto d = args.at(0).asDict();
+                if (d->find("_win_id") != d->end()) {
+                    return QString::fromStdString((*d)["_win_id"].toString());
+                }
+            } else if (args.at(0).isString()) {
+                return QString::fromStdString(args.at(0).asString());
+            }
+        }
+        return m_lastCreatedWindowId;
+    };
+
     // Helper to generate a window ScriptDict
     auto makeWindowDict = [this](const QString &winId, const QString &title, ResourceGuard &g, int l, int c) -> ScriptValue {
         auto winDict = std::make_shared<ScriptDict>();
-        g.alloc(sizeof(ScriptDict) + 8 * 64, l, c);
+        g.alloc(sizeof(ScriptDict) + 12 * 64, l, c);
 
         (*winDict)["_win_id"] = ScriptValue(winId.toStdString());
+        (*winDict)["id"] = ScriptValue(winId.toStdString());
+        (*winDict)["win_id"] = ScriptValue(winId.toStdString());
         (*winDict)["title"] = ScriptValue(title.toStdString());
 
         // win.add_label(text: String)
         (*winDict)["add_label"] = ScriptValue([this, winId](const std::vector<ScriptValue> &args, ResourceGuard &, int line, int col) -> ScriptValue {
             if (args.empty()) throw ScriptTrap("win.add_label() requires text argument", line, col);
-            QString text = QString::fromStdString(args.at(0).toString());
+            QString text = (args.size() > 1) ? QString::fromStdString(args.at(1).toString()) : QString::fromStdString(args.at(0).toString());
             QVariantMap props;
             props[QStringLiteral("text")] = text;
             if (m_uiCallbacks.addWidget) {
@@ -675,10 +730,12 @@ ScriptValue PluginSandbox::createUiNamespace(ResourceGuard &guard) {
             return ScriptValue();
         }, "win.add_text");
 
-        // win.add_input(placeholder_or_default: String = "")
+        // win.add_input(placeholder: String = "", default_text: String = "")
         (*winDict)["add_input"] = ScriptValue([this, winId](const std::vector<ScriptValue> &args, ResourceGuard &, int, int) -> ScriptValue {
-            QString defText = args.empty() ? QString() : QString::fromStdString(args.at(0).toString());
+            QString placeholder = args.empty() ? QString() : QString::fromStdString(args.at(0).toString());
+            QString defText = (args.size() > 1 && !args.at(1).isNone()) ? QString::fromStdString(args.at(1).toString()) : QString();
             QVariantMap props;
+            props[QStringLiteral("placeholder")] = placeholder;
             props[QStringLiteral("defaultText")] = defText;
             if (m_uiCallbacks.addWidget) {
                 m_uiCallbacks.addWidget(winId, QStringLiteral("input"), props);
@@ -686,11 +743,15 @@ ScriptValue PluginSandbox::createUiNamespace(ResourceGuard &guard) {
             return ScriptValue();
         }, "win.add_input");
 
-        // win.add_button(label: String, action_name: String)
+        // win.add_button(label: String, action_name: String = label)
         (*winDict)["add_button"] = ScriptValue([this, winId](const std::vector<ScriptValue> &args, ResourceGuard &, int line, int col) -> ScriptValue {
             if (args.empty()) throw ScriptTrap("win.add_button() requires label argument", line, col);
             QString label = QString::fromStdString(args.at(0).toString());
             QString actionName = (args.size() > 1) ? QString::fromStdString(args.at(1).toString()) : label;
+            if (args.size() >= 3) {
+                label = QString::fromStdString(args.at(1).toString());
+                actionName = QString::fromStdString(args.at(2).toString());
+            }
             QVariantMap props;
             props[QStringLiteral("label")] = label;
             props[QStringLiteral("action")] = actionName;
@@ -701,26 +762,41 @@ ScriptValue PluginSandbox::createUiNamespace(ResourceGuard &guard) {
         }, "win.add_button");
 
         // win.show()
-        (*winDict)["show"] = ScriptValue([this, winId](const std::vector<ScriptValue> &, ResourceGuard &, int, int) -> ScriptValue {
+        auto showFn = ScriptValue([this, winId](const std::vector<ScriptValue> &, ResourceGuard &, int, int) -> ScriptValue {
             if (m_uiCallbacks.showWindow) {
                 m_uiCallbacks.showWindow(winId);
             }
             return ScriptValue();
         }, "win.show");
+        (*winDict)["show"] = showFn;
+        (*winDict)["show_window"] = showFn;
 
         // win.close()
-        (*winDict)["close"] = ScriptValue([this, winId](const std::vector<ScriptValue> &, ResourceGuard &, int, int) -> ScriptValue {
+        auto closeFn = ScriptValue([this, winId](const std::vector<ScriptValue> &, ResourceGuard &, int, int) -> ScriptValue {
             if (m_uiCallbacks.closeWindow) {
                 m_uiCallbacks.closeWindow(winId);
             }
             return ScriptValue();
         }, "win.close");
+        (*winDict)["close"] = closeFn;
+        (*winDict)["close_window"] = closeFn;
+        (*winDict)["dismiss"] = closeFn;
+
+        // win.clear()
+        auto clearFn = ScriptValue([this, winId](const std::vector<ScriptValue> &, ResourceGuard &, int, int) -> ScriptValue {
+            if (m_uiCallbacks.clearWindow) {
+                m_uiCallbacks.clearWindow(winId);
+            }
+            return ScriptValue();
+        }, "win.clear");
+        (*winDict)["clear"] = clearFn;
+        (*winDict)["clear_window"] = clearFn;
 
         return ScriptValue(winDict);
     };
 
-    // ui.create_window(title: String, width: Number = 400, height: Number = 300) -> Dict
-    (*dict)["create_window"] = ScriptValue([this, makeWindowDict](const std::vector<ScriptValue> &args, ResourceGuard &g, int l, int c) -> ScriptValue {
+    // ui.create_window(title: String, width: Number = 450, height: Number = 320) -> Dict
+    auto createWindowFn = ScriptValue([this, makeWindowDict](const std::vector<ScriptValue> &args, ResourceGuard &g, int l, int c) -> ScriptValue {
         if (!m_permissions.allowUi) {
             PluginLogger::log(m_publicId, QStringLiteral("UI_WINDOW"),
                               QStringLiteral("BLOCKED: UI permission disabled"), false);
@@ -739,6 +815,7 @@ ScriptValue PluginSandbox::createUiNamespace(ResourceGuard &guard) {
 
         QString winId = QStringLiteral("win_%1_%2")
                             .arg(m_publicId, QUuid::createUuid().toString(QUuid::WithoutBraces).left(8));
+        m_lastCreatedWindowId = winId;
 
         PluginLogger::log(m_publicId, QStringLiteral("UI_WINDOW"),
                           QStringLiteral("Created window '%1' (%2x%3)").arg(title).arg(width).arg(height), true);
@@ -750,7 +827,116 @@ ScriptValue PluginSandbox::createUiNamespace(ResourceGuard &guard) {
         return makeWindowDict(winId, title, g, l, c);
     }, "ui.create_window");
 
-    guard.alloc(sizeof(ScriptDict) + 64, -1, -1);
+    (*dict)["create_window"] = createWindowFn;
+    (*dict)["create_dialog"] = createWindowFn;
+
+    // ui.close_window([win_or_id])
+    auto uiCloseWindowFn = ScriptValue([this, resolveWinId](const std::vector<ScriptValue> &args, ResourceGuard &, int, int) -> ScriptValue {
+        QString winId = resolveWinId(args);
+        if (!winId.isEmpty() && m_uiCallbacks.closeWindow) {
+            m_uiCallbacks.closeWindow(winId);
+        }
+        return ScriptValue();
+    }, "ui.close_window");
+    (*dict)["close_window"] = uiCloseWindowFn;
+    (*dict)["close"] = uiCloseWindowFn;
+
+    // ui.show_window([win_or_id])
+    auto uiShowWindowFn = ScriptValue([this, resolveWinId](const std::vector<ScriptValue> &args, ResourceGuard &, int, int) -> ScriptValue {
+        QString winId = resolveWinId(args);
+        if (!winId.isEmpty() && m_uiCallbacks.showWindow) {
+            m_uiCallbacks.showWindow(winId);
+        }
+        return ScriptValue();
+    }, "ui.show_window");
+    (*dict)["show_window"] = uiShowWindowFn;
+    (*dict)["show"] = uiShowWindowFn;
+
+    // ui.clear_window([win_or_id])
+    auto uiClearWindowFn = ScriptValue([this, resolveWinId](const std::vector<ScriptValue> &args, ResourceGuard &, int, int) -> ScriptValue {
+        QString winId = resolveWinId(args);
+        if (!winId.isEmpty() && m_uiCallbacks.clearWindow) {
+            m_uiCallbacks.clearWindow(winId);
+        }
+        return ScriptValue();
+    }, "ui.clear_window");
+    (*dict)["clear_window"] = uiClearWindowFn;
+    (*dict)["clear"] = uiClearWindowFn;
+
+    // ui.message_box(title, message)
+    (*dict)["message_box"] = ScriptValue([this](const std::vector<ScriptValue> &args, ResourceGuard &, int l, int c) -> ScriptValue {
+        if (!m_permissions.allowUi) {
+            throw ScriptTrap("PermissionDenied: UI access is disabled for this plugin", l, c);
+        }
+        if (args.empty()) {
+            throw ScriptTrap("ui.message_box(title, [message]) requires at least 1 argument", l, c);
+        }
+        QString title = QString::fromStdString(args.at(0).toString());
+        QString message = (args.size() > 1) ? QString::fromStdString(args.at(1).toString()) : title;
+        if (m_uiCallbacks.showMessageBox) {
+            m_uiCallbacks.showMessageBox(title, message);
+        }
+        return ScriptValue();
+    }, "ui.message_box");
+
+    // Flat UI helpers on ui directly targeting active window
+    (*dict)["add_label"] = ScriptValue([this](const std::vector<ScriptValue> &args, ResourceGuard &, int l, int c) -> ScriptValue {
+        if (args.empty()) throw ScriptTrap("ui.add_label() requires text argument", l, c);
+        if (m_lastCreatedWindowId.isEmpty()) throw ScriptTrap("RuntimeError: No active window created for ui.add_label()", l, c);
+        QString text = (args.size() > 1) ? QString::fromStdString(args.at(1).toString()) : QString::fromStdString(args.at(0).toString());
+        QVariantMap props;
+        props[QStringLiteral("text")] = text;
+        if (m_uiCallbacks.addWidget) {
+            m_uiCallbacks.addWidget(m_lastCreatedWindowId, QStringLiteral("label"), props);
+        }
+        return ScriptValue();
+    }, "ui.add_label");
+
+    (*dict)["add_text"] = ScriptValue([this](const std::vector<ScriptValue> &args, ResourceGuard &, int, int) -> ScriptValue {
+        if (m_lastCreatedWindowId.isEmpty()) return ScriptValue();
+        QString content = args.empty() ? QString() : QString::fromStdString(args.at(0).toString());
+        bool readOnly = (args.size() > 1) ? args.at(1).toBool() : true;
+        QVariantMap props;
+        props[QStringLiteral("content")] = content;
+        props[QStringLiteral("readOnly")] = readOnly;
+        if (m_uiCallbacks.addWidget) {
+            m_uiCallbacks.addWidget(m_lastCreatedWindowId, QStringLiteral("text"), props);
+        }
+        return ScriptValue();
+    }, "ui.add_text");
+
+    (*dict)["add_input"] = ScriptValue([this](const std::vector<ScriptValue> &args, ResourceGuard &, int, int) -> ScriptValue {
+        if (m_lastCreatedWindowId.isEmpty()) return ScriptValue();
+        QString ph = args.empty() ? QString() : QString::fromStdString(args.at(0).toString());
+        QString def = (args.size() > 1) ? QString::fromStdString(args.at(1).toString()) : QString();
+        QVariantMap props;
+        props[QStringLiteral("placeholder")] = ph;
+        props[QStringLiteral("defaultText")] = def;
+        if (m_uiCallbacks.addWidget) {
+            m_uiCallbacks.addWidget(m_lastCreatedWindowId, QStringLiteral("input"), props);
+        }
+        return ScriptValue();
+    }, "ui.add_input");
+
+    (*dict)["add_button"] = ScriptValue([this](const std::vector<ScriptValue> &args, ResourceGuard &, int l, int c) -> ScriptValue {
+        if (args.empty()) throw ScriptTrap("ui.add_button() requires label argument", l, c);
+        if (m_lastCreatedWindowId.isEmpty()) throw ScriptTrap("RuntimeError: No active window created for ui.add_button()", l, c);
+        QString label = QString::fromStdString(args.at(0).toString());
+        QString actionName = (args.size() > 1) ? QString::fromStdString(args.at(1).toString()) : label;
+        if (args.size() >= 3) {
+            label = QString::fromStdString(args.at(1).toString());
+            actionName = QString::fromStdString(args.at(2).toString());
+        }
+        QVariantMap props;
+        props[QStringLiteral("label")] = label;
+        props[QStringLiteral("action")] = actionName;
+        if (m_uiCallbacks.addWidget) {
+            m_uiCallbacks.addWidget(m_lastCreatedWindowId, QStringLiteral("button"), props);
+        }
+        return ScriptValue();
+    }, "ui.add_button");
+
+    guard.alloc(sizeof(ScriptDict) + 128, -1, -1);
     return ScriptValue(dict);
 }
 

@@ -21,7 +21,11 @@ PluginHostDialog::PluginHostDialog(const QString &publicId,
 {
     setWindowTitle(QStringLiteral("[%1] %2").arg(publicId, title));
     resize(width, height);
-    setAttribute(Qt::WA_DeleteOnClose, false);
+    // Explicitly configure as a top-level independent window with standard controls
+    setWindowFlags(Qt::Window | Qt::WindowTitleHint | Qt::WindowCloseButtonHint | Qt::WindowMinMaxButtonsHint);
+    setModal(false);
+    setWindowModality(Qt::NonModal);
+    setAttribute(Qt::WA_DeleteOnClose, true);
 
     auto *mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(16, 16, 16, 16);
@@ -58,7 +62,7 @@ void PluginHostDialog::addInput(const QString &placeholder, const QString &defau
 
 void PluginHostDialog::addButton(const QString &label, const QString &actionName) {
     auto *btn = new QPushButton(label, this);
-    connect(btn, &QPushButton::clicked, this, [this, actionName]() {
+    connect(btn, &QPushButton::clicked, this, [this, label, actionName]() {
         QVariantMap inputs;
         for (int i = 0; i < m_inputs.size(); ++i) {
             inputs[QStringLiteral("input_%1").arg(i)] = m_inputs.at(i)->text();
@@ -67,13 +71,60 @@ void PluginHostDialog::addButton(const QString &label, const QString &actionName
             }
         }
         emit actionTriggered(m_publicId, m_winId, actionName, inputs);
+
+        // Immediate closing if action or label indicates close/dismiss/cancel
+        const QString act = actionName.trimmed();
+        const QString lbl = label.trimmed();
+        if (act.compare(QStringLiteral("close_window"), Qt::CaseInsensitive) == 0 ||
+            act.compare(QStringLiteral("close"), Qt::CaseInsensitive) == 0 ||
+            act.compare(QStringLiteral("dismiss"), Qt::CaseInsensitive) == 0 ||
+            act.compare(QStringLiteral("cancel"), Qt::CaseInsensitive) == 0 ||
+            act.compare(QStringLiteral("exit"), Qt::CaseInsensitive) == 0 ||
+            lbl.compare(QStringLiteral("close"), Qt::CaseInsensitive) == 0 ||
+            lbl.compare(QStringLiteral("cancel"), Qt::CaseInsensitive) == 0 ||
+            lbl.compare(QStringLiteral("dismiss"), Qt::CaseInsensitive) == 0) {
+            this->reject();
+        }
     });
     m_contentLayout->addWidget(btn);
 }
 
+void PluginHostDialog::clearWidgets() {
+    QLayoutItem *child = nullptr;
+    while ((child = m_contentLayout->takeAt(0)) != nullptr) {
+        if (child->widget()) {
+            child->widget()->deleteLater();
+        }
+        delete child;
+    }
+    m_inputs.clear();
+}
+
 void PluginHostDialog::closeEvent(QCloseEvent *event) {
-    emit dialogClosed(m_winId);
-    QDialog::closeEvent(event);
+    if (!m_closing) {
+        m_closing = true;
+        emit dialogClosed(m_winId);
+    }
+    event->accept();
+    QWidget::closeEvent(event);
+}
+
+void PluginHostDialog::reject() {
+    if (!m_closing) {
+        m_closing = true;
+        emit dialogClosed(m_winId);
+    }
+    QDialog::reject();
+    this->deleteLater();
+}
+
+void PluginHostDialog::accept() {
+    if (!m_closing) {
+        m_closing = true;
+        emit dialogClosed(m_winId);
+    }
+    QDialog::accept();
+    this->deleteLater();
 }
 
 } // namespace EnsemblePlugin

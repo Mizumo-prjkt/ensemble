@@ -70,6 +70,7 @@ private:
 
     QComboBox *m_skinFlavorCombo = nullptr;
     QLabel *m_themeConflictNotice = nullptr;
+    bool m_isUpdatingTheme = false;
     QFrame *m_materialYouCard = nullptr;
     QLabel *m_wallpaperColorPreview = nullptr;
     QLabel *m_wallpaperHexLabel = nullptr;

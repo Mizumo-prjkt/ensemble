@@ -37,7 +37,6 @@ private slots:
     // Permissions slots
     void onSavePermissionsClicked();
     void onAllowAllDetectedDomainsClicked();
-    void onAddDomainClicked();
     void onRemoveDomainClicked();
 
     // Audit log slots
@@ -59,6 +58,7 @@ private:
     QLabel *m_versionLabel = nullptr;
     QLabel *m_statusBadge = nullptr;
     QLabel *m_pathLabel = nullptr;
+    QLabel *m_resourceUsageLabel = nullptr;
     QTextEdit *m_errorBox = nullptr;
     QComboBox *m_actionCombo = nullptr;
     QPushButton *m_runActionBtn = nullptr;
@@ -75,7 +75,6 @@ private:
     QLabel *m_detectedDomainsLabel = nullptr;
     QListWidget *m_allowedDomainsList = nullptr;
     QPushButton *m_allowDetectedBtn = nullptr;
-    QPushButton *m_addDomainBtn = nullptr;
     QPushButton *m_removeDomainBtn = nullptr;
     QPushButton *m_savePermsBtn = nullptr;
 
