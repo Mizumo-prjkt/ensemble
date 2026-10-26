@@ -26,14 +26,14 @@ DiagnosticsWorker::DiagnosticsWorker(QObject *parent)
 {
 }
 
-void DiagnosticsWorker::processJob(const DiagnosticsJob &job)
+void DiagnosticsWorker::executeJob(const DiagnosticsJob &job,
+                                   QList<ProblemItem> &problems,
+                                   int &errorCount,
+                                   int &warningCount)
 {
-    QElapsedTimer timer;
-    timer.start();
-
-    QList<ProblemItem> problems;
-    int errorCount = 0;
-    int warningCount = 0;
+    problems.clear();
+    errorCount = 0;
+    warningCount = 0;
 
     // 1. Check Work Skin CSS syntax & structure
     QStringList cssErrors;
@@ -210,6 +210,20 @@ void DiagnosticsWorker::processJob(const DiagnosticsJob &job)
         problems.append(item);
         warningCount++;
     }
+}
+
+void DiagnosticsWorker::processJob(const DiagnosticsJob &job)
+{
+    QElapsedTimer timer;
+    timer.start();
+
+    QList<ProblemItem> problems;
+    int errorCount = 0;
+    int warningCount = 0;
+
+    executeJob(job, problems, errorCount, warningCount);
+
+    if (QThread::currentThread()->isInterruptionRequested()) return;
 
     emit jobFinished(job.jobId, problems, errorCount, warningCount, timer.elapsed());
 }
@@ -226,6 +240,11 @@ ProjectDiagnosticsRunner &ProjectDiagnosticsRunner::instance()
 ProjectDiagnosticsRunner::ProjectDiagnosticsRunner(QObject *parent)
     : QObject(parent)
 {
+    qRegisterMetaType<DiagnosticsChapterSnapshot>("DiagnosticsChapterSnapshot");
+    qRegisterMetaType<DiagnosticsJob>("DiagnosticsJob");
+    qRegisterMetaType<ProblemItem>("ProblemItem");
+    qRegisterMetaType<QList<ProblemItem>>("QList<ProblemItem>");
+
     m_watchdogTimer = new QTimer(this);
     m_watchdogTimer->setSingleShot(true);
     connect(m_watchdogTimer, &QTimer::timeout, this, &ProjectDiagnosticsRunner::onWatchdogTimeout);
@@ -289,6 +308,36 @@ void ProjectDiagnosticsRunner::requestDiagnostics(const QString &workSkinCss,
 
     QMetaObject::invokeMethod(m_worker, "processJob", Qt::QueuedConnection,
                               Q_ARG(DiagnosticsJob, job));
+}
+
+QList<ProblemItem> ProjectDiagnosticsRunner::runDiagnosticsSync(const QString &workSkinCss,
+                                                              const QStringList &cssClasses,
+                                                              const QList<DiagnosticsChapterSnapshot> &chapters,
+                                                              int *outErrorCount,
+                                                              int *outWarningCount)
+{
+    QElapsedTimer timer;
+    timer.start();
+
+    DiagnosticsJob job;
+    job.jobId = m_nextJobId++;
+    job.workSkinCss = workSkinCss;
+    job.cssClasses = cssClasses;
+    job.chapters = chapters;
+
+    QList<ProblemItem> problems;
+    int errorCount = 0;
+    int warningCount = 0;
+
+    DiagnosticsWorker::executeJob(job, problems, errorCount, warningCount);
+
+    if (outErrorCount) *outErrorCount = errorCount;
+    if (outWarningCount) *outWarningCount = warningCount;
+
+    m_lastRunMs.store(timer.elapsed());
+    m_totalRuns.fetch_add(1);
+
+    return problems;
 }
 
 void ProjectDiagnosticsRunner::onJobFinished(quint64 jobId, const QList<ProblemItem> &problems, int errorCount, int warningCount, qint64 elapsedMs)

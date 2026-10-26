@@ -1076,6 +1076,7 @@ QJsonObject McpHandler::toolSetWorkSkinCss(QWebSocket *client, const QJsonObject
 
     const int oldLen = m_mainWindow->project().workSkinCss().length();
     m_mainWindow->setWorkSkinCssFromMcp(css);
+    m_mainWindow->updateProblemsDiagnostics(true);
     const int byteDelta = css.length() - oldLen;
 
     const auto caller = client && m_server ? m_server->agentSessionForClient(client) : McpAgentSession();
@@ -1114,7 +1115,7 @@ QJsonObject McpHandler::toolGetProblems(const QJsonObject &args)
         return makeToolResult(QStringLiteral("Ensemble main window unavailable."), true);
     }
 
-    m_mainWindow->updateProblemsDiagnostics();
+    m_mainWindow->updateProblemsDiagnostics(true);
 
     const QList<ProblemItem> problems = m_mainWindow->currentProblems();
     QJsonArray problemsArray;

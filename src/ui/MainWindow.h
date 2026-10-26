@@ -66,7 +66,7 @@ public:
     bool loadProjectFromMcp(const QString &path, bool saveCurrent = false, QString *errorMessage = nullptr);
     bool reloadProjectFromDisk();
     QByteArray capturePreviewScreenshot(int chapterIndex);
-    void updateProblemsDiagnostics();
+    void updateProblemsDiagnostics(bool synchronous = false);
     QList<ProblemItem> currentProblems() const { return m_currentProblems; }
     void updateLoreGraphUi();
     LoreGraphDialog *loreGraphDialog() const { return m_loreGraphDialog; }

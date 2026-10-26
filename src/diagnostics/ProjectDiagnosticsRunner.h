@@ -24,6 +24,8 @@ struct DiagnosticsJob {
     QStringList cssClasses;
     QList<DiagnosticsChapterSnapshot> chapters;
 };
+Q_DECLARE_METATYPE(DiagnosticsChapterSnapshot)
+Q_DECLARE_METATYPE(DiagnosticsJob)
 
 /**
  * @brief Worker living on an isolated background thread.
@@ -34,6 +36,11 @@ class DiagnosticsWorker : public QObject {
 
 public:
     explicit DiagnosticsWorker(QObject *parent = nullptr);
+
+    static void executeJob(const DiagnosticsJob &job,
+                           QList<ProblemItem> &problems,
+                           int &errorCount,
+                           int &warningCount);
 
 public slots:
     void processJob(const DiagnosticsJob &job);
@@ -58,6 +65,12 @@ public:
     void requestDiagnostics(const QString &workSkinCss,
                             const QStringList &cssClasses,
                             const QList<DiagnosticsChapterSnapshot> &chapters);
+
+    QList<ProblemItem> runDiagnosticsSync(const QString &workSkinCss,
+                                          const QStringList &cssClasses,
+                                          const QList<DiagnosticsChapterSnapshot> &chapters,
+                                          int *outErrorCount = nullptr,
+                                          int *outWarningCount = nullptr);
 
     bool isRunning() const noexcept { return m_running.load(std::memory_order_relaxed); }
     qint64 lastRunMs() const noexcept { return m_lastRunMs.load(std::memory_order_relaxed); }

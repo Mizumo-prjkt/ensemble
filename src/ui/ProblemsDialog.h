@@ -18,6 +18,7 @@ struct ProblemItem {
     int chapterIndex = -1; // -1 for CSS or project level
     QList<int> affectedChapters; // List of chapter indices affected by this problem
 };
+Q_DECLARE_METATYPE(ProblemItem)
 
 class ProblemsDialog : public QDialog
 {

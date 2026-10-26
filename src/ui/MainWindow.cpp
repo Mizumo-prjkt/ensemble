@@ -1805,7 +1805,7 @@ void MainWindow::dropEvent(QDropEvent *event) {
   QMainWindow::dropEvent(event);
 }
 
-void MainWindow::updateProblemsDiagnostics() {
+void MainWindow::updateProblemsDiagnostics(bool synchronous) {
   if (!m_hasActiveProject) {
     m_currentProblems.clear();
     if (m_problemsDialog) {
@@ -1831,7 +1831,15 @@ void MainWindow::updateProblemsDiagnostics() {
   const QString css = m_project.workSkinCss();
   const QStringList cssClasses = m_cssPane ? m_cssPane->cssClassNames() : QStringList();
 
-  ProjectDiagnosticsRunner::instance().requestDiagnostics(css, cssClasses, snapshots);
+  if (synchronous) {
+    int errorCount = 0;
+    int warningCount = 0;
+    QList<ProblemItem> problems = ProjectDiagnosticsRunner::instance().runDiagnosticsSync(
+        css, cssClasses, snapshots, &errorCount, &warningCount);
+    onDiagnosticsReady(problems, errorCount, warningCount);
+  } else {
+    ProjectDiagnosticsRunner::instance().requestDiagnostics(css, cssClasses, snapshots);
+  }
 }
 
 void MainWindow::onDiagnosticsReady(const QList<ProblemItem> &problems, int errorCount, int warningCount) {
